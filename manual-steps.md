@@ -533,6 +533,15 @@ The current starter layout creates:
 - `coder-local`
   a hosted coding delegate for bounded edits, refactors, and drafting work
 
+Agent config note:
+
+- model resolution is now driven by each agent's own `modelSource`
+- use `modelSource: "hosted"` for hosted-provider candidate selection
+- use `modelSource: "local"` for Ollama-backed selection
+- use `rolePolicyKey` on the agent config to choose which entry under
+  `multiAgent.rolePolicies` is written into managed `AGENTS.md`
+- policy keys are reusable, so multiple agents can share one policy on purpose
+
 It also enables `tools.agentToAgent` so your stronger agent can delegate to the
 other configured agents.
 

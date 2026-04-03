@@ -240,7 +240,9 @@
     "strongAgent": {
       "id": "main",
       "name": "Strong Coder",
+      "rolePolicyKey": "orchestrator",
       "default": true,
+      "modelSource": "hosted",
       "sandboxMode": "off",
       "subagents": {
         "requireAgentId": true,
@@ -262,6 +264,8 @@
       "enabled": true,
       "id": "research",
       "name": "Gemini Research",
+      "rolePolicyKey": "research",
+      "modelSource": "hosted",
       "subagents": {
         "requireAgentId": true,
         "allowAgents": []
@@ -275,6 +279,8 @@
       "enabled": true,
       "id": "chat-local",
       "name": "Local Chat",
+      "rolePolicyKey": "trustedChat",
+      "modelSource": "local",
       "sandboxMode": "off",
       "subagents": {
         "requireAgentId": true,
@@ -288,6 +294,8 @@
       "enabled": false,
       "id": "chat-openai",
       "name": "Telegram OpenAI",
+      "rolePolicyKey": "trustedChat",
+      "modelSource": "hosted",
       "sandboxMode": "off",
       "subagents": {
         "requireAgentId": true,
@@ -302,6 +310,8 @@
       "enabled": true,
       "id": "review-local",
       "name": "Local Reviewer",
+      "rolePolicyKey": "review",
+      "modelSource": "local",
       "sandboxMode": "off",
       "subagents": {
         "requireAgentId": true,
@@ -313,6 +323,8 @@
       "enabled": true,
       "id": "coder-local",
       "name": "Coder Delegate",
+      "rolePolicyKey": "codingDelegate",
+      "modelSource": "hosted",
       "sandboxMode": "off",
       "subagents": {
         "requireAgentId": true,
@@ -325,7 +337,7 @@
       ]
     },
     "rolePolicies": {
-      "strongAgent": [
+      "orchestrator": [
         "# AGENTS.md - Strong Coder",
         "",
         "## Session Startup",
@@ -344,7 +356,7 @@
         "- Do not delegate work that is urgent and blocks your immediate next step if doing it yourself is faster.",
         "- Treat delegated output as input to review, not unquestionable truth."
       ],
-      "researchAgent": [
+      "research": [
         "# AGENTS.md - Gemini Research",
         "",
         "## Session Startup",
@@ -361,7 +373,7 @@
         "- Do not make risky system changes.",
         "- Do not take ownership of the final user-facing decision unless explicitly asked."
       ],
-      "localChatAgent": [
+      "trustedChat": [
         "# AGENTS.md - Local Chat",
         "",
         "## Session Startup",
@@ -379,25 +391,7 @@
         "- Do not pretend to be the strongest coding agent.",
         "- Be honest when a stronger hosted agent would be better."
       ],
-      "hostedTelegramAgent": [
-        "# AGENTS.md - Telegram OpenAI",
-        "",
-        "## Session Startup",
-        "- You are the hosted Telegram chat agent.",
-        "- Keep replies practical, conversational, and reliable for trusted Telegram use.",
-        "- Your real writable workspace is `/home/node/.openclaw/workspace`.",
-        "- For any file or git work, prefer file tools in that workspace and set exec `workdir` to `/home/node/.openclaw/workspace` explicitly.",
-        "- Never create projects under `/app`; that path is part of the gateway container and is not durable user workspace storage.",
-        "",
-        "## Role",
-        "- Handle Telegram conversations when the operator wants a hosted model instead of a local one.",
-        "- Escalate repo-wide coding or research orchestration back to the main agent when needed.",
-        "",
-        "## Red Lines",
-        "- Do not assume you are the default agent for every surface.",
-        "- Stay focused on the Telegram-facing workload."
-      ],
-      "localReviewAgent": [
+      "review": [
         "# AGENTS.md - Local Reviewer",
         "",
         "## Session Startup",
@@ -412,12 +406,12 @@
         "- Do not modify code directly unless your tool policy explicitly allows it.",
         "- If you are unsure, say what needs stronger review."
       ],
-      "localCoderAgent": [
-        "# AGENTS.md - Local Coder",
+      "codingDelegate": [
+        "# AGENTS.md - Coding Delegate",
         "",
         "## Session Startup",
-        "- You are the local coding specialist.",
-        "- Focus on bounded implementation work that benefits from a local model.",
+        "- You are the delegated coding specialist.",
+        "- Focus on bounded implementation work with clear acceptance criteria.",
         "",
         "## Role",
         "- Good fits: drafting code, mechanical refactors, targeted edits, test writing from obvious patterns, and code transformations with clear acceptance criteria.",

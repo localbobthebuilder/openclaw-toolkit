@@ -931,10 +931,10 @@ function Ensure-OllamaState {
 
     $state.ProviderModels = @($providerModels)
     if ($Config.multiAgent -and $Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled) {
-        $state.ResolvedLocalChatModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localChatAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "chat-local"
+        $state.ResolvedLocalChatModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localChatAgent -AvailableOllamaRefs $availableRefs -Purpose "chat-local" -FallbackToFirstCandidate
     }
     if ($Config.multiAgent -and $Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled) {
-        $state.ResolvedLocalReviewModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localReviewAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "review-local"
+        $state.ResolvedLocalReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localReviewAgent -AvailableOllamaRefs $availableRefs -Purpose "review-local" -FallbackToFirstCandidate
     }
     if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled) {
         $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $availableRefs -Purpose "coder-local" -FallbackToFirstCandidate
@@ -994,43 +994,7 @@ function Resolve-StrongModelRef {
         [Parameter(Mandatory = $true)]$Config,
         [string[]]$AvailableOllamaRefs = @()
     )
-
-    $candidateRefs = @()
-    foreach ($candidate in @($Config.multiAgent.strongAgent.candidateModelRefs)) {
-        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidate)
-    }
-    if ($Config.multiAgent.strongAgent.modelRef) {
-        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$Config.multiAgent.strongAgent.modelRef)
-    }
-
-    $authReadyProviders = Get-AuthReadyHostedProviders
-    foreach ($candidateRef in @($candidateRefs)) {
-        if ($candidateRef -like "ollama/*") {
-            if ($candidateRef -in @($AvailableOllamaRefs)) {
-                return $candidateRef
-            }
-            continue
-        }
-
-        $providerId = ($candidateRef -split "/", 2)[0]
-        if ($providerId -in @($authReadyProviders)) {
-            return $candidateRef
-        }
-    }
-
-    if ($Config.multiAgent.strongAgent.allowLocalFallback) {
-        $localFallbackRef = Get-PreferredLocalFallbackRef -Config $Config -AvailableOllamaRefs $AvailableOllamaRefs
-        if ($localFallbackRef) {
-            Write-WarnLine "No authenticated hosted strong-model candidate is available. Falling back to local model $localFallbackRef."
-            return $localFallbackRef
-        }
-    }
-
-    if ($Config.multiAgent.strongAgent.modelRef) {
-        return [string]$Config.multiAgent.strongAgent.modelRef
-    }
-
-    return $null
+    return (Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.strongAgent -AvailableOllamaRefs $AvailableOllamaRefs -Purpose "strong agent" -FallbackToFirstCandidate)
 }
 
 function Resolve-HostedModelRef {
@@ -1088,25 +1052,59 @@ function Resolve-AgentPreferredModelRef {
         $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$AgentConfig.modelRef)
     }
 
-    $authReadyProviders = Get-AuthReadyHostedProviders
-    foreach ($candidateRef in @($candidateRefs)) {
-        if ($candidateRef -like "ollama/*") {
-            if ($candidateRef -in @($AvailableOllamaRefs)) {
-                return $candidateRef
-            }
-            continue
-        }
-
-        $providerId = ($candidateRef -split "/", 2)[0]
-        if ($providerId -in @($authReadyProviders)) {
-            return $candidateRef
-        }
+    $modelSource = if ($AgentConfig.PSObject.Properties.Name -contains "modelSource" -and $AgentConfig.modelSource) {
+        ([string]$AgentConfig.modelSource).ToLowerInvariant()
+    }
+    else {
+        "static"
     }
 
-    foreach ($candidateRef in @($candidateRefs)) {
-        if ($candidateRef -like "ollama/*") {
-            return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose)
+    if ($modelSource -eq "hosted") {
+        $authReadyProviders = Get-AuthReadyHostedProviders
+        foreach ($candidateRef in @($candidateRefs)) {
+            if ($candidateRef -like "ollama/*") {
+                if ($candidateRef -in @($AvailableOllamaRefs) -and $AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
+                    return $candidateRef
+                }
+                continue
+            }
+
+            $providerId = ($candidateRef -split "/", 2)[0]
+            if ($providerId -in @($authReadyProviders)) {
+                return $candidateRef
+            }
         }
+
+        if ($AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
+            foreach ($candidateRef in @($candidateRefs)) {
+                if ($candidateRef -like "ollama/*") {
+                    return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose)
+                }
+            }
+            $localFallbackRef = Get-PreferredLocalFallbackRef -Config $Config -AvailableOllamaRefs $AvailableOllamaRefs
+            if ($localFallbackRef) {
+                Write-WarnLine "No authenticated hosted provider is ready for $Purpose. Falling back to local model $localFallbackRef."
+                return $localFallbackRef
+            }
+        }
+
+        if ($FallbackToFirstCandidate -and @($candidateRefs).Count -gt 0) {
+            $fallbackCandidate = [string](@($candidateRefs)[0])
+            Write-WarnLine "No authenticated preferred provider is ready for $Purpose. Keeping preferred model ref $fallbackCandidate until auth is completed."
+            return $fallbackCandidate
+        }
+
+        return $null
+    }
+
+    if ($modelSource -eq "local") {
+        foreach ($candidateRef in @($candidateRefs)) {
+            if ($candidateRef -like "ollama/*") {
+                return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose)
+            }
+        }
+
+        return $null
     }
 
     if ($FallbackToFirstCandidate -and @($candidateRefs).Count -gt 0) {
@@ -1466,26 +1464,12 @@ if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.s
 
 $resolvedResearchModelRef = $null
 if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
-    $researchCandidates = @()
-    foreach ($candidateRef in @($config.multiAgent.researchAgent.candidateModelRefs)) {
-        $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$candidateRef)
-    }
-    if ($config.multiAgent.researchAgent.modelRef) {
-        $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$config.multiAgent.researchAgent.modelRef)
-    }
-    $resolvedResearchModelRef = Resolve-HostedModelRef -Config $config -CandidateRefs $researchCandidates -Purpose "research agent" -FallbackToFirstCandidate
+    $resolvedResearchModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.researchAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "research agent" -FallbackToFirstCandidate
 }
 
 $resolvedHostedTelegramModelRef = $null
 if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled) {
-    $hostedTelegramCandidates = @()
-    foreach ($candidateRef in @($config.multiAgent.hostedTelegramAgent.candidateModelRefs)) {
-        $hostedTelegramCandidates = Add-UniqueString -List $hostedTelegramCandidates -Value ([string]$candidateRef)
-    }
-    if ($config.multiAgent.hostedTelegramAgent.modelRef) {
-        $hostedTelegramCandidates = Add-UniqueString -List $hostedTelegramCandidates -Value ([string]$config.multiAgent.hostedTelegramAgent.modelRef)
-    }
-    $resolvedHostedTelegramModelRef = Resolve-HostedModelRef -Config $config -CandidateRefs $hostedTelegramCandidates -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
+    $resolvedHostedTelegramModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.hostedTelegramAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
 }
 
 $managedModelRefs = Get-ManagedModelRefs -Config $config -ResolvedStrongModelRef $resolvedStrongModelRef -ResolvedResearchModelRef $resolvedResearchModelRef -ResolvedLocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -ResolvedHostedTelegramModelRef $resolvedHostedTelegramModelRef -ResolvedLocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -ResolvedLocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -ExtraRefs $ollamaState.AvailableRefs

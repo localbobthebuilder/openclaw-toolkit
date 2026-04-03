@@ -73,6 +73,8 @@ Multi-agent note:
   so they can use the real shared workspace
 - `coder-local` is the dedicated coding delegate and now prefers hosted models
   instead of Ollama
+- agent model behavior comes from each agent's own `modelSource`, and reusable
+  `AGENTS.md` policy selection comes from each agent's `rolePolicyKey`
 - Active Windows workspace: `C:\Users\Deadline\.openclaw\workspace`
 - Ollama model files live under `C:\Users\Deadline\.ollama\models`
 - Docker Desktop VHDX compaction is separate and uses

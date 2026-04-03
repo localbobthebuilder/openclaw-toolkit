@@ -185,10 +185,10 @@ function Resolve-HostWorkspacePath {
 function Get-RolePolicyLines {
     param(
         [Parameter(Mandatory = $true)]$RolePolicies,
-        [Parameter(Mandatory = $true)][string]$Key
+        [string]$Key
     )
 
-    if ($null -eq $RolePolicies) {
+    if ($null -eq $RolePolicies -or [string]::IsNullOrWhiteSpace($Key)) {
         return @()
     }
 
@@ -198,6 +198,21 @@ function Get-RolePolicyLines {
     }
 
     return @($value | ForEach-Object { [string]$_ })
+}
+
+function Get-AgentRolePolicyKey {
+    param(
+        $AgentConfig,
+        [string]$DefaultKey
+    )
+
+    if ($null -ne $AgentConfig -and
+        $AgentConfig.PSObject.Properties.Name -contains "rolePolicyKey" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.rolePolicyKey)) {
+        return [string]$AgentConfig.rolePolicyKey
+    }
+
+    return $DefaultKey
 }
 
 function Ensure-WorkspaceAgentsFile {
@@ -478,6 +493,32 @@ function Resolve-OllamaModelRef {
     return $DesiredRef
 }
 
+function Get-AuthReadyHostedProviders {
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", $ContainerName,
+        "node", "dist/index.js",
+        "models", "status", "--json"
+    ) -AllowFailure
+
+    $providers = @()
+    if ($result.ExitCode -eq 0 -and $result.Output) {
+        try {
+            $parsed = $result.Output | ConvertFrom-Json -Depth 50
+            foreach ($providerEntry in @($parsed.auth.providers)) {
+                if ($providerEntry.provider -and $providerEntry.provider -ne "ollama" -and $providerEntry.effective.kind -and $providerEntry.effective.kind -ne "missing") {
+                    if ([string]$providerEntry.provider -notin $providers) {
+                        $providers += [string]$providerEntry.provider
+                    }
+                }
+            }
+        }
+        catch {
+        }
+    }
+
+    return @($providers)
+}
+
 function Resolve-PreferredAgentModelRef {
     param(
         [string]$ExplicitRef,
@@ -486,8 +527,15 @@ function Resolve-PreferredAgentModelRef {
         [Parameter(Mandatory = $true)][string]$Purpose
     )
 
+    $modelSource = if ($AgentConfig.PSObject.Properties.Name -contains "modelSource" -and $AgentConfig.modelSource) {
+        ([string]$AgentConfig.modelSource).ToLowerInvariant()
+    }
+    else {
+        "static"
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($ExplicitRef)) {
-        if ($ExplicitRef.StartsWith("ollama/")) {
+        if ($modelSource -eq "local" -and $ExplicitRef.StartsWith("ollama/")) {
             return (Resolve-OllamaModelRef -DesiredRef $ExplicitRef -Config $Config -Purpose $Purpose)
         }
         return $ExplicitRef
@@ -503,10 +551,35 @@ function Resolve-PreferredAgentModelRef {
         $candidateRefs += [string]$AgentConfig.modelRef
     }
 
-    foreach ($candidateRef in @($candidateRefs)) {
-        if ($candidateRef.StartsWith("ollama/")) {
-            return (Resolve-OllamaModelRef -DesiredRef $candidateRef -Config $Config -Purpose $Purpose)
+    if ($modelSource -eq "hosted") {
+        $authReadyProviders = Get-AuthReadyHostedProviders
+        foreach ($candidateRef in @($candidateRefs)) {
+            if ($candidateRef.StartsWith("ollama/")) {
+                continue
+            }
+
+            $providerId = ($candidateRef -split "/", 2)[0]
+            if ($providerId -in @($authReadyProviders)) {
+                return $candidateRef
+            }
         }
+
+        foreach ($candidateRef in @($candidateRefs)) {
+            if (-not $candidateRef.StartsWith("ollama/")) {
+                return $candidateRef
+            }
+        }
+    }
+
+    if ($modelSource -eq "local") {
+        foreach ($candidateRef in @($candidateRefs)) {
+            if ($candidateRef.StartsWith("ollama/")) {
+                return (Resolve-OllamaModelRef -DesiredRef $candidateRef -Config $Config -Purpose $Purpose)
+            }
+        }
+    }
+
+    foreach ($candidateRef in @($candidateRefs)) {
         return $candidateRef
     }
 
@@ -558,7 +631,7 @@ if ($existingBindingsRaw) {
 $desiredAgents = @()
 $strongId = [string]$multi.strongAgent.id
 $strongName = if ($multi.strongAgent.name) { [string]$multi.strongAgent.name } else { "Strong Coder" }
-$resolvedStrongModelRef = if ($StrongModelRef) { $StrongModelRef } elseif ($multi.strongAgent.modelRef) { [string]$multi.strongAgent.modelRef } else { $null }
+$resolvedStrongModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $StrongModelRef -AgentConfig $multi.strongAgent -Config $config -Purpose $strongId
 $strongWorkspace = Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.strongAgent
 $strongSandbox = $null
 $strongSubagents = Get-AgentSubagentPolicy -AgentConfig $multi.strongAgent
@@ -584,16 +657,7 @@ if ($multi.researchAgent -and $multi.researchAgent.enabled) {
         }
     }
 
-    $resolvedResearchModelRef = $null
-    if ($ResearchModelRef) {
-        $resolvedResearchModelRef = $ResearchModelRef
-    }
-    elseif ($multi.researchAgent.modelRef) {
-        $resolvedResearchModelRef = [string]$multi.researchAgent.modelRef
-    }
-    elseif ($multi.researchAgent.candidateModelRefs) {
-        $resolvedResearchModelRef = [string](@($multi.researchAgent.candidateModelRefs) | Select-Object -First 1)
-    }
+    $resolvedResearchModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $ResearchModelRef -AgentConfig $multi.researchAgent -Config $config -Purpose ([string]$multi.researchAgent.id)
 
     $desiredAgents += (New-AgentEntry -Id ([string]$multi.researchAgent.id) -Name ([string]$multi.researchAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.researchAgent) -ModelRef $resolvedResearchModelRef -Tools $researchTools -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.researchAgent))
 }
@@ -601,7 +665,7 @@ if ($multi.researchAgent -and $multi.researchAgent.enabled) {
 $chatAgentId = $null
 if ($multi.localChatAgent.enabled) {
     $chatAgentId = [string]$multi.localChatAgent.id
-    $resolvedChatModelRef = if ($LocalChatModelRef) { $LocalChatModelRef } else { Resolve-OllamaModelRef -DesiredRef ([string]$multi.localChatAgent.modelRef) -Config $config -Purpose "chat-local" }
+    $resolvedChatModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalChatModelRef -AgentConfig $multi.localChatAgent -Config $config -Purpose ([string]$multi.localChatAgent.id)
     $chatSandbox = $null
     if ($multi.localChatAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localChatAgent.sandboxMode) {
         $chatSandbox = [ordered]@{
@@ -632,7 +696,7 @@ if ($multi.localReviewAgent.enabled) {
         )
     }
 
-    $resolvedReviewModelRef = if ($LocalReviewModelRef) { $LocalReviewModelRef } else { Resolve-OllamaModelRef -DesiredRef ([string]$multi.localReviewAgent.modelRef) -Config $config -Purpose "review-local" }
+    $resolvedReviewModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalReviewModelRef -AgentConfig $multi.localReviewAgent -Config $config -Purpose ([string]$multi.localReviewAgent.id)
     $reviewSandbox = $null
     if ($multi.localReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localReviewAgent.sandboxMode) {
         $reviewSandbox = [ordered]@{
@@ -643,7 +707,7 @@ if ($multi.localReviewAgent.enabled) {
 }
 
 if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
-    $resolvedHostedChatModelRef = if ($HostedTelegramModelRef) { $HostedTelegramModelRef } elseif ($multi.hostedTelegramAgent.modelRef) { [string]$multi.hostedTelegramAgent.modelRef } elseif ($multi.hostedTelegramAgent.candidateModelRefs) { [string](@($multi.hostedTelegramAgent.candidateModelRefs) | Select-Object -First 1) } else { $null }
+    $resolvedHostedChatModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $HostedTelegramModelRef -AgentConfig $multi.hostedTelegramAgent -Config $config -Purpose ([string]$multi.hostedTelegramAgent.id)
     $hostedTelegramSandbox = $null
     if ($multi.hostedTelegramAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.hostedTelegramAgent.sandboxMode) {
         $hostedTelegramSandbox = [ordered]@{
@@ -674,7 +738,7 @@ if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
         )
     }
 
-    $resolvedCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalCoderModelRef -AgentConfig $multi.localCoderAgent -Config $config -Purpose "coder-local"
+    $resolvedCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalCoderModelRef -AgentConfig $multi.localCoderAgent -Config $config -Purpose ([string]$multi.localCoderAgent.id)
     $coderSandbox = $null
     if ($multi.localCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localCoderAgent.sandboxMode) {
         $coderSandbox = [ordered]@{
@@ -782,31 +846,31 @@ if ($multi.enableAgentToAgent) {
 
 $managedAgentsFiles = @()
 if ($multi.manageWorkspaceAgentsMd) {
-    $mainAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $null -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key "strongAgent")
+    $mainAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $null -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.strongAgent -DefaultKey "strongAgent"))
     if ($mainAgentsPath) { $managedAgentsFiles += $mainAgentsPath }
 
     if ($multi.researchAgent -and $multi.researchAgent.enabled) {
-        $researchAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.researchAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key "researchAgent")
+        $researchAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.researchAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.researchAgent -DefaultKey "researchAgent"))
         if ($researchAgentsPath) { $managedAgentsFiles += $researchAgentsPath }
     }
 
     if ($multi.localChatAgent -and $multi.localChatAgent.enabled) {
-        $chatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localChatAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key "localChatAgent")
+        $chatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localChatAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localChatAgent -DefaultKey "localChatAgent"))
         if ($chatAgentsPath) { $managedAgentsFiles += $chatAgentsPath }
     }
 
     if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
-        $hostedChatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.hostedTelegramAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key "hostedTelegramAgent")
+        $hostedChatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.hostedTelegramAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.hostedTelegramAgent -DefaultKey "hostedTelegramAgent"))
         if ($hostedChatAgentsPath) { $managedAgentsFiles += $hostedChatAgentsPath }
     }
 
     if ($multi.localReviewAgent -and $multi.localReviewAgent.enabled) {
-        $reviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key "localReviewAgent")
+        $reviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localReviewAgent -DefaultKey "localReviewAgent"))
         if ($reviewAgentsPath) { $managedAgentsFiles += $reviewAgentsPath }
     }
 
     if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
-        $coderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key "localCoderAgent")
+        $coderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localCoderAgent -DefaultKey "localCoderAgent"))
         if ($coderAgentsPath) { $managedAgentsFiles += $coderAgentsPath }
     }
 }
