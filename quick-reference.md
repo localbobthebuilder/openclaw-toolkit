@@ -55,6 +55,8 @@ Most important commands:
 - Multiple targeted verifications in one run:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks "local-model agent"`
 - `agent` smoke covers `chat-local`, `research`, `review-local`, and `coder-local`, and now reports categorized failure reasons.
+- Focused remote/local orchestration smoke:
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke`
 - Apply the configured starter multi-agent layout:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agents`
 - Compact Docker Desktop storage:
@@ -85,6 +87,9 @@ Multi-agent note:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd compact-storage`
 - Strong hosted candidate order: OpenAI Codex -> Claude Sonnet -> Gemini ->
   local fallback
+- OpenClaw runtime failover first rotates auth profiles, then falls back to the
+  next configured model; that is why `main` can keep working when OpenAI is in
+  quota cooldown.
 - Telegram target agent is configurable with
   `multiAgent.telegramRouting.targetAgentId` in
   `D:\openclaw\openclaw-toolkit\openclaw-bootstrap.config.json`
@@ -98,6 +103,8 @@ Useful extras:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-model-test`
 - Agent capability smoke test:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke`
+- Remote coder/local reviewer orchestration smoke:
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke`
 - Local delegated coder diagnostic:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test`
 - Ollama GPU fit probe:

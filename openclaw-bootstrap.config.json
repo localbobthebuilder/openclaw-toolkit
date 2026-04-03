@@ -187,9 +187,22 @@
           "gpuTotalMiB": 8192
         },
         "desiredModelIds": [
+          "qwen2.5-coder:3b",
+          "qwen2.5-coder:1.5b",
+          "qwen3:4b",
+          "qwen3:8b",
           "qwen2.5:7b"
         ],
-        "autoPullMissingModels": true
+        "autoPullMissingModels": true,
+        "modelOverrides": [
+          {
+            "id": "qwen2.5-coder:3b",
+            "minimumContextWindow": 24576,
+            "contextWindow": 32768,
+            "maxTokens": 8192,
+            "fallbackModelId": "qwen2.5-coder:1.5b"
+          }
+        ]
       }
     ],
     "setAsDefaultModel": false,
@@ -260,8 +273,67 @@
           "cacheWrite": 0
         },
         "minimumContextWindow": 16384,
+        "fallbackModelId": "qwen3:4b",
         "contextWindow": 32768,
         "maxTokens": 4096
+      },
+      {
+        "id": "qwen3:4b",
+        "name": "Qwen 3 4B",
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "minimumContextWindow": 16384
+      },
+      {
+        "id": "qwen3:8b",
+        "name": "Qwen 3 8B",
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "minimumContextWindow": 16384,
+        "fallbackModelId": "qwen3:4b"
+      },
+      {
+        "id": "qwen2.5-coder:3b",
+        "name": "Qwen 2.5 Coder 3B",
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "minimumContextWindow": 24576,
+        "fallbackModelId": "qwen2.5-coder:1.5b"
+      },
+      {
+        "id": "qwen2.5-coder:1.5b",
+        "name": "Qwen 2.5 Coder 1.5B",
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "minimumContextWindow": 16384
       }
     ]
   },
@@ -301,7 +373,9 @@
         "allowAgents": [
           "research",
           "review-local",
-          "coder-local"
+          "review-remote",
+          "coder-local",
+          "coder-remote"
         ]
       },
       "modelRef": "openai-codex/gpt-5.4",
@@ -388,7 +462,53 @@
       "modelRef": "openai-codex/gpt-5.4",
       "candidateModelRefs": [
         "openai-codex/gpt-5.4",
-        "anthropic/claude-sonnet-4-6"
+        "anthropic/claude-sonnet-4-6",
+        "google/gemini-3.1-flash-lite-preview",
+        "ollama/qwen3-coder:30b",
+        "ollama/qwen3.5:35b-a3b"
+      ],
+      "allowLocalFallback": true
+    },
+    "remoteReviewAgent": {
+      "enabled": true,
+      "id": "review-remote",
+      "name": "Remote Reviewer",
+      "rolePolicyKey": "review",
+      "modelSource": "local",
+      "endpointKey": "review-pc",
+      "sandboxMode": "off",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
+      "modelRef": "ollama/qwen2.5-coder:3b",
+      "candidateModelRefs": [
+        "ollama/qwen2.5-coder:3b",
+        "ollama/qwen2.5-coder:1.5b",
+        "ollama/qwen3:4b",
+        "ollama/qwen3:8b",
+        "ollama/qwen2.5:7b"
+      ]
+    },
+    "remoteCoderAgent": {
+      "enabled": true,
+      "id": "coder-remote",
+      "name": "Remote Coder",
+      "rolePolicyKey": "codingDelegate",
+      "modelSource": "local",
+      "endpointKey": "review-pc",
+      "sandboxMode": "off",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
+      "modelRef": "ollama/qwen2.5-coder:3b",
+      "candidateModelRefs": [
+        "ollama/qwen2.5-coder:3b",
+        "ollama/qwen2.5-coder:1.5b",
+        "ollama/qwen3:4b",
+        "ollama/qwen3:8b",
+        "ollama/qwen2.5:7b"
       ]
     },
     "rolePolicies": {
@@ -419,8 +539,11 @@
         "",
         "## Delegation Rules",
         "- Delegate web research, docs lookups, and broad comparison work to the `research` agent when it is available.",
-        "- Delegate diff review, plan checking, and verification passes to the `review-local` agent when a second opinion is helpful.",
-        "- Delegate bounded implementation work, mechanical refactors, and low-risk code transforms to the `coder-local` agent when a second coding pass is useful.",
+        "- Delegate diff review, plan checking, and verification passes to `review-local` or `review-remote` when a second opinion is helpful.",
+        "- Delegate bounded implementation work, mechanical refactors, and low-risk code transforms to `coder-local` or `coder-remote` when a second coding pass is useful.",
+        "- When delegating file review, always pass exact absolute workspace paths for every file or directory to inspect. Do not send bare filenames for files inside subdirectories.",
+        "- When delegating implementation work, require the coding delegate to report the exact created or modified file paths.",
+        "- Do not claim a delegated review is complete until the reviewer has actually returned findings or an explicit no-issues result.",
         "- Keep security-sensitive final decisions and high-consequence tool use with yourself unless the user explicitly wants otherwise.",
         "",
         "## Red Lines",

@@ -78,6 +78,19 @@ function Get-ToolkitOllamaEndpoints {
             $item.desiredModelIds = @()
         }
 
+        if ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $endpoint.modelOverrides) {
+            $item.modelOverrides = @(
+                foreach ($override in @($endpoint.modelOverrides)) {
+                    if ($override -and $override.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$override.id)) {
+                        $override
+                    }
+                }
+            )
+        }
+        else {
+            $item.modelOverrides = @()
+        }
+
         if ($item.default) {
             $sawDefault = $true
         }
@@ -215,6 +228,67 @@ function Get-ToolkitLocalModelCatalog {
     return @()
 }
 
+function Get-ToolkitEndpointModelOverrideCatalog {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$EndpointKey
+    )
+
+    $endpoint = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey $EndpointKey
+    if ($null -eq $endpoint) {
+        return @()
+    }
+
+    if ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $endpoint.modelOverrides) {
+        return @($endpoint.modelOverrides)
+    }
+
+    return @()
+}
+
+function Get-ToolkitEndpointModelOverrideEntry {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [string]$EndpointKey
+    )
+
+    foreach ($entry in @(Get-ToolkitEndpointModelOverrideCatalog -Config $Config -EndpointKey $EndpointKey)) {
+        if ($entry -and [string]$entry.id -eq $ModelId) {
+            return $entry
+        }
+    }
+
+    return $null
+}
+
+function Merge-ToolkitConfigObjects {
+    param(
+        $BaseObject,
+        $OverrideObject
+    )
+
+    $merged = [ordered]@{}
+    if ($null -ne $BaseObject) {
+        foreach ($property in $BaseObject.PSObject.Properties) {
+            $merged[$property.Name] = $property.Value
+        }
+    }
+    if ($null -ne $OverrideObject) {
+        foreach ($property in $OverrideObject.PSObject.Properties) {
+            if ($null -ne $property.Value) {
+                $merged[$property.Name] = $property.Value
+            }
+        }
+    }
+
+    if ($merged.Count -eq 0) {
+        return $null
+    }
+
+    return [pscustomobject]$merged
+}
+
 function Get-ToolkitLocalModelEntry {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -228,4 +302,27 @@ function Get-ToolkitLocalModelEntry {
     }
 
     return $null
+}
+
+function Get-ToolkitEffectiveLocalModelEntry {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [string]$EndpointKey
+    )
+
+    $baseEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId
+    $overrideEntry = Get-ToolkitEndpointModelOverrideEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
+
+    if ($null -eq $baseEntry -and $null -eq $overrideEntry) {
+        return $null
+    }
+    if ($null -eq $baseEntry) {
+        return $overrideEntry
+    }
+    if ($null -eq $overrideEntry) {
+        return $baseEntry
+    }
+
+    return (Merge-ToolkitConfigObjects -BaseObject $baseEntry -OverrideObject $overrideEntry)
 }

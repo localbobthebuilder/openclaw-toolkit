@@ -142,6 +142,46 @@ function Remove-ModelEntry {
     return $removed
 }
 
+function Remove-EndpointModelState {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ModelId
+    )
+
+    $changed = New-Object System.Collections.Generic.List[string]
+    foreach ($endpoint in @($Config.ollama.endpoints)) {
+        if ($null -eq $endpoint) {
+            continue
+        }
+
+        $newDesiredIds = @(
+            foreach ($desiredId in @($endpoint.desiredModelIds)) {
+                if ([string]$desiredId -ne $ModelId) {
+                    [string]$desiredId
+                }
+            }
+        )
+        if (@($newDesiredIds).Count -ne @($endpoint.desiredModelIds).Count) {
+            $endpoint.desiredModelIds = $newDesiredIds
+            $changed.Add("$([string]$endpoint.key).desiredModelIds")
+        }
+
+        $newOverrides = @(
+            foreach ($override in @($endpoint.modelOverrides)) {
+                if ($override -and [string]$override.id -ne $ModelId) {
+                    $override
+                }
+            }
+        )
+        if (@($newOverrides).Count -ne @($endpoint.modelOverrides).Count) {
+            $endpoint.modelOverrides = $newOverrides
+            $changed.Add("$([string]$endpoint.key).modelOverrides")
+        }
+    }
+
+    return @($changed)
+}
+
 function Replace-ManagedModelRefs {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -156,7 +196,9 @@ function Replace-ManagedModelRefs {
         "localChatAgent",
         "hostedTelegramAgent",
         "localReviewAgent",
-        "localCoderAgent"
+        "localCoderAgent",
+        "remoteReviewAgent",
+        "remoteCoderAgent"
     )
 
     foreach ($propertyName in $agentPropertyNames) {
@@ -227,6 +269,7 @@ if ($isManagedModel) {
         if (-not $removed) {
             throw "Failed to remove '$Model' from managed ollama.models."
         }
+        $endpointStateChanges = @(Remove-EndpointModelState -Config $config -ModelId $Model)
 
         $remainingIds = @(Get-LocalModelIds -Config $config)
         if (-not $replacementId -and $remainingIds.Count -gt 0) {
@@ -246,6 +289,9 @@ if ($isManagedModel) {
         }
         if ($changedRefs.Count -gt 0) {
             Write-Host ("Updated managed references: " + ($changedRefs -join ", ")) -ForegroundColor Green
+        }
+        if ($endpointStateChanges.Count -gt 0) {
+            Write-Host ("Removed endpoint-specific model state: " + ($endpointStateChanges -join ", ")) -ForegroundColor Green
         }
     }
     else {

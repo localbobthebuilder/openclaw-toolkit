@@ -81,6 +81,8 @@ Main operator wrapper:
   Smoke-test OpenClaw through the configured Ollama model path.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke`
   Smoke-test the shared-workspace agent roles, especially the Telegram-routed agent's real file and git workflows.
+- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke`
+  Smoke-test `main -> coder-remote -> review-local` on the shared workspace and verify that the review task uses exact full file paths.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-AssignTo <agent-id>]`
@@ -117,6 +119,14 @@ Example:
 
 With that in place, `bootstrap` will try to pull `qwen2.5:7b` onto
 `review-pc` automatically.
+
+OpenClaw model failover note:
+
+- OpenClaw first rotates auth profiles within the current provider.
+- If that does not recover the run, it falls back to the next configured
+  model for that agent.
+- In this toolkit, `main` can therefore move from OpenAI Codex to Gemini and
+  then to local Ollama if a hosted provider hits quota or auth failure.
 
 Direct scripts:
 
@@ -158,6 +168,8 @@ Direct scripts:
   Run the local-model smoke test directly.
 - `D:\openclaw\openclaw-toolkit\run-agent-smoke.cmd`
   Run the shared-workspace agent capability smoke test directly.
+- `D:\openclaw\openclaw-toolkit\run-remote-review-smoke.cmd`
+  Run the focused `main -> coder-remote -> review-local` orchestration smoke test directly.
 - `D:\openclaw\openclaw-toolkit\run-local-delegated-coder-test.cmd`
   Diagnose the exact `main -> coder-local` spawned local-model path and detect raw fake tool-call output.
 - `D:\openclaw\openclaw-toolkit\run-add-local-model.cmd`

@@ -8,6 +8,8 @@ param(
     [string]$HostedTelegramModelRef,
     [string]$LocalReviewModelRef,
     [string]$LocalCoderModelRef,
+    [string]$RemoteReviewModelRef,
+    [string]$RemoteCoderModelRef,
     [switch]$NoRestart
 )
 
@@ -295,6 +297,7 @@ function New-AgentEntry {
         [Parameter(Mandatory = $true)][string]$Name,
         [string]$Workspace,
         [string]$ModelRef,
+        [string[]]$FallbackRefs = @(),
         [bool]$IsDefault = $false,
         $Tools,
         $Sandbox,
@@ -312,7 +315,13 @@ function New-AgentEntry {
     if ($ModelRef) {
         $entry.model = [ordered]@{
             primary   = $ModelRef
-            fallbacks = @()
+            fallbacks = @(
+                foreach ($fallbackRef in @($FallbackRefs)) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$fallbackRef) -and [string]$fallbackRef -ne $ModelRef) {
+                        [string]$fallbackRef
+                    }
+                }
+            )
         }
     }
     if ($IsDefault) {
@@ -677,6 +686,121 @@ function Resolve-PreferredAgentModelRef {
     return $null
 }
 
+function Get-PreferredLocalFallbackRef {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string[]]$AvailableRefs = @()
+    )
+
+    $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
+    $defaultEndpointKey = if ($null -ne $defaultEndpoint) { [string]$defaultEndpoint.key } else { "local" }
+    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+        if (-not $model.id) {
+            continue
+        }
+
+        $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $defaultEndpointKey
+        if ($candidate -in @($AvailableRefs)) {
+            return $candidate
+        }
+    }
+
+    if (@($AvailableRefs).Count -gt 0) {
+        return [string]$AvailableRefs[0]
+    }
+
+    return $null
+}
+
+function Resolve-AgentFallbackModelRefs {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig,
+        [string]$PrimaryModelRef,
+        [Parameter(Mandatory = $true)][string]$Purpose
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PrimaryModelRef)) {
+        return @()
+    }
+
+    $availableOllamaRefs = @(Get-OllamaAvailableModelRefs -Config $Config)
+    $candidateRefs = @()
+    foreach ($candidateRef in @($AgentConfig.candidateModelRefs)) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidateRef)
+    }
+    if ($AgentConfig.modelRef) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$AgentConfig.modelRef)
+    }
+
+    $modelSource = if ($AgentConfig.PSObject.Properties.Name -contains "modelSource" -and $AgentConfig.modelSource) {
+        ([string]$AgentConfig.modelSource).ToLowerInvariant()
+    }
+    else {
+        "static"
+    }
+
+    $fallbacks = @()
+    if ($modelSource -eq "hosted") {
+        $authReadyProviders = Get-AuthReadyHostedProviders
+        foreach ($candidateRef in @($candidateRefs)) {
+            $candidateRefText = [string]$candidateRef
+            if ([string]::IsNullOrWhiteSpace($candidateRefText)) {
+                continue
+            }
+
+            if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRefText) -or $candidateRefText.StartsWith("ollama/")) {
+                continue
+            }
+
+            $providerId = ($candidateRefText -split "/", 2)[0]
+            if ($providerId -in @($authReadyProviders) -and $candidateRefText -ne $PrimaryModelRef) {
+                $fallbacks = Add-UniqueString -List $fallbacks -Value $candidateRefText
+            }
+        }
+
+        if ($AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
+            foreach ($candidateRef in @($candidateRefs)) {
+                $candidateRefText = [string]$candidateRef
+                if ([string]::IsNullOrWhiteSpace($candidateRefText)) {
+                    continue
+                }
+
+                if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRefText) -or $candidateRefText.StartsWith("ollama/")) {
+                    $resolvedLocalFallback = Resolve-OllamaModelRef -DesiredRef $candidateRefText -Config $Config -Purpose $Purpose -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig)
+                    if (-not [string]::IsNullOrWhiteSpace($resolvedLocalFallback) -and $resolvedLocalFallback -ne $PrimaryModelRef) {
+                        $fallbacks = Add-UniqueString -List $fallbacks -Value $resolvedLocalFallback
+                    }
+                }
+            }
+
+            if (@($fallbacks).Count -eq 0 -or -not (@($fallbacks) | Where-Object { $_ -like "ollama*" })) {
+                $preferredLocalFallback = Get-PreferredLocalFallbackRef -Config $Config -AvailableRefs $availableOllamaRefs
+                if (-not [string]::IsNullOrWhiteSpace($preferredLocalFallback) -and $preferredLocalFallback -ne $PrimaryModelRef) {
+                    $fallbacks = Add-UniqueString -List $fallbacks -Value $preferredLocalFallback
+                }
+            }
+        }
+    }
+    elseif ($modelSource -eq "local") {
+        foreach ($candidateRef in @($candidateRefs)) {
+            $candidateRefText = [string]$candidateRef
+            if ([string]::IsNullOrWhiteSpace($candidateRefText)) {
+                continue
+            }
+
+            if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRefText) -or $candidateRefText.StartsWith("ollama/")) {
+                $resolvedLocalFallback = Resolve-OllamaModelRef -DesiredRef $candidateRefText -Config $Config -Purpose $Purpose -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig)
+                if (-not [string]::IsNullOrWhiteSpace($resolvedLocalFallback) -and $resolvedLocalFallback -ne $PrimaryModelRef) {
+                    $fallbacks = Add-UniqueString -List $fallbacks -Value $resolvedLocalFallback
+                }
+            }
+        }
+    }
+
+    return @($fallbacks)
+}
+
 function Wait-ForGateway {
     param([string]$HealthUrl = "http://127.0.0.1:18789/healthz")
 
@@ -724,6 +848,7 @@ $desiredAgents = @()
 $strongId = [string]$multi.strongAgent.id
 $strongName = if ($multi.strongAgent.name) { [string]$multi.strongAgent.name } else { "Strong Coder" }
 $resolvedStrongModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $StrongModelRef -AgentConfig $multi.strongAgent -Config $config -Purpose $strongId
+$resolvedStrongFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.strongAgent -PrimaryModelRef $resolvedStrongModelRef -Purpose $strongId
 $strongWorkspace = Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.strongAgent
 $strongSandbox = $null
 $strongSubagents = Get-AgentSubagentPolicy -AgentConfig $multi.strongAgent
@@ -732,7 +857,7 @@ if ($multi.strongAgent.PSObject.Properties.Name -contains "sandboxMode" -and $mu
         mode = [string]$multi.strongAgent.sandboxMode
     }
 }
-$desiredAgents += (New-AgentEntry -Id $strongId -Name $strongName -Workspace $strongWorkspace -ModelRef $resolvedStrongModelRef -IsDefault ([bool]$multi.strongAgent.default) -Sandbox $strongSandbox -Subagents $strongSubagents)
+$desiredAgents += (New-AgentEntry -Id $strongId -Name $strongName -Workspace $strongWorkspace -ModelRef $resolvedStrongModelRef -FallbackRefs $resolvedStrongFallbackRefs -IsDefault ([bool]$multi.strongAgent.default) -Sandbox $strongSandbox -Subagents $strongSubagents)
 
 if ($multi.researchAgent -and $multi.researchAgent.enabled) {
     $researchTools = $null
@@ -750,21 +875,23 @@ if ($multi.researchAgent -and $multi.researchAgent.enabled) {
     }
 
     $resolvedResearchModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $ResearchModelRef -AgentConfig $multi.researchAgent -Config $config -Purpose ([string]$multi.researchAgent.id)
+    $resolvedResearchFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.researchAgent -PrimaryModelRef $resolvedResearchModelRef -Purpose ([string]$multi.researchAgent.id)
 
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.researchAgent.id) -Name ([string]$multi.researchAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.researchAgent) -ModelRef $resolvedResearchModelRef -Tools $researchTools -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.researchAgent))
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.researchAgent.id) -Name ([string]$multi.researchAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.researchAgent) -ModelRef $resolvedResearchModelRef -FallbackRefs $resolvedResearchFallbackRefs -Tools $researchTools -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.researchAgent))
 }
 
 $chatAgentId = $null
 if ($multi.localChatAgent.enabled) {
     $chatAgentId = [string]$multi.localChatAgent.id
     $resolvedChatModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalChatModelRef -AgentConfig $multi.localChatAgent -Config $config -Purpose ([string]$multi.localChatAgent.id)
+    $resolvedChatFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.localChatAgent -PrimaryModelRef $resolvedChatModelRef -Purpose ([string]$multi.localChatAgent.id)
     $chatSandbox = $null
     if ($multi.localChatAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localChatAgent.sandboxMode) {
         $chatSandbox = [ordered]@{
             mode = [string]$multi.localChatAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id $chatAgentId -Name ([string]$multi.localChatAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localChatAgent) -ModelRef $resolvedChatModelRef -Sandbox $chatSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localChatAgent))
+    $desiredAgents += (New-AgentEntry -Id $chatAgentId -Name ([string]$multi.localChatAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localChatAgent) -ModelRef $resolvedChatModelRef -FallbackRefs $resolvedChatFallbackRefs -Sandbox $chatSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localChatAgent))
 }
 
 if ($multi.localReviewAgent.enabled) {
@@ -789,24 +916,26 @@ if ($multi.localReviewAgent.enabled) {
     }
 
     $resolvedReviewModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalReviewModelRef -AgentConfig $multi.localReviewAgent -Config $config -Purpose ([string]$multi.localReviewAgent.id)
+    $resolvedReviewFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.localReviewAgent -PrimaryModelRef $resolvedReviewModelRef -Purpose ([string]$multi.localReviewAgent.id)
     $reviewSandbox = $null
     if ($multi.localReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localReviewAgent.sandboxMode) {
         $reviewSandbox = [ordered]@{
             mode = [string]$multi.localReviewAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localReviewAgent.id) -Name ([string]$multi.localReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localReviewAgent) -ModelRef $resolvedReviewModelRef -Tools $reviewTools -Sandbox $reviewSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localReviewAgent))
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localReviewAgent.id) -Name ([string]$multi.localReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localReviewAgent) -ModelRef $resolvedReviewModelRef -FallbackRefs $resolvedReviewFallbackRefs -Tools $reviewTools -Sandbox $reviewSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localReviewAgent))
 }
 
 if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
     $resolvedHostedChatModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $HostedTelegramModelRef -AgentConfig $multi.hostedTelegramAgent -Config $config -Purpose ([string]$multi.hostedTelegramAgent.id)
+    $resolvedHostedChatFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.hostedTelegramAgent -PrimaryModelRef $resolvedHostedChatModelRef -Purpose ([string]$multi.hostedTelegramAgent.id)
     $hostedTelegramSandbox = $null
     if ($multi.hostedTelegramAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.hostedTelegramAgent.sandboxMode) {
         $hostedTelegramSandbox = [ordered]@{
             mode = [string]$multi.hostedTelegramAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.hostedTelegramAgent.id) -Name ([string]$multi.hostedTelegramAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent) -ModelRef $resolvedHostedChatModelRef -Sandbox $hostedTelegramSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.hostedTelegramAgent))
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.hostedTelegramAgent.id) -Name ([string]$multi.hostedTelegramAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent) -ModelRef $resolvedHostedChatModelRef -FallbackRefs $resolvedHostedChatFallbackRefs -Sandbox $hostedTelegramSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.hostedTelegramAgent))
 }
 
 if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
@@ -831,13 +960,78 @@ if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
     }
 
     $resolvedCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalCoderModelRef -AgentConfig $multi.localCoderAgent -Config $config -Purpose ([string]$multi.localCoderAgent.id)
+    $resolvedCoderFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.localCoderAgent -PrimaryModelRef $resolvedCoderModelRef -Purpose ([string]$multi.localCoderAgent.id)
     $coderSandbox = $null
     if ($multi.localCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localCoderAgent.sandboxMode) {
         $coderSandbox = [ordered]@{
             mode = [string]$multi.localCoderAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localCoderAgent.id) -Name ([string]$multi.localCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localCoderAgent) -ModelRef $resolvedCoderModelRef -Tools $coderTools -Sandbox $coderSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localCoderAgent))
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localCoderAgent.id) -Name ([string]$multi.localCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localCoderAgent) -ModelRef $resolvedCoderModelRef -FallbackRefs $resolvedCoderFallbackRefs -Tools $coderTools -Sandbox $coderSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localCoderAgent))
+}
+
+if ($multi.remoteReviewAgent -and $multi.remoteReviewAgent.enabled) {
+    $remoteReviewTools = [ordered]@{
+        alsoAllow = @(
+            "read",
+            "sessions_list",
+            "sessions_history",
+            "sessions_send",
+            "sessions_spawn",
+            "session_status"
+        )
+        deny  = @(
+            "exec",
+            "write",
+            "edit",
+            "browser",
+            "canvas",
+            "nodes",
+            "cron"
+        )
+    }
+
+    $resolvedRemoteReviewModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $RemoteReviewModelRef -AgentConfig $multi.remoteReviewAgent -Config $config -Purpose ([string]$multi.remoteReviewAgent.id)
+    $resolvedRemoteReviewFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.remoteReviewAgent -PrimaryModelRef $resolvedRemoteReviewModelRef -Purpose ([string]$multi.remoteReviewAgent.id)
+    $remoteReviewSandbox = $null
+    if ($multi.remoteReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.remoteReviewAgent.sandboxMode) {
+        $remoteReviewSandbox = [ordered]@{
+            mode = [string]$multi.remoteReviewAgent.sandboxMode
+        }
+    }
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.remoteReviewAgent.id) -Name ([string]$multi.remoteReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.remoteReviewAgent) -ModelRef $resolvedRemoteReviewModelRef -FallbackRefs $resolvedRemoteReviewFallbackRefs -Tools $remoteReviewTools -Sandbox $remoteReviewSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.remoteReviewAgent))
+}
+
+if ($multi.remoteCoderAgent -and $multi.remoteCoderAgent.enabled) {
+    $remoteCoderTools = [ordered]@{
+        alsoAllow = @(
+            "read",
+            "write",
+            "edit",
+            "exec",
+            "sessions_list",
+            "sessions_history",
+            "sessions_send",
+            "sessions_spawn",
+            "session_status"
+        )
+        deny  = @(
+            "browser",
+            "canvas",
+            "nodes",
+            "cron"
+        )
+    }
+
+    $resolvedRemoteCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $RemoteCoderModelRef -AgentConfig $multi.remoteCoderAgent -Config $config -Purpose ([string]$multi.remoteCoderAgent.id)
+    $resolvedRemoteCoderFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.remoteCoderAgent -PrimaryModelRef $resolvedRemoteCoderModelRef -Purpose ([string]$multi.remoteCoderAgent.id)
+    $remoteCoderSandbox = $null
+    if ($multi.remoteCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.remoteCoderAgent.sandboxMode) {
+        $remoteCoderSandbox = [ordered]@{
+            mode = [string]$multi.remoteCoderAgent.sandboxMode
+        }
+    }
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.remoteCoderAgent.id) -Name ([string]$multi.remoteCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.remoteCoderAgent) -ModelRef $resolvedRemoteCoderModelRef -FallbackRefs $resolvedRemoteCoderFallbackRefs -Tools $remoteCoderTools -Sandbox $remoteCoderSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.remoteCoderAgent))
 }
 
 $mergedAgents = @()
@@ -969,6 +1163,8 @@ if ($multi.manageWorkspaceAgentsMd) {
                 { $multi.hostedTelegramAgent -and $_ -eq [string]$multi.hostedTelegramAgent.id } { $agentConfig = $multi.hostedTelegramAgent; break }
                 { $multi.localReviewAgent -and $_ -eq [string]$multi.localReviewAgent.id } { $agentConfig = $multi.localReviewAgent; break }
                 { $multi.localCoderAgent -and $_ -eq [string]$multi.localCoderAgent.id } { $agentConfig = $multi.localCoderAgent; break }
+                { $multi.remoteReviewAgent -and $_ -eq [string]$multi.remoteReviewAgent.id } { $agentConfig = $multi.remoteReviewAgent; break }
+                { $multi.remoteCoderAgent -and $_ -eq [string]$multi.remoteCoderAgent.id } { $agentConfig = $multi.remoteCoderAgent; break }
             }
 
             if ($null -eq $agentConfig) {
@@ -1006,6 +1202,16 @@ if ($multi.manageWorkspaceAgentsMd) {
         if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
             $coderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localCoderAgent -DefaultKey "localCoderAgent"))
             if ($coderAgentsPath) { $managedAgentsFiles += $coderAgentsPath }
+        }
+
+        if ($multi.remoteReviewAgent -and $multi.remoteReviewAgent.enabled) {
+            $remoteReviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.remoteReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.remoteReviewAgent -DefaultKey "remoteReviewAgent"))
+            if ($remoteReviewAgentsPath) { $managedAgentsFiles += $remoteReviewAgentsPath }
+        }
+
+        if ($multi.remoteCoderAgent -and $multi.remoteCoderAgent.enabled) {
+            $remoteCoderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.remoteCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.remoteCoderAgent -DefaultKey "remoteCoderAgent"))
+            if ($remoteCoderAgentsPath) { $managedAgentsFiles += $remoteCoderAgentsPath }
         }
     }
 }

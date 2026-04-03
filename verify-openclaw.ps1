@@ -63,6 +63,7 @@ function Resolve-RequestedChecks {
 $script:RequestedChecks = Resolve-RequestedChecks -Values $Checks
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -380,6 +381,24 @@ function Add-UniqueString {
     return @($List)
 }
 
+function Resolve-ExpectedConfiguredModelRef {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $AgentConfig,
+        [string]$ModelRef
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ModelRef)) {
+        return $ModelRef
+    }
+
+    if (-not ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $ModelRef) -or $ModelRef -like "ollama/*")) {
+        return $ModelRef
+    }
+
+    return (Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $ModelRef -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig))
+}
+
 function Convert-NormalizedJson {
     param($Value)
 
@@ -669,6 +688,12 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled -and $config.multiAgent.localCoderAgent.id) {
             $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.localCoderAgent.id)
         }
+        if ($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled -and $config.multiAgent.remoteReviewAgent.id) {
+            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.remoteReviewAgent.id)
+        }
+        if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled -and $config.multiAgent.remoteCoderAgent.id) {
+            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.remoteCoderAgent.id)
+        }
 
         $actualAgents = @($liveConfig.agents.list)
         $actualAgentIds = @($actualAgents | ForEach-Object { [string]$_.id })
@@ -719,7 +744,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
         if ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled -and $config.multiAgent.localChatAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$config.multiAgent.localChatAgent.modelRef)
+            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localChatAgent -ModelRef ([string]$config.multiAgent.localChatAgent.modelRef))
         }
         if ($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled) {
             if ($config.multiAgent.hostedTelegramAgent.modelRef) {
@@ -730,15 +755,23 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
         if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled -and $config.multiAgent.localReviewAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$config.multiAgent.localReviewAgent.modelRef)
+            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localReviewAgent -ModelRef ([string]$config.multiAgent.localReviewAgent.modelRef))
         }
         if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled -and $config.multiAgent.localCoderAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$config.multiAgent.localCoderAgent.modelRef)
+            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localCoderAgent -ModelRef ([string]$config.multiAgent.localCoderAgent.modelRef))
+        }
+        if ($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled -and $config.multiAgent.remoteReviewAgent.modelRef) {
+            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$config.multiAgent.remoteReviewAgent.modelRef))
+        }
+        if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled -and $config.multiAgent.remoteCoderAgent.modelRef) {
+            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$config.multiAgent.remoteCoderAgent.modelRef))
         }
         if ($config.ollama -and $config.ollama.enabled) {
-            foreach ($model in @($config.ollama.models)) {
-                if ($model.id) {
-                    $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ("ollama/" + [string]$model.id)
+            foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $config)) {
+                foreach ($model in @($config.ollama.models)) {
+                    if ($model.id) {
+                        $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Convert-ToolkitLocalModelIdToRef -Config $config -ModelId ([string]$model.id) -EndpointKey ([string]$endpoint.key))
+                    }
                 }
             }
         }
@@ -884,7 +917,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled) {
             $reviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.localReviewAgent.id } | Select-Object -First 1
             $actualReviewModel = if ($reviewAgent -and $reviewAgent.model) { [string]$reviewAgent.model.primary } else { "" }
-            $desiredReviewModel = [string]$config.multiAgent.localReviewAgent.modelRef
+            $desiredReviewModel = Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localReviewAgent -ModelRef ([string]$config.multiAgent.localReviewAgent.modelRef)
             if ($actualReviewModel -eq $desiredReviewModel) {
                 $multiAgentVerification += "PASS: review-local model is $actualReviewModel"
             }
@@ -926,10 +959,10 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             $actualCoderModel = if ($coderAgent -and $coderAgent.model) { [string]$coderAgent.model.primary } else { "" }
             $expectedCoderModels = @()
             foreach ($candidateRef in @($config.multiAgent.localCoderAgent.candidateModelRefs)) {
-                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value ([string]$candidateRef)
+                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localCoderAgent -ModelRef ([string]$candidateRef))
             }
             if ($config.multiAgent.localCoderAgent.modelRef) {
-                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value ([string]$config.multiAgent.localCoderAgent.modelRef)
+                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localCoderAgent -ModelRef ([string]$config.multiAgent.localCoderAgent.modelRef))
             }
             $desiredCoderModel = if (@($expectedCoderModels).Count -gt 0) { [string]$expectedCoderModels[0] } else { [string]$config.multiAgent.localCoderAgent.modelRef }
             if ($actualCoderModel -in @($expectedCoderModels)) {
@@ -965,6 +998,83 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
             else {
                 $multiAgentVerification += "FAIL: coder-local sandbox mode mismatch. Expected $expectedCoderSandboxMode, got $actualCoderSandboxMode"
+            }
+        }
+
+        if ($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled) {
+            $remoteReviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.remoteReviewAgent.id } | Select-Object -First 1
+            if ($null -eq $remoteReviewAgent) {
+                $multiAgentVerification += "FAIL: remoteReviewAgent '$($config.multiAgent.remoteReviewAgent.id)' is missing from agents.list"
+            }
+            else {
+                $desiredRemoteReviewModel = Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$config.multiAgent.remoteReviewAgent.modelRef)
+                if ($remoteReviewAgent.model.primary -eq $desiredRemoteReviewModel) {
+                    $multiAgentVerification += "PASS: review-remote model is $($remoteReviewAgent.model.primary)"
+                }
+            else {
+                $multiAgentVerification += "FAIL: review-remote model mismatch. Expected $desiredRemoteReviewModel, got $($remoteReviewAgent.model.primary)"
+            }
+            }
+
+            $expectedRemoteReviewSandboxMode = if ($config.multiAgent.remoteReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.remoteReviewAgent.sandboxMode) {
+                [string]$config.multiAgent.remoteReviewAgent.sandboxMode
+            }
+            else {
+                [string]$liveConfig.agents.defaults.sandbox.mode
+            }
+            $actualRemoteReviewSandboxMode = if ($remoteReviewAgent -and $remoteReviewAgent.sandbox -and $remoteReviewAgent.sandbox.mode) {
+                [string]$remoteReviewAgent.sandbox.mode
+            }
+            else {
+                [string]$liveConfig.agents.defaults.sandbox.mode
+            }
+            if ($actualRemoteReviewSandboxMode -eq $expectedRemoteReviewSandboxMode) {
+                $multiAgentVerification += "PASS: review-remote sandbox mode is $actualRemoteReviewSandboxMode"
+            }
+            else {
+                $multiAgentVerification += "FAIL: review-remote sandbox mode mismatch. Expected $expectedRemoteReviewSandboxMode, got $actualRemoteReviewSandboxMode"
+            }
+        }
+
+        if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled) {
+            $remoteCoderAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.remoteCoderAgent.id } | Select-Object -First 1
+            if ($null -eq $remoteCoderAgent) {
+                $multiAgentVerification += "FAIL: remoteCoderAgent '$($config.multiAgent.remoteCoderAgent.id)' is missing from agents.list"
+            }
+            else {
+                $expectedRemoteCoderModels = @()
+                foreach ($candidateRef in @($config.multiAgent.remoteCoderAgent.candidateModelRefs)) {
+                    $expectedRemoteCoderModels = Add-UniqueString -List $expectedRemoteCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$candidateRef))
+                }
+                if ($config.multiAgent.remoteCoderAgent.modelRef) {
+                    $expectedRemoteCoderModels = Add-UniqueString -List $expectedRemoteCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$config.multiAgent.remoteCoderAgent.modelRef))
+                }
+                $desiredRemoteCoderModel = if (@($expectedRemoteCoderModels).Count -gt 0) { [string]$expectedRemoteCoderModels[0] } else { [string]$config.multiAgent.remoteCoderAgent.modelRef }
+                if ($remoteCoderAgent.model.primary -in @($expectedRemoteCoderModels)) {
+                    $multiAgentVerification += "PASS: coder-remote model is $($remoteCoderAgent.model.primary)"
+                }
+                else {
+                    $multiAgentVerification += "FAIL: coder-remote model mismatch. Expected one of $(@($expectedRemoteCoderModels) -join ', '), got $($remoteCoderAgent.model.primary)"
+                }
+            }
+
+            $expectedRemoteCoderSandboxMode = if ($config.multiAgent.remoteCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.remoteCoderAgent.sandboxMode) {
+                [string]$config.multiAgent.remoteCoderAgent.sandboxMode
+            }
+            else {
+                [string]$liveConfig.agents.defaults.sandbox.mode
+            }
+            $actualRemoteCoderSandboxMode = if ($remoteCoderAgent -and $remoteCoderAgent.sandbox -and $remoteCoderAgent.sandbox.mode) {
+                [string]$remoteCoderAgent.sandbox.mode
+            }
+            else {
+                [string]$liveConfig.agents.defaults.sandbox.mode
+            }
+            if ($actualRemoteCoderSandboxMode -eq $expectedRemoteCoderSandboxMode) {
+                $multiAgentVerification += "PASS: coder-remote sandbox mode is $actualRemoteCoderSandboxMode"
+            }
+            else {
+                $multiAgentVerification += "FAIL: coder-remote sandbox mode mismatch. Expected $expectedRemoteCoderSandboxMode, got $actualRemoteCoderSandboxMode"
             }
         }
 
@@ -1132,7 +1242,9 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                     @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); AgentId = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" } },
                     @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); AgentId = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.id } else { "chat-openai" } },
                     @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); AgentId = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" } },
-                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); AgentId = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" } }
+                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); AgentId = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" } },
+                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled); AgentId = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.id } else { "review-remote" } },
+                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled); AgentId = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.id } else { "coder-remote" } }
                 )
 
                 foreach ($overlayCheck in $overlayChecks) {
@@ -1156,7 +1268,9 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                     @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); Workspace = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.workspace } else { $null } },
                     @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); Workspace = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.workspace } else { $null } },
                     @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); Workspace = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.workspace } else { $null } },
-                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } }
+                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } },
+                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled); Workspace = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.workspace } else { $null } },
+                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled); Workspace = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.workspace } else { $null } }
                 )
 
                 foreach ($workspaceCheck in $workspaceChecks) {

@@ -120,6 +120,7 @@ function Parse-OllamaLine {
             SizeMiB   = $null
             Processor = ""
             Context   = ""
+            ContextWindow = $null
         }
     }
 
@@ -131,15 +132,23 @@ function Parse-OllamaLine {
             SizeMiB   = $null
             Processor = ""
             Context   = ""
+            ContextWindow = $null
         }
     }
 
     $size = $parts[2].Trim()
+    $contextText = $parts[4].Trim()
+    $contextWindow = $null
+    $parsedContextWindow = 0
+    if ([int]::TryParse($contextText, [ref]$parsedContextWindow)) {
+        $contextWindow = [int]$parsedContextWindow
+    }
     return [pscustomobject]@{
         Size      = $size
         SizeMiB   = Convert-DisplayedSizeToMiB -Text $size
         Processor = $parts[3].Trim()
-        Context   = $parts[4].Trim()
+        Context   = $contextText
+        ContextWindow = $contextWindow
     }
 }
 
@@ -227,6 +236,7 @@ if ($budgetMiB -le 0) {
 $results = New-Object System.Collections.Generic.List[object]
 $selected = $null
 $context = [int]$StartContextWindow
+$lastEffectiveContextWindow = $null
 
 Write-Detail ("Endpoint: {0} ({1})" -f $endpoint.key, (Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint))
 Write-Detail ("GPU total={0} MiB, required headroom={1} MiB, budget={2} MiB" -f $gpu.TotalMiB, $HeadroomMiB, $budgetMiB)
@@ -284,11 +294,13 @@ while ($context -le $MaxContextWindow) {
     $estimatedUsageMiB = if ($gpu.Kind -eq "local-nvidia-smi") { $peak } else { $parsed.SizeMiB }
     $fitsBudget = $null -ne $estimatedUsageMiB -and $estimatedUsageMiB -le $budgetMiB
     $fullGpu = $parsed.Processor -eq "100% GPU"
+    $effectiveContextWindow = if ($null -ne $parsed.ContextWindow) { [int]$parsed.ContextWindow } else { [int]$context }
 
     $result = [pscustomobject]@{
         Model             = $Model
         EndpointKey       = [string]$endpoint.key
-        ContextWindow     = [int]$context
+        RequestedContextWindow = [int]$context
+        ContextWindow     = [int]$effectiveContextWindow
         EstimatedUsageMiB = $estimatedUsageMiB
         PeakMiB           = if ($gpu.Kind -eq "local-nvidia-smi") { [int]$peak } else { $null }
         Size              = $parsed.Size
@@ -297,7 +309,7 @@ while ($context -le $MaxContextWindow) {
         LoadedContext     = $parsed.Context
         FitsBudget        = [bool]$fitsBudget
         FullGpu           = [bool]$fullGpu
-        MeetsMinimum      = [bool]($context -ge $MinimumContextWindow)
+        MeetsMinimum      = [bool]($effectiveContextWindow -ge $MinimumContextWindow)
     }
     $results.Add($result)
 
@@ -307,6 +319,10 @@ while ($context -le $MaxContextWindow) {
 
     if ($fitsBudget -and $fullGpu) {
         $selected = $result
+        if ($null -ne $lastEffectiveContextWindow -and $effectiveContextWindow -le $lastEffectiveContextWindow) {
+            break
+        }
+        $lastEffectiveContextWindow = $effectiveContextWindow
         $context += [int]$ContextStep
         continue
     }
@@ -317,7 +333,7 @@ while ($context -le $MaxContextWindow) {
 Write-Step "Summary"
 foreach ($result in $results) {
     $marker = if ($selected -and $result.ContextWindow -eq $selected.ContextWindow) { "*" } else { "-" }
-    Write-Detail ("{0} ctx={1} usage={2} MiB processor={3} size={4}" -f $marker, $result.ContextWindow, $result.EstimatedUsageMiB, $result.Processor, $result.Size)
+    Write-Detail ("{0} ctx={1} requested={2} usage={3} MiB processor={4} size={5}" -f $marker, $result.ContextWindow, $result.RequestedContextWindow, $result.EstimatedUsageMiB, $result.Processor, $result.Size)
 }
 
 if ($selected) {

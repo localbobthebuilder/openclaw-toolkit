@@ -802,6 +802,8 @@ function Get-ManagedModelRefs {
         [string]$ResolvedHostedTelegramModelRef,
         [string]$ResolvedLocalReviewModelRef,
         [string]$ResolvedLocalCoderModelRef,
+        [string]$ResolvedRemoteReviewModelRef,
+        [string]$ResolvedRemoteCoderModelRef,
         [string[]]$ExtraRefs = @()
     )
 
@@ -822,6 +824,9 @@ function Get-ManagedModelRefs {
         }
         elseif ($Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled -and $Config.multiAgent.localChatAgent.modelRef) {
             $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localChatAgent.modelRef)
+        }
+        foreach ($candidateRef in @($Config.multiAgent.localChatAgent.candidateModelRefs)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
         }
         if ($Config.multiAgent.hostedTelegramAgent -and $Config.multiAgent.hostedTelegramAgent.enabled) {
             if ($ResolvedHostedTelegramModelRef) {
@@ -851,11 +856,35 @@ function Get-ManagedModelRefs {
         elseif ($Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled -and $Config.multiAgent.localReviewAgent.modelRef) {
             $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localReviewAgent.modelRef)
         }
+        foreach ($candidateRef in @($Config.multiAgent.localReviewAgent.candidateModelRefs)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
+        }
         if ($ResolvedLocalCoderModelRef) {
             $refs = Add-UniqueString -List $refs -Value $ResolvedLocalCoderModelRef
         }
         elseif ($Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled -and $Config.multiAgent.localCoderAgent.modelRef) {
             $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localCoderAgent.modelRef)
+        }
+        foreach ($candidateRef in @($Config.multiAgent.localCoderAgent.candidateModelRefs)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
+        }
+        if ($ResolvedRemoteReviewModelRef) {
+            $refs = Add-UniqueString -List $refs -Value $ResolvedRemoteReviewModelRef
+        }
+        elseif ($Config.multiAgent.remoteReviewAgent -and $Config.multiAgent.remoteReviewAgent.enabled -and $Config.multiAgent.remoteReviewAgent.modelRef) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.remoteReviewAgent.modelRef)
+        }
+        foreach ($candidateRef in @($Config.multiAgent.remoteReviewAgent.candidateModelRefs)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
+        }
+        if ($ResolvedRemoteCoderModelRef) {
+            $refs = Add-UniqueString -List $refs -Value $ResolvedRemoteCoderModelRef
+        }
+        elseif ($Config.multiAgent.remoteCoderAgent -and $Config.multiAgent.remoteCoderAgent.enabled -and $Config.multiAgent.remoteCoderAgent.modelRef) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.remoteCoderAgent.modelRef)
+        }
+        foreach ($candidateRef in @($Config.multiAgent.remoteCoderAgent.candidateModelRefs)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
         }
     }
 
@@ -1064,13 +1093,18 @@ function Ensure-OllamaState {
         ResolvedHostedTelegramModelRef = $null
         ResolvedLocalReviewModelRef = $null
         ResolvedLocalCoderModelRef = $null
+        ResolvedRemoteReviewModelRef = $null
+        ResolvedRemoteCoderModelRef = $null
     }
 
     $referencedLocalModels = New-Object System.Collections.Generic.List[object]
+    $referencedLocalModelKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($agentConfig in @(
             $Config.multiAgent.localChatAgent,
             $Config.multiAgent.localReviewAgent,
-            $Config.multiAgent.localCoderAgent
+            $Config.multiAgent.localCoderAgent,
+            $Config.multiAgent.remoteReviewAgent,
+            $Config.multiAgent.remoteCoderAgent
         )) {
         if ($null -eq $agentConfig -or -not ($agentConfig.PSObject.Properties.Name -contains "enabled") -or -not $agentConfig.enabled) {
             continue
@@ -1089,21 +1123,31 @@ function Ensure-OllamaState {
         foreach ($candidate in @($agentConfig.candidateModelRefs)) {
             if (-not [string]::IsNullOrWhiteSpace([string]$candidate) -and ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef ([string]$candidate)) -or ([string]$candidate).StartsWith("ollama/"))) {
                 $modelId = Get-ToolkitModelIdFromRef -ModelRef ([string]$candidate)
-                $referencedLocalModels.Add([pscustomobject]@{ endpointKey = $endpointKey; modelId = $modelId })
+                $requestKey = "$endpointKey::$modelId"
+                if ($referencedLocalModelKeys.Add($requestKey)) {
+                    $referencedLocalModels.Add([pscustomobject]@{ endpointKey = $endpointKey; modelId = $modelId })
+                }
             }
         }
         if ($agentConfig.modelRef -and ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef ([string]$agentConfig.modelRef)) -or ([string]$agentConfig.modelRef).StartsWith("ollama/"))) {
-            $referencedLocalModels.Add([pscustomobject]@{ endpointKey = $endpointKey; modelId = (Get-ToolkitModelIdFromRef -ModelRef ([string]$agentConfig.modelRef)) })
+            $modelId = Get-ToolkitModelIdFromRef -ModelRef ([string]$agentConfig.modelRef)
+            $requestKey = "$endpointKey::$modelId"
+            if ($referencedLocalModelKeys.Add($requestKey)) {
+                $referencedLocalModels.Add([pscustomobject]@{ endpointKey = $endpointKey; modelId = $modelId })
+            }
         }
     }
 
     foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
         foreach ($desiredModelId in @($endpoint.desiredModelIds)) {
             if (-not [string]::IsNullOrWhiteSpace([string]$desiredModelId)) {
-                $referencedLocalModels.Add([pscustomobject]@{
-                        endpointKey = [string]$endpoint.key
-                        modelId     = [string]$desiredModelId
-                    })
+                $requestKey = "$([string]$endpoint.key)::$([string]$desiredModelId)"
+                if ($referencedLocalModelKeys.Add($requestKey)) {
+                    $referencedLocalModels.Add([pscustomobject]@{
+                            endpointKey = [string]$endpoint.key
+                            modelId     = [string]$desiredModelId
+                        })
+                }
             }
         }
 
@@ -1149,7 +1193,10 @@ function Ensure-OllamaState {
                 continue
             }
             $configuredIds = Add-UniqueString -List $configuredIds -Value ([string]$configuredModel.id)
-            $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $configuredModel)
+            $effectiveConfiguredModel = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId ([string]$configuredModel.id) -EndpointKey ([string]$endpoint.key)
+            if ($null -ne $effectiveConfiguredModel) {
+                $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $effectiveConfiguredModel)
+            }
         }
 
         foreach ($tag in $tags) {
@@ -1180,6 +1227,12 @@ function Ensure-OllamaState {
     }
     if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled) {
         $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-local" -FallbackToFirstCandidate
+    }
+    if ($Config.multiAgent -and $Config.multiAgent.remoteReviewAgent -and $Config.multiAgent.remoteReviewAgent.enabled) {
+        $state.ResolvedRemoteReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.remoteReviewAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-remote" -FallbackToFirstCandidate
+    }
+    if ($Config.multiAgent -and $Config.multiAgent.remoteCoderAgent -and $Config.multiAgent.remoteCoderAgent.enabled) {
+        $state.ResolvedRemoteCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.remoteCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-remote" -FallbackToFirstCandidate
     }
 
     return [pscustomobject]$state
@@ -1783,7 +1836,7 @@ if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.h
     $resolvedHostedTelegramModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.hostedTelegramAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
 }
 
-$managedModelRefs = Get-ManagedModelRefs -Config $config -ResolvedStrongModelRef $resolvedStrongModelRef -ResolvedResearchModelRef $resolvedResearchModelRef -ResolvedLocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -ResolvedHostedTelegramModelRef $resolvedHostedTelegramModelRef -ResolvedLocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -ResolvedLocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -ExtraRefs $ollamaState.AvailableRefs
+$managedModelRefs = Get-ManagedModelRefs -Config $config -ResolvedStrongModelRef $resolvedStrongModelRef -ResolvedResearchModelRef $resolvedResearchModelRef -ResolvedLocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -ResolvedHostedTelegramModelRef $resolvedHostedTelegramModelRef -ResolvedLocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -ResolvedLocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -ResolvedRemoteReviewModelRef $ollamaState.ResolvedRemoteReviewModelRef -ResolvedRemoteCoderModelRef $ollamaState.ResolvedRemoteCoderModelRef -ExtraRefs $ollamaState.AvailableRefs
 if (@($managedModelRefs).Count -gt 0) {
     $modelsAllowlist = [ordered]@{}
     foreach ($modelRef in @($managedModelRefs)) {
@@ -1859,7 +1912,7 @@ if ($config.sandbox.enabled) {
 Clear-RedundantNodeDenyCommands -Config $config
 Configure-TelegramSurface -Config $config
 Configure-VoiceNotes -Config $config
-& (Join-Path (Split-Path -Parent $PSCommandPath) "configure-agent-layout.ps1") -ConfigPath $ConfigPath -NoRestart -StrongModelRef $resolvedStrongModelRef -ResearchModelRef $resolvedResearchModelRef -LocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -HostedTelegramModelRef $resolvedHostedTelegramModelRef -LocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -LocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef
+& (Join-Path (Split-Path -Parent $PSCommandPath) "configure-agent-layout.ps1") -ConfigPath $ConfigPath -NoRestart -StrongModelRef $resolvedStrongModelRef -ResearchModelRef $resolvedResearchModelRef -LocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -HostedTelegramModelRef $resolvedHostedTelegramModelRef -LocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -LocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -RemoteReviewModelRef $ollamaState.ResolvedRemoteReviewModelRef -RemoteCoderModelRef $ollamaState.ResolvedRemoteCoderModelRef
 
 Write-Step "Restarting gateway after config changes"
 Push-Location $config.repoPath

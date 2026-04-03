@@ -183,7 +183,7 @@ function Get-EndpointDiskFreeBytes {
             if ($telemetry.PSObject.Properties.Name -contains "diskFreeBytes" -and $telemetry.diskFreeBytes) {
                 return [int64]$telemetry.diskFreeBytes
             }
-            throw "Endpoint '$($Endpoint.key)' needs telemetry.diskFreeBytes for pre-pull disk checks."
+            return $null
         }
         default {
             throw "Unsupported telemetry kind '$kind' for endpoint '$($Endpoint.key)'."
@@ -256,9 +256,11 @@ function Set-AgentLocalModel {
     )
 
     $mapping = @{
-        "chat-local"   = "localChatAgent"
-        "review-local" = "localReviewAgent"
-        "coder-local"  = "localCoderAgent"
+        "chat-local"    = "localChatAgent"
+        "review-local"  = "localReviewAgent"
+        "coder-local"   = "localCoderAgent"
+        "review-remote" = "remoteReviewAgent"
+        "coder-remote"  = "remoteCoderAgent"
     }
 
     if (-not $mapping.ContainsKey($TargetAgentId)) {
@@ -314,9 +316,71 @@ function New-LocalModelEntry {
     return [pscustomobject]$entry
 }
 
+function New-EndpointModelOverrideEntry {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [Parameter(Mandatory = $true)][int]$ContextWindow,
+        [Parameter(Mandatory = $true)][int]$MaxTokensValue,
+        [int]$MinimumContextWindowValue = 24576,
+        [string]$FallbackModelId
+    )
+
+    $entry = [ordered]@{
+        id                   = $ModelId
+        minimumContextWindow = $MinimumContextWindowValue
+        contextWindow        = $ContextWindow
+        maxTokens            = $MaxTokensValue
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($FallbackModelId)) {
+        $entry.fallbackModelId = $FallbackModelId
+    }
+
+    return [pscustomobject]$entry
+}
+
+function Set-EndpointModelOverride {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$EndpointKey,
+        [Parameter(Mandatory = $true)]$OverrideEntry
+    )
+
+    foreach ($endpoint in @($Config.ollama.endpoints)) {
+        if ([string]$endpoint.key -ne $EndpointKey) {
+            continue
+        }
+
+        if (-not ($endpoint.PSObject.Properties.Name -contains "modelOverrides")) {
+            $endpoint | Add-Member -NotePropertyName modelOverrides -NotePropertyValue @()
+        }
+
+        $overrides = New-Object System.Collections.Generic.List[object]
+        $replaced = $false
+        foreach ($existingOverride in @($endpoint.modelOverrides)) {
+            if ($existingOverride -and [string]$existingOverride.id -eq [string]$OverrideEntry.id) {
+                $overrides.Add($OverrideEntry)
+                $replaced = $true
+            }
+            elseif ($existingOverride) {
+                $overrides.Add($existingOverride)
+            }
+        }
+        if (-not $replaced) {
+            $overrides.Add($OverrideEntry)
+        }
+
+        $endpoint.modelOverrides = $overrides.ToArray()
+        return
+    }
+
+    throw "Could not find endpoint '$EndpointKey' while writing model override."
+}
+
 function Resolve-ConfiguredFallbackModelId {
     param(
         [Parameter(Mandatory = $true)]$Config,
+        [string]$EndpointKey,
         [Parameter(Mandatory = $true)][string]$ModelId,
         [string]$ExplicitFallbackModel
     )
@@ -325,7 +389,7 @@ function Resolve-ConfiguredFallbackModelId {
         return $ExplicitFallbackModel
     }
 
-    $entry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId
+    $entry = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
     if ($entry -and $entry.PSObject.Properties.Name -contains "fallbackModelId" -and $entry.fallbackModelId) {
         return [string]$entry.fallbackModelId
     }
@@ -387,7 +451,10 @@ function Resolve-ModelPlan {
 
     if (-not $AlreadyInstalled) {
         $diskFreeBytes = Get-EndpointDiskFreeBytes -Endpoint $Endpoint
-        if ($diskFreeBytes -lt $requiredDiskBytes) {
+        if ($null -eq $diskFreeBytes) {
+            Write-Warning "Endpoint '$($Endpoint.key)' does not expose free-disk telemetry. Skipping pre-pull disk check for $ModelId."
+        }
+        elseif ($diskFreeBytes -lt $requiredDiskBytes) {
             throw "Endpoint '$($Endpoint.key)' has insufficient free disk for $ModelId. Need about $([math]::Round($requiredDiskBytes / 1GB, 2)) GB, free is $([math]::Round($diskFreeBytes / 1GB, 2)) GB."
         }
     }
@@ -420,7 +487,7 @@ $alreadyInstalled = $Model -in $installed
 
 $upperContextBound = Resolve-UpperContextBound -RequestedMaxContextWindow $MaxContextWindow -LegacyContexts $Contexts
 $visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-$fallbackModelId = Resolve-ConfiguredFallbackModelId -Config $config -ModelId $Model -ExplicitFallbackModel $FallbackModel
+$fallbackModelId = Resolve-ConfiguredFallbackModelId -Config $config -EndpointKey $endpoint.key -ModelId $Model -ExplicitFallbackModel $FallbackModel
 $plan = Resolve-ModelPlan -Config $config -Endpoint $endpoint -ModelId $Model -DisplayName $Name -FallbackModelId $fallbackModelId -AlreadyInstalled:$alreadyInstalled -Visited $visited
 
 if ($plan.ModelId -notin $installed) {
@@ -453,7 +520,7 @@ $probeResult = $probeJsonLine | ConvertFrom-Json -Depth 20
 $selectedContextWindow = if ($null -ne $probeResult.selectedContextWindow) { [int]$probeResult.selectedContextWindow } else { $null }
 
 if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumContextWindow) {
-    $finalFallback = Resolve-ConfiguredFallbackModelId -Config $config -ModelId $plan.ModelId -ExplicitFallbackModel $FallbackModel
+    $finalFallback = Resolve-ConfiguredFallbackModelId -Config $config -EndpointKey $endpoint.key -ModelId $plan.ModelId -ExplicitFallbackModel $FallbackModel
     if ($finalFallback -and $finalFallback -ne $plan.ModelId) {
         Write-Warning "Model '$($plan.ModelId)' did not fit with a useful context on endpoint '$($endpoint.key)'. Falling back to '$finalFallback'."
         & $PSCommandPath -Model $finalFallback -Name $Name -EndpointKey $endpoint.key -InputKinds $InputKinds -Reasoning:$Reasoning -MaxTokens $MaxTokens -StartContextWindow $StartContextWindow -ContextStep $ContextStep -MaxContextWindow $upperContextBound -HeadroomMiB $HeadroomMiB -MinimumContextWindow $MinimumContextWindow -RawSizeLimitRatio $RawSizeLimitRatio -AssignTo $AssignTo -ConfigPath $ConfigPath -SkipBootstrap:$SkipBootstrap
@@ -468,13 +535,39 @@ if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumCont
 }
 
 $newEntry = New-LocalModelEntry -ModelId $plan.ModelId -DisplayName $plan.DisplayName -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -Inputs $InputKinds -ReasoningModel:$Reasoning -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
+$endpointOverride = New-EndpointModelOverrideEntry -ModelId $plan.ModelId -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
 
 Write-Step "Updating bootstrap config"
 $newModels = New-Object System.Collections.Generic.List[object]
 $replaced = $false
 foreach ($existingModel in @($config.ollama.models)) {
     if ([string]$existingModel.id -eq $plan.ModelId) {
-        $newModels.Add($newEntry)
+        $mergedExisting = [ordered]@{}
+        foreach ($property in $existingModel.PSObject.Properties) {
+            $mergedExisting[$property.Name] = $property.Value
+        }
+        $mergedExisting.name = $plan.DisplayName
+        $mergedExisting.input = @($InputKinds)
+        $mergedExisting.cost = [ordered]@{
+            input      = 0
+            output     = 0
+            cacheRead  = 0
+            cacheWrite = 0
+        }
+        $mergedExisting.minimumContextWindow = $MinimumContextWindow
+        if ($Reasoning) {
+            $mergedExisting.reasoning = $true
+        }
+        elseif ($mergedExisting.Contains("reasoning")) {
+            $mergedExisting.Remove("reasoning")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($fallbackModelId)) {
+            $mergedExisting.fallbackModelId = $fallbackModelId
+        }
+        elseif ($mergedExisting.Contains("fallbackModelId")) {
+            $mergedExisting.Remove("fallbackModelId")
+        }
+        $newModels.Add([pscustomobject]$mergedExisting)
         $replaced = $true
     }
     else {
@@ -482,9 +575,28 @@ foreach ($existingModel in @($config.ollama.models)) {
     }
 }
 if (-not $replaced) {
-    $newModels.Add($newEntry)
+    $catalogEntry = [ordered]@{
+        id                   = $plan.ModelId
+        name                 = $plan.DisplayName
+        input                = @($InputKinds)
+        cost                 = [ordered]@{
+            input      = 0
+            output     = 0
+            cacheRead  = 0
+            cacheWrite = 0
+        }
+        minimumContextWindow = $MinimumContextWindow
+    }
+    if ($Reasoning) {
+        $catalogEntry.reasoning = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($fallbackModelId)) {
+        $catalogEntry.fallbackModelId = $fallbackModelId
+    }
+    $newModels.Add([pscustomobject]$catalogEntry)
 }
 $config.ollama.models = $newModels.ToArray()
+Set-EndpointModelOverride -Config $config -EndpointKey $endpoint.key -OverrideEntry $endpointOverride
 
 $assigned = $false
 if ($AssignTo) {
@@ -494,7 +606,7 @@ if ($AssignTo) {
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 
-Write-Host "Updated bootstrap config for $($endpoint.providerId)/$($plan.ModelId) with contextWindow=$selectedContextWindow and maxTokens=$MaxTokens." -ForegroundColor Green
+Write-Host "Updated bootstrap config for $($endpoint.providerId)/$($plan.ModelId) with endpoint override contextWindow=$selectedContextWindow and maxTokens=$MaxTokens." -ForegroundColor Green
 if ($assigned) {
     Write-Host "Assigned $($endpoint.providerId)/$($plan.ModelId) to agent $AssignTo on endpoint $($endpoint.key)." -ForegroundColor Green
 }
