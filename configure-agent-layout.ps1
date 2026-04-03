@@ -466,7 +466,7 @@ function Get-OllamaAvailableModelRefs {
 
     $refs = @()
     foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
-        $url = ([string]$endpoint.baseUrl).TrimEnd("/") + "/api/tags"
+        $url = (Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint).TrimEnd("/") + "/api/tags"
         $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $url) -AllowFailure
         if ($result.ExitCode -ne 0 -or -not $result.Output) {
             continue
@@ -503,7 +503,7 @@ function Try-PullOllamaModel {
     Write-Host "Ollama model missing on endpoint $($Endpoint.key), pulling: $ModelId" -ForegroundColor Yellow
     $oldHost = $env:OLLAMA_HOST
     try {
-        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
         $pull = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("pull", $ModelId) -AllowFailure
     }
     finally {

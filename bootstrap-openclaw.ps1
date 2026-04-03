@@ -878,7 +878,7 @@ function Get-ManagedModelRefs {
 function Get-OllamaTags {
     param([Parameter(Mandatory = $true)]$Endpoint)
 
-    $tagsUrl = ([string]$Endpoint.baseUrl).TrimEnd("/") + "/api/tags"
+    $tagsUrl = (Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint).TrimEnd("/") + "/api/tags"
     $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $tagsUrl) -AllowFailure
     if ($result.ExitCode -ne 0 -or -not $result.Output -or $result.Output -notmatch '"models"') {
         return @()
@@ -970,7 +970,7 @@ function Invoke-OllamaCli {
 
     $oldHost = $env:OLLAMA_HOST
     try {
-        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
         $output = & $command.Source @Arguments 2>&1
         $exitCode = $LASTEXITCODE
     }
@@ -1097,6 +1097,15 @@ function Ensure-OllamaState {
     }
 
     foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        foreach ($desiredModelId in @($endpoint.desiredModelIds)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$desiredModelId)) {
+                $referencedLocalModels.Add([pscustomobject]@{
+                        endpointKey = [string]$endpoint.key
+                        modelId     = [string]$desiredModelId
+                    })
+            }
+        }
+
         $tags = @(Get-OllamaTags -Endpoint $endpoint)
         $availableIds = @($tags | ForEach-Object { [string]$_.model })
 
@@ -1155,7 +1164,7 @@ function Ensure-OllamaState {
             availableRefs = @($availableRefs)
         }
         $state.ProviderEntries[$endpoint.providerId] = [ordered]@{
-            baseUrl = [string]$endpoint.baseUrl
+            baseUrl = Get-ToolkitOllamaProviderBaseUrl -Endpoint $endpoint
             apiKey  = [string]$endpoint.apiKey
             api     = "ollama"
             models  = @($providerModels)

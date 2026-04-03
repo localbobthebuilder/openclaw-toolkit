@@ -94,7 +94,7 @@ function Invoke-OllamaCli {
 
     $oldHost = $env:OLLAMA_HOST
     try {
-        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
         $output = & $command.Source @Arguments 2>&1
         $exitCode = $LASTEXITCODE
     }

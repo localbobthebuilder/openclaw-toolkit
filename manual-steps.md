@@ -90,6 +90,28 @@ Main operator wrapper:
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd stop`
   Stop the gateway and remove disposable sandbox worker containers.
 
+Named Ollama endpoints can also declare endpoint-level desired models. That is
+useful when you have multiple Ollama PCs and want bootstrap to keep a small
+starter model present on each machine even before any agent is assigned to it.
+
+Example:
+
+```json
+"ollama": {
+  "endpoints": [
+    {
+      "key": "review-pc",
+      "baseUrl": "http://desktop-r9ab74f:11434",
+      "desiredModelIds": ["qwen2.5:7b"],
+      "autoPullMissingModels": true
+    }
+  ]
+}
+```
+
+With that in place, `bootstrap` will try to pull `qwen2.5:7b` onto
+`review-pc` automatically.
+
 Direct scripts:
 
 - `D:\openclaw\openclaw-toolkit\run-bootstrap.cmd`

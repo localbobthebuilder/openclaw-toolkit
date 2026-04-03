@@ -167,6 +167,7 @@
         "key": "local",
         "providerId": "ollama",
         "baseUrl": "http://host.docker.internal:11434",
+        "hostBaseUrl": "http://127.0.0.1:11434",
         "apiKey": "ollama-local",
         "default": true,
         "telemetry": {
@@ -177,13 +178,17 @@
       {
         "key": "review-pc",
         "providerId": "ollama-review-pc",
-        "baseUrl": "http://192.168.1.126:11434",
+        "baseUrl": "http://100.96.119.26:11434",
+        "hostBaseUrl": "http://100.96.119.26:11434",
         "apiKey": "ollama-review-pc",
         "default": false,
         "telemetry": {
           "kind": "static-gpu-total",
           "gpuTotalMiB": 8192
         },
+        "desiredModelIds": [
+          "qwen2.5:7b"
+        ],
         "autoPullMissingModels": true
       }
     ],

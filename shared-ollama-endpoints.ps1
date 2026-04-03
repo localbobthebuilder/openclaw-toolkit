@@ -41,6 +41,15 @@ function Get-ToolkitOllamaEndpoints {
             key        = $key
             providerId = $providerId
             baseUrl    = if ($endpoint.baseUrl) { [string]$endpoint.baseUrl } else { "http://127.0.0.1:11434" }
+            hostBaseUrl = if ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) {
+                [string]$endpoint.hostBaseUrl
+            }
+            elseif ($endpoint.baseUrl) {
+                [string]$endpoint.baseUrl
+            }
+            else {
+                "http://127.0.0.1:11434"
+            }
             apiKey     = if ($endpoint.apiKey) { [string]$endpoint.apiKey } else { "ollama-$key" }
             default    = [bool]($endpoint.PSObject.Properties.Name -contains "default" -and $endpoint.default)
         }
@@ -54,6 +63,19 @@ function Get-ToolkitOllamaEndpoints {
         }
         else {
             $item.autoPullMissingModels = $true
+        }
+
+        if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds" -and $endpoint.desiredModelIds) {
+            $item.desiredModelIds = @(
+                foreach ($modelId in @($endpoint.desiredModelIds)) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$modelId)) {
+                        [string]$modelId
+                    }
+                }
+            )
+        }
+        else {
+            $item.desiredModelIds = @()
         }
 
         if ($item.default) {
@@ -110,6 +132,22 @@ function Get-ToolkitOllamaProviderIds {
             [string]$endpoint.providerId
         }
     )
+}
+
+function Get-ToolkitOllamaHostBaseUrl {
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    if ($Endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and -not [string]::IsNullOrWhiteSpace([string]$Endpoint.hostBaseUrl)) {
+        return [string]$Endpoint.hostBaseUrl
+    }
+
+    return [string]$Endpoint.baseUrl
+}
+
+function Get-ToolkitOllamaProviderBaseUrl {
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    return [string]$Endpoint.baseUrl
 }
 
 function Get-ToolkitModelIdFromRef {

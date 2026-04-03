@@ -54,7 +54,7 @@ function Invoke-OllamaCli {
 
     $oldHost = $env:OLLAMA_HOST
     try {
-        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
         $output = & $command.Source @Arguments 2>&1
         $exitCode = $LASTEXITCODE
     }
@@ -228,7 +228,7 @@ $results = New-Object System.Collections.Generic.List[object]
 $selected = $null
 $context = [int]$StartContextWindow
 
-Write-Detail ("Endpoint: {0} ({1})" -f $endpoint.key, $endpoint.baseUrl)
+Write-Detail ("Endpoint: {0} ({1})" -f $endpoint.key, (Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint))
 Write-Detail ("GPU total={0} MiB, required headroom={1} MiB, budget={2} MiB" -f $gpu.TotalMiB, $HeadroomMiB, $budgetMiB)
 
 while ($context -le $MaxContextWindow) {
@@ -256,7 +256,7 @@ while ($context -le $MaxContextWindow) {
         }
         catch {
         }
-    } -ArgumentList $endpoint.baseUrl, $payload
+    } -ArgumentList (Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint), $payload
 
     $peak = 0
     for ($i = 0; $i -lt $Samples; $i++) {
@@ -338,7 +338,7 @@ if ($Json) {
     $summary = [ordered]@{
         model                 = $Model
         endpointKey           = [string]$endpoint.key
-        endpointBaseUrl       = [string]$endpoint.baseUrl
+        endpointBaseUrl       = Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint
         gpuTelemetryKind      = [string]$gpu.Kind
         gpuTotalMiB           = [int]$gpu.TotalMiB
         headroomMiB           = [int]$HeadroomMiB
