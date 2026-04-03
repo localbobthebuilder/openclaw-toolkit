@@ -1,0 +1,398 @@
+{
+  "repoUrl": "https://github.com/openclaw/openclaw.git",
+  "repoCloneDepth": 1,
+  "repoPath": "..\\openclaw",
+  "composeFilePath": "..\\openclaw\\docker-compose.yml",
+  "envFilePath": "..\\openclaw\\.env",
+  "envTemplatePath": ".\\openclaw.env.template",
+  "dockerSetupScriptRelativePath": "scripts/docker/setup.sh",
+  "gatewayPort": 18789,
+  "bridgePort": 18790,
+  "gatewayBind": "lan",
+  "gatewayAuthRateLimit": {
+    "maxAttempts": 10,
+    "windowMs": 60000,
+    "lockoutMs": 300000
+  },
+  "toolPolicy": {
+    "globalProfile": "minimal",
+    "globalAllow": [
+      "read",
+      "write",
+      "edit",
+      "exec",
+      "process",
+      "sessions_list",
+      "sessions_history",
+      "sessions_send",
+      "sessions_spawn",
+      "sessions_yield",
+      "subagents",
+      "session_status",
+      "memory_search",
+      "memory_get"
+    ],
+    "globalDeny": [
+      "browser",
+      "canvas",
+      "nodes",
+      "cron",
+      "gateway"
+    ],
+    "researchAllow": [
+      "read",
+      "sessions_list",
+      "sessions_history",
+      "sessions_send",
+      "sessions_spawn",
+      "sessions_yield",
+      "subagents",
+      "session_status",
+      "memory_search",
+      "memory_get",
+      "web_search",
+      "web_fetch"
+    ],
+    "researchDeny": [
+      "exec",
+      "process",
+      "write",
+      "edit",
+      "browser",
+      "canvas",
+      "nodes",
+      "cron",
+      "gateway"
+    ]
+  },
+  "contextManagement": {
+    "compaction": {
+      "mode": "safeguard",
+      "timeoutSeconds": 900,
+      "reserveTokensFloor": 24000,
+      "identifierPolicy": "strict",
+      "postCompactionSections": [
+        "Session Startup",
+        "Red Lines"
+      ]
+    },
+    "contextPruning": {
+      "mode": "cache-ttl",
+      "ttl": "1h",
+      "keepLastAssistants": 3,
+      "softTrimRatio": 0.3,
+      "hardClearRatio": 0.5,
+      "minPrunableToolChars": 50000,
+      "softTrim": {
+        "maxChars": 4000,
+        "headChars": 1500,
+        "tailChars": 1500
+      },
+      "hardClear": {
+        "enabled": true,
+        "placeholder": "[Old tool result content cleared]"
+      }
+    }
+  },
+  "requireLocalhostPublishedPorts": true,
+  "disableInsecureControlUiAuth": true,
+  "clearRedundantDangerousNodeDenyCommands": true,
+  "telegram": {
+    "enabled": true,
+    "dmPolicy": "allowlist",
+    "allowFrom": [
+      "8674459047"
+    ],
+    "execApprovals": {
+      "enabled": true,
+      "approvers": [
+        "8674459047"
+      ],
+      "target": "dm"
+    },
+    "groupPolicy": "allowlist",
+    "groups": [
+      {
+        "id": "-1003770800252",
+        "requireMention": false,
+        "allowFrom": [
+          "8674459047"
+        ]
+      }
+    ]
+  },
+  "voiceNotes": {
+    "enabled": true,
+    "mode": "local-whisper",
+    "gatewayImageTag": "openclaw:local-voice",
+    "whisperModel": "base",
+    "maxBytes": 20971520,
+    "echoTranscript": false,
+    "timeoutSeconds": 120
+  },
+  "tailscale": {
+    "enableServe": true,
+    "proxyTarget": "http://127.0.0.1:18789"
+  },
+  "ollama": {
+    "enabled": true,
+    "baseUrl": "http://host.docker.internal:11434",
+    "apiKey": "ollama-local",
+    "setAsDefaultModel": false,
+    "clearFallbacks": true,
+    "models": [
+      {
+        "id": "qwen3.5:35b-a3b",
+        "name": "Qwen 3.5 35B A3B",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 128000,
+        "maxTokens": 8192
+      },
+      {
+        "id": "qwen3-coder:30b",
+        "name": "Qwen3 Coder 30B",
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 90000,
+        "maxTokens": 8192
+      },
+      {
+        "id": "glm-4.7-flash:latest",
+        "name": "GLM 4.7 Flash",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 90000,
+        "maxTokens": 8192
+      },
+      {
+        "id": "deepseek-coder-v2:16b",
+        "name": "DeepSeek Coder V2 16B",
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 57344,
+        "maxTokens": 8192
+      }
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "dockerSocketSource": "/var/run/docker.sock.raw",
+    "dockerSocketTarget": "/var/run/docker.sock",
+    "dockerSocketGroup": "0",
+    "buildGatewayImageWithDockerCli": true,
+    "gatewayImageTag": "openclaw:local",
+    "sandboxBaseImage": "openclaw-sandbox:bookworm-slim",
+    "sandboxImage": "openclaw-sandbox-common:bookworm-slim",
+    "mode": "all",
+    "scope": "session",
+    "workspaceAccess": "rw",
+    "toolsFsWorkspaceOnly": true,
+    "applyPatchWorkspaceOnly": true
+  },
+  "multiAgent": {
+    "enabled": true,
+    "enableAgentToAgent": true,
+    "manageWorkspaceAgentsMd": false,
+    "sharedWorkspace": {
+      "enabled": true,
+      "path": "/home/node/.openclaw/workspace"
+    },
+    "strongAgent": {
+      "id": "main",
+      "name": "Strong Coder",
+      "default": true,
+      "modelRef": "openai-codex/gpt-5.4",
+      "candidateModelRefs": [
+        "openai-codex/gpt-5.4",
+        "anthropic/claude-sonnet-4-6",
+        "google/gemini-3.1-pro-preview"
+      ],
+      "allowLocalFallback": true
+    },
+    "researchAgent": {
+      "enabled": true,
+      "id": "research",
+      "name": "Gemini Research",
+      "modelRef": "google/gemini-3.1-pro-preview",
+      "candidateModelRefs": [
+        "google/gemini-3.1-pro-preview"
+      ]
+    },
+    "localChatAgent": {
+      "enabled": true,
+      "id": "chat-local",
+      "name": "Local Chat",
+      "sandboxMode": "off",
+      "modelRef": "ollama/glm-4.7-flash:latest",
+      "routeTrustedTelegramGroups": true,
+      "routeTrustedTelegramDms": true
+    },
+    "hostedTelegramAgent": {
+      "enabled": false,
+      "id": "chat-openai",
+      "name": "Telegram OpenAI",
+      "sandboxMode": "off",
+      "modelRef": "openai-codex/gpt-5.4",
+      "candidateModelRefs": [
+        "openai-codex/gpt-5.4"
+      ]
+    },
+    "localReviewAgent": {
+      "enabled": true,
+      "id": "review-local",
+      "name": "Local Reviewer",
+      "sandboxMode": "off",
+      "modelRef": "ollama/qwen3-coder:30b"
+    },
+    "localCoderAgent": {
+      "enabled": true,
+      "id": "coder-local",
+      "name": "Local Coder",
+      "sandboxMode": "off",
+      "modelRef": "ollama/qwen3-coder:30b"
+    },
+    "rolePolicies": {
+      "strongAgent": [
+        "# AGENTS.md - Strong Coder",
+        "",
+        "## Session Startup",
+        "- You are the primary orchestrator for this OpenClaw setup.",
+        "- Own the final answer, final code quality, and final safety judgment.",
+        "- Default to using your own tools for direct work unless a delegated agent is a better fit.",
+        "",
+        "## Delegation Rules",
+        "- Delegate web research, docs lookups, and broad comparison work to the `research` agent when it is available.",
+        "- Delegate diff review, plan checking, and verification passes to the `review-local` agent when a second opinion is helpful.",
+        "- Delegate local coding drafts, mechanical refactors, and low-risk code transforms to the `coder-local` agent when the task fits inside its local-model limits.",
+        "- Keep security-sensitive final decisions and high-consequence tool use with yourself unless the user explicitly wants otherwise.",
+        "",
+        "## Red Lines",
+        "- Do not assume another agent already ran unless you have its output.",
+        "- Do not delegate work that is urgent and blocks your immediate next step if doing it yourself is faster.",
+        "- Treat delegated output as input to review, not unquestionable truth."
+      ],
+      "researchAgent": [
+        "# AGENTS.md - Gemini Research",
+        "",
+        "## Session Startup",
+        "- You are the research specialist.",
+        "- Focus on documentation, comparison, and synthesis work that helps the main agent move faster.",
+        "",
+        "## Role",
+        "- Gather sources, summarize findings, compare options, and call out uncertainty.",
+        "- Prefer concise, decision-oriented outputs that another agent can act on quickly.",
+        "",
+        "## Red Lines",
+        "- Do not make risky system changes.",
+        "- Do not take ownership of the final user-facing decision unless explicitly asked."
+      ],
+      "localChatAgent": [
+        "# AGENTS.md - Local Chat",
+        "",
+        "## Session Startup",
+        "- You are the local casual-chat agent used for trusted Telegram conversations.",
+        "- Keep replies practical, clear, and lightweight.",
+        "- Your real writable workspace is `/home/node/.openclaw/workspace`.",
+        "- For any file or git work, prefer file tools in that workspace and set exec `workdir` to `/home/node/.openclaw/workspace` explicitly.",
+        "- Never create projects under `/app`; that path is part of the gateway container and is not durable user workspace storage.",
+        "",
+        "## Role",
+        "- Handle normal chat, summaries, short explanations, and light brainstorming.",
+        "- Escalate mentally complex coding, security, or high-stakes decisions back to the main agent.",
+        "",
+        "## Red Lines",
+        "- Do not pretend to be the strongest coding agent.",
+        "- Be honest when a stronger hosted agent would be better."
+      ],
+      "hostedTelegramAgent": [
+        "# AGENTS.md - Telegram OpenAI",
+        "",
+        "## Session Startup",
+        "- You are the hosted Telegram chat agent.",
+        "- Keep replies practical, conversational, and reliable for trusted Telegram use.",
+        "- Your real writable workspace is `/home/node/.openclaw/workspace`.",
+        "- For any file or git work, prefer file tools in that workspace and set exec `workdir` to `/home/node/.openclaw/workspace` explicitly.",
+        "- Never create projects under `/app`; that path is part of the gateway container and is not durable user workspace storage.",
+        "",
+        "## Role",
+        "- Handle Telegram conversations when the operator wants a hosted model instead of a local one.",
+        "- Escalate repo-wide coding or research orchestration back to the main agent when needed.",
+        "",
+        "## Red Lines",
+        "- Do not assume you are the default agent for every surface.",
+        "- Stay focused on the Telegram-facing workload."
+      ],
+      "localReviewAgent": [
+        "# AGENTS.md - Local Reviewer",
+        "",
+        "## Session Startup",
+        "- You are the local review and verification agent.",
+        "- Your job is to inspect proposed changes, plans, and outputs for problems or mismatches.",
+        "",
+        "## Role",
+        "- Review diffs, check plan execution, summarize risks, and spot likely regressions.",
+        "- Prefer concrete findings over broad narrative.",
+        "",
+        "## Red Lines",
+        "- Do not modify code directly unless your tool policy explicitly allows it.",
+        "- If you are unsure, say what needs stronger review."
+      ],
+      "localCoderAgent": [
+        "# AGENTS.md - Local Coder",
+        "",
+        "## Session Startup",
+        "- You are the local coding specialist.",
+        "- Focus on bounded implementation work that benefits from a local model.",
+        "",
+        "## Role",
+        "- Good fits: drafting code, mechanical refactors, targeted edits, test writing from obvious patterns, and code transformations with clear acceptance criteria.",
+        "- Return concise implementation summaries plus any risks or uncertainties.",
+        "",
+        "## Red Lines",
+        "- Do not take on high-stakes security decisions or ambiguous architectural changes without escalation.",
+        "- If the task feels too large or unclear, say so and hand it back to the main agent."
+      ]
+    },
+    "telegramRouting": {
+      "targetAgentId": "chat-local",
+      "routeTrustedTelegramGroups": true,
+      "routeTrustedTelegramDms": true
+    }
+  },
+  "verification": {
+    "healthUrl": "http://127.0.0.1:18789/healthz",
+    "reportPath": ".\\bootstrap-report.txt"
+  }
+}

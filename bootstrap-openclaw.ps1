@@ -1,0 +1,1544 @@
+[CmdletBinding()]
+param(
+    [string]$ConfigPath,
+    [switch]$SkipPrerequisites
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not $ConfigPath) {
+    $ConfigPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "openclaw-bootstrap.config.json"
+}
+
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+
+$usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
+$pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+if (-not $usingPowerShellCore -and $null -ne $pwshCommand) {
+    Write-Host "INFO: Running under Windows PowerShell. 'pwsh' is installed and preferred for future runs." -ForegroundColor Yellow
+    Write-Host "INFO: Next time, launch via run-bootstrap.cmd or run:" -ForegroundColor Yellow
+    Write-Host "      pwsh -ExecutionPolicy Bypass -File $($MyInvocation.MyCommand.Path)" -ForegroundColor Yellow
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Write-WarnLine {
+    param([string]$Message)
+    Write-Host "WARNING: $Message" -ForegroundColor Yellow
+}
+
+function Test-CommandExists {
+    param([string]$Name)
+    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Invoke-External {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [switch]$AllowFailure
+    )
+
+    Write-Host ">> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkGray
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $psi.WorkingDirectory = (Get-Location).Path
+    if ($Arguments.Count -gt 0) {
+        $psi.Arguments = [string]::Join(" ", ($Arguments | ForEach-Object {
+                    if ($_ -match '[\s"]') {
+                        '"' + ($_ -replace '\\', '\\' -replace '"', '\"') + '"'
+                    }
+                    else {
+                        $_
+                    }
+                }))
+    }
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    $null = $process.Start()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    $exitCode = $process.ExitCode
+    $text = (($stdout, $stderr) | Where-Object { $_ -and $_.Trim().Length -gt 0 }) -join [Environment]::NewLine
+
+    if ($text) {
+        Write-Host $text
+    }
+
+    if (-not $AllowFailure -and $exitCode -ne 0) {
+        throw "Command failed ($exitCode): $FilePath $($Arguments -join ' ')"
+    }
+
+    [pscustomobject]@{
+        ExitCode = $exitCode
+        Output   = $text
+    }
+}
+
+function Backup-File {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Test-Path $Path) {
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $backupRoot = Join-Path (Split-Path -Parent $PSCommandPath) "backups"
+        if (-not (Test-Path $backupRoot)) {
+            New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+        }
+        $backupName = "$(Split-Path -Leaf $Path).bootstrap-backup-$stamp"
+        Copy-Item -LiteralPath $Path -Destination (Join-Path $backupRoot $backupName) -Force
+    }
+}
+
+function New-RandomHexToken {
+    param([int]$Bytes = 32)
+
+    $buffer = New-Object byte[] $Bytes
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($buffer)
+    }
+    finally {
+        $rng.Dispose()
+    }
+
+    return -join ($buffer | ForEach-Object { $_.ToString("x2") })
+}
+
+function Convert-WindowsPathToDockerDesktop {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath -match '^(?<drive>[A-Za-z]):\\(?<rest>.*)$') {
+        $drive = $Matches.drive.ToLowerInvariant()
+        $rest = $Matches.rest -replace '\\', '/'
+        if ([string]::IsNullOrWhiteSpace($rest)) {
+            return "/$drive"
+        }
+        return "/$drive/$rest"
+    }
+
+    return ($fullPath -replace '\\', '/')
+}
+
+function Get-HostConfigDir {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "hostConfigDir" -and $Config.hostConfigDir) {
+        return [string]$Config.hostConfigDir
+    }
+
+    return (Join-Path $env:USERPROFILE ".openclaw")
+}
+
+function Get-HostWorkspaceDir {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "hostWorkspaceDir" -and $Config.hostWorkspaceDir) {
+        return [string]$Config.hostWorkspaceDir
+    }
+
+    return (Join-Path (Get-HostConfigDir -Config $Config) "workspace")
+}
+
+function Ensure-RepoPresent {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (Test-Path $Config.repoPath) {
+        if (-not (Test-Path (Join-Path $Config.repoPath ".git"))) {
+            throw "Repo path exists but is not a git checkout: $($Config.repoPath)"
+        }
+
+        Write-Host "OpenClaw repo already present at $($Config.repoPath)." -ForegroundColor Green
+        return
+    }
+
+    $parentDir = Split-Path -Parent $Config.repoPath
+    if (-not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    }
+
+    Write-Step "Cloning OpenClaw repository"
+    $cloneArgs = @("clone")
+    if ($Config.repoCloneDepth) {
+        $cloneArgs += @("--depth", [string]$Config.repoCloneDepth)
+    }
+    $cloneArgs += @([string]$Config.repoUrl, [string]$Config.repoPath)
+    $null = Invoke-External -FilePath "git" -Arguments $cloneArgs
+}
+
+function Ensure-LocalhostDockerPorts {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComposePath
+    )
+
+    $raw = Get-Content -Raw $ComposePath
+    $updated = $raw
+    $updated = [regex]::Replace(
+        $updated,
+        '(?m)^(\s*-\s*)"\$\{OPENCLAW_GATEWAY_PORT:-18789\}:18789"\s*$',
+        '${1}"127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"'
+    )
+    $updated = [regex]::Replace(
+        $updated,
+        '(?m)^(\s*-\s*)"\$\{OPENCLAW_BRIDGE_PORT:-18790\}:18790"\s*$',
+        '${1}"127.0.0.1:${OPENCLAW_BRIDGE_PORT:-18790}:18790"'
+    )
+
+    if ($updated -ne $raw) {
+        Backup-File -Path $ComposePath
+        Set-Content -Path $ComposePath -Value $updated -Encoding UTF8
+        Write-Host "Updated docker-compose port publishing to localhost-only." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Docker Compose already publishes OpenClaw on localhost only."
+    }
+}
+
+function Ensure-SandboxComposeSupport {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComposePath,
+        [Parameter(Mandatory = $true)]$SandboxConfig
+    )
+
+    if (-not $SandboxConfig.enabled) {
+        return
+    }
+
+    $raw = Get-Content -Raw $ComposePath
+    $updated = $raw
+    $socketMount = "      - $($SandboxConfig.dockerSocketSource):$($SandboxConfig.dockerSocketTarget)"
+    $managedSocketComment = "      # Bootstrap-managed Windows Docker Desktop sandbox support."
+
+    $updated = [regex]::Replace(
+        $updated,
+        "(?ms)^\s*## Uncomment the lines below to enable sandbox isolation\r?\n\s*## \(agents\.defaults\.sandbox\)\. Requires Docker CLI in the image\r?\n\s*## \(build with --build-arg OPENCLAW_INSTALL_DOCKER_CLI=1\) or use\r?\n\s*## scripts/docker/setup\.sh with OPENCLAW_SANDBOX=1 for automated setup\.\r?\n\s*## Set DOCKER_GID to the host''s docker group GID \(run: stat -c ''%g'' /var/run/docker\.sock\)\.\r?\n\s*# - /var/run/docker\.sock:/var/run/docker\.sock\r?\n",
+        "$managedSocketComment" + [Environment]::NewLine
+    )
+
+    if ($updated -notmatch [regex]::Escape($SandboxConfig.dockerSocketSource)) {
+        $updated = [regex]::Replace(
+            $updated,
+            '(?m)^(\s*-\s*\$\{OPENCLAW_WORKSPACE_DIR\}:/home/node/\.openclaw/workspace\s*)$',
+            '$1' + [Environment]::NewLine + $managedSocketComment + [Environment]::NewLine + $socketMount,
+            1
+        )
+    }
+
+    $desiredGroupAdd = '    group_add:' + [Environment]::NewLine + "      - `"$($SandboxConfig.dockerSocketGroup)`""
+    if ($updated -match '(?ms)^\s*# group_add:\s*\r?\n\s*#\s+- "\$\{DOCKER_GID:-999\}"\s*$') {
+        $updated = [regex]::Replace(
+            $updated,
+            '(?ms)^\s*# group_add:\s*\r?\n\s*#\s+- "\$\{DOCKER_GID:-999\}"\s*$',
+            $desiredGroupAdd,
+            1
+        )
+    }
+    elseif ($updated -match '(?ms)^\s*group_add:\s*\r?\n\s*-\s*".*?"\s*$') {
+        $updated = [regex]::Replace(
+            $updated,
+            '(?ms)^\s*group_add:\s*\r?\n\s*-\s*".*?"\s*$',
+            $desiredGroupAdd,
+            1
+        )
+    }
+    else {
+        $updated = [regex]::Replace(
+            $updated,
+            '(?m)^(\s*)ports:\s*$',
+            $desiredGroupAdd + [Environment]::NewLine + '$1ports:',
+            1
+        )
+    }
+
+    if ($updated -ne $raw) {
+        Backup-File -Path $ComposePath
+        Set-Content -Path $ComposePath -Value $updated -Encoding UTF8
+        Write-Host "Updated docker-compose for Docker-backed sandboxing." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Docker Compose already includes sandbox socket support."
+    }
+}
+
+function Ensure-GatewayImageSupportsSandbox {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (-not $Config.sandbox.enabled -or -not $Config.sandbox.buildGatewayImageWithDockerCli) {
+        return
+    }
+
+    $sourceVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
+    $imageVersion = Get-OpenClawImageVersion -ImageTag ([string]$Config.sandbox.gatewayImageTag)
+
+    $dockerProbe = Invoke-External -FilePath "docker" -Arguments @(
+        "run", "--rm", "--entrypoint", "sh", $Config.sandbox.gatewayImageTag,
+        "-lc", "docker --version"
+    ) -AllowFailure
+
+    $needsRebuild = $dockerProbe.ExitCode -ne 0
+    if (-not $needsRebuild -and $sourceVersion -and $imageVersion -and $sourceVersion -ne $imageVersion) {
+        Write-WarnLine "Gateway image $($Config.sandbox.gatewayImageTag) is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
+        $needsRebuild = $true
+    }
+
+    if (-not $needsRebuild) {
+        Write-Host "Gateway image already includes Docker CLI support and matches repo version." -ForegroundColor Green
+        return
+    }
+
+    Write-Step "Building gateway image with Docker CLI support"
+    Push-Location $Config.repoPath
+    try {
+        $null = Invoke-External -FilePath "docker" -Arguments @(
+            "build", "-t", $Config.sandbox.gatewayImageTag,
+            "--build-arg", "OPENCLAW_INSTALL_DOCKER_CLI=1",
+            "-f", "Dockerfile", "."
+        )
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Set-EnvVarValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    $raw = if (Test-Path $Path) { Get-Content -Raw $Path } else { "" }
+    $updated = $raw
+    $pattern = "(?m)^$([regex]::Escape($Name))=.*$"
+    $replacement = "${Name}=${Value}"
+
+    if ($updated -match $pattern) {
+        $updated = [regex]::Replace($updated, $pattern, $replacement, 1)
+    }
+    else {
+        $trimmed = $updated.TrimEnd("`r", "`n")
+        if ($trimmed.Length -gt 0) {
+            $updated = $trimmed + [Environment]::NewLine + $replacement + [Environment]::NewLine
+        }
+        else {
+            $updated = $replacement + [Environment]::NewLine
+        }
+    }
+
+    if ($updated -ne $raw) {
+        Backup-File -Path $Path
+        Set-Content -Path $Path -Value $updated -Encoding UTF8
+        Write-Host "Updated $Name in $(Split-Path -Leaf $Path)." -ForegroundColor Green
+    }
+}
+
+function Ensure-LocalWhisperGatewayImage {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($null -eq $Config.voiceNotes -or -not $Config.voiceNotes.enabled) {
+        return
+    }
+
+    if ($Config.voiceNotes.mode -ne "local-whisper") {
+        return
+    }
+
+    $targetImage = if ($Config.voiceNotes.gatewayImageTag) {
+        [string]$Config.voiceNotes.gatewayImageTag
+    }
+    else {
+        "openclaw:local-voice"
+    }
+
+    $sourceVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
+    $imageVersion = Get-OpenClawImageVersion -ImageTag $targetImage
+
+    $probe = Invoke-External -FilePath "docker" -Arguments @(
+        "run", "--rm", "--entrypoint", "sh", $targetImage,
+        "-lc", "whisper --help >/dev/null 2>&1 && ffmpeg -version >/dev/null 2>&1"
+    ) -AllowFailure
+
+    $needsRebuild = $probe.ExitCode -ne 0
+    if (-not $needsRebuild -and $sourceVersion -and $imageVersion -and $sourceVersion -ne $imageVersion) {
+        Write-WarnLine "Gateway image $targetImage is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
+        $needsRebuild = $true
+    }
+
+    if ($needsRebuild) {
+        $dockerfilePath = Join-Path (Split-Path -Parent $PSCommandPath) "Dockerfile.gateway-local-whisper"
+        if (-not (Test-Path $dockerfilePath)) {
+            throw "Local whisper Dockerfile not found: $dockerfilePath"
+        }
+
+        Write-Step "Building gateway image with local whisper support"
+        $null = Invoke-External -FilePath "docker" -Arguments @(
+            "build",
+            "-t", $targetImage,
+            "--build-arg", "BASE_IMAGE=$($Config.sandbox.gatewayImageTag)",
+            "-f", $dockerfilePath,
+            (Split-Path -Parent $dockerfilePath)
+        )
+    }
+    else {
+        Write-Host "Gateway image already includes local whisper support and matches repo version." -ForegroundColor Green
+    }
+
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_IMAGE" -Value $targetImage
+}
+
+function Get-OpenClawRepoVersion {
+    param([Parameter(Mandatory = $true)][string]$RepoPath)
+
+    $packageJsonPath = Join-Path $RepoPath "package.json"
+    if (-not (Test-Path $packageJsonPath)) {
+        return $null
+    }
+
+    try {
+        $pkg = Get-Content -Raw $packageJsonPath | ConvertFrom-Json
+        return [string]$pkg.version
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-OpenClawImageVersion {
+    param([Parameter(Mandatory = $true)][string]$ImageTag)
+
+    $probe = Invoke-External -FilePath "docker" -Arguments @(
+        "run", "--rm", "--entrypoint", "sh", $ImageTag,
+        "-lc", "sed -n '1,20p' /app/package.json"
+    ) -AllowFailure
+
+    if ($probe.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($probe.Output)) {
+        return $null
+    }
+
+    $match = [regex]::Match($probe.Output, '"version"\s*:\s*"([^"]+)"')
+    if ($match.Success) {
+        return $match.Groups[1].Value
+    }
+
+    return $null
+}
+
+function Ensure-SandboxImages {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (-not $Config.sandbox.enabled) {
+        return
+    }
+
+    $baseProbe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", $Config.sandbox.sandboxBaseImage) -AllowFailure
+    if ($baseProbe.ExitCode -ne 0) {
+        Write-Step "Building base sandbox image"
+        Push-Location $Config.repoPath
+        try {
+            $null = Invoke-External -FilePath "docker" -Arguments @(
+                "build", "-t", $Config.sandbox.sandboxBaseImage,
+                "-f", "Dockerfile.sandbox", "."
+            )
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    else {
+        Write-Host "Base sandbox image already exists."
+    }
+
+    $commonProbe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", $Config.sandbox.sandboxImage) -AllowFailure
+    if ($commonProbe.ExitCode -ne 0) {
+        Write-Step "Building common sandbox image"
+        Push-Location $Config.repoPath
+        try {
+            $null = Invoke-External -FilePath "docker" -Arguments @(
+                "build", "-t", $Config.sandbox.sandboxImage,
+                "-f", "Dockerfile.sandbox-common",
+                "--build-arg", "BASE_IMAGE=$($Config.sandbox.sandboxBaseImage)",
+                "."
+            )
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    else {
+        Write-Host "Common sandbox image already exists."
+    }
+}
+
+function Wait-ForGateway {
+    param(
+        [Parameter(Mandatory = $true)][string]$HealthUrl,
+        [int]$MaxAttempts = 20
+    )
+
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
+        $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $HealthUrl) -AllowFailure
+        if ($result.ExitCode -eq 0 -and $result.Output -match '"ok"\s*:\s*true') {
+            Write-Host "Gateway is healthy." -ForegroundColor Green
+            return
+        }
+        Start-Sleep -Seconds 3
+    }
+
+    throw "Gateway never became healthy at $HealthUrl"
+}
+
+function Ensure-TailscaleServe {
+    param(
+        [Parameter(Mandatory = $true)]$Config
+    )
+
+    if (-not $Config.tailscale.enableServe) {
+        Write-Host "Tailscale Serve bootstrap disabled in config."
+        return
+    }
+
+    $serveStatus = Invoke-External -FilePath "tailscale" -Arguments @("serve", "status") -AllowFailure
+    if ($serveStatus.ExitCode -eq 0 -and $serveStatus.Output -match [regex]::Escape($Config.tailscale.proxyTarget)) {
+        Write-Host "Tailscale Serve already points at $($Config.tailscale.proxyTarget)." -ForegroundColor Green
+        return
+    }
+
+    $serveArgs = @("serve", "--bg", $Config.tailscale.proxyTarget)
+    $apply = Invoke-External -FilePath "tailscale" -Arguments $serveArgs -AllowFailure
+    if ($apply.ExitCode -eq 0) {
+        Write-Host "Tailscale Serve configured." -ForegroundColor Green
+        return
+    }
+
+    $statusJson = Invoke-External -FilePath "tailscale" -Arguments @("status", "--json")
+    $status = $statusJson.Output | ConvertFrom-Json
+    $nodeId = $status.Self.ID
+    if (-not $nodeId) {
+        throw "Could not determine Tailscale node id for Serve enablement."
+    }
+
+    $enableUrl = "https://login.tailscale.com/f/serve?node=$nodeId"
+    Write-WarnLine "Tailscale Serve could not be enabled automatically."
+    Write-Host "Open this page, enable HTTPS certificates and Serve, then return here:" -ForegroundColor Yellow
+    Write-Host $enableUrl -ForegroundColor Yellow
+    Start-Process $enableUrl | Out-Null
+    Read-Host "Press Enter after you finish the Tailscale page"
+
+    $retry = Invoke-External -FilePath "tailscale" -Arguments $serveArgs -AllowFailure
+    if ($retry.ExitCode -ne 0) {
+        throw "Tailscale Serve still failed after manual enablement."
+    }
+
+    Write-Host "Tailscale Serve configured after manual approval." -ForegroundColor Green
+}
+
+function Invoke-InteractiveDockerSetup {
+    param(
+        [Parameter(Mandatory = $true)]$Config
+    )
+
+    if (-not (Test-CommandExists "bash")) {
+        throw "OpenClaw Docker setup has not run yet and 'bash' is not available. Install Git Bash/WSL or run the repo setup manually first."
+    }
+
+    $setupScriptPath = Join-Path $Config.repoPath $Config.dockerSetupScriptRelativePath
+    if (-not (Test-Path $setupScriptPath)) {
+        throw "Docker setup script not found: $setupScriptPath"
+    }
+
+    $answer = Read-Host "OpenClaw Docker onboarding has not run yet. Run bash scripts/docker/setup.sh now? (y/n)"
+    if ($answer -notin @("y", "Y", "yes", "YES")) {
+        throw "Bootstrap needs the repo Docker setup completed first."
+    }
+
+    Push-Location $Config.repoPath
+    try {
+        Invoke-External -FilePath "bash" -Arguments @($setupScriptPath)
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Ensure-EnvFile {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (Test-Path $Config.envFilePath) {
+        Write-Host ".env already exists. Skipping env seeding."
+        return
+    }
+
+    $envDir = Split-Path -Parent $Config.envFilePath
+    if (-not (Test-Path $envDir)) {
+        New-Item -ItemType Directory -Force -Path $envDir | Out-Null
+    }
+
+    if ($Config.PSObject.Properties.Name -contains "envTemplatePath" -and $Config.envTemplatePath -and (Test-Path $Config.envTemplatePath)) {
+        Copy-Item -LiteralPath $Config.envTemplatePath -Destination $Config.envFilePath -Force
+        Write-Host "Seeded .env from setup template." -ForegroundColor Green
+
+        $hostConfigDir = Get-HostConfigDir -Config $Config
+        $hostWorkspaceDir = Get-HostWorkspaceDir -Config $Config
+        if (-not (Test-Path $hostConfigDir)) {
+            New-Item -ItemType Directory -Force -Path $hostConfigDir | Out-Null
+        }
+        if (-not (Test-Path $hostWorkspaceDir)) {
+            New-Item -ItemType Directory -Force -Path $hostWorkspaceDir | Out-Null
+        }
+
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_CONFIG_DIR" -Value (Convert-WindowsPathToDockerDesktop -Path $hostConfigDir)
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_WORKSPACE_DIR" -Value (Convert-WindowsPathToDockerDesktop -Path $hostWorkspaceDir)
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_PORT" -Value ([string]$Config.gatewayPort)
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_BRIDGE_PORT" -Value ([string]$Config.bridgePort)
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_BIND" -Value ([string]$Config.gatewayBind)
+
+        $rawEnv = Get-Content -Raw $Config.envFilePath
+        if ($rawEnv -notmatch '(?m)^OPENCLAW_GATEWAY_TOKEN=.+$') {
+            Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_TOKEN" -Value (New-RandomHexToken)
+        }
+
+        return
+    }
+
+    Write-WarnLine "No env template found at $($Config.envTemplatePath). Falling back to interactive setup."
+    Invoke-InteractiveDockerSetup -Config $Config
+}
+
+function Set-OpenClawConfigJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Value,
+        [switch]$AsArray
+    )
+
+    if (($AsArray -or $Value -is [System.Array]) -and @($Value).Count -eq 0) {
+        $json = "[]"
+    }
+    else {
+        if ($AsArray -or $Value -is [System.Array]) {
+            $json = @($Value) | ConvertTo-Json -AsArray -Depth 50 -Compress
+        }
+        else {
+            $json = $Value | ConvertTo-Json -Depth 50 -Compress
+        }
+    }
+
+    $null = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", "openclaw-openclaw-gateway-1",
+        "node", "dist/index.js",
+        "config", "set", $Path, $json, "--strict-json"
+    )
+}
+
+function Set-OpenClawConfigValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    $null = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", "openclaw-openclaw-gateway-1",
+        "node", "dist/index.js",
+        "config", "set", $Path, $Value
+    )
+}
+
+function Add-UniqueString {
+    param(
+        [string[]]$List = @(),
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return @($List)
+    }
+
+    if ($Value -notin @($List)) {
+        return @(@($List) + $Value)
+    }
+
+    return @($List)
+}
+
+function Ensure-ControlUiAllowedOrigins {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $origins = @()
+    $origins = Add-UniqueString -List $origins -Value "http://localhost:$($Config.gatewayPort)"
+    $origins = Add-UniqueString -List $origins -Value "http://127.0.0.1:$($Config.gatewayPort)"
+
+    $serveStatus = Invoke-External -FilePath "tailscale" -Arguments @("serve", "status") -AllowFailure
+    if ($serveStatus.ExitCode -eq 0) {
+        $firstLine = ($serveStatus.Output -split "`r?`n" | Where-Object { $_.Trim().Length -gt 0 } | Select-Object -First 1)
+        if ($firstLine -match '^(https://\S+?)(?:\s+\(|$)') {
+            $origins = Add-UniqueString -List $origins -Value $Matches[1].TrimEnd("/")
+        }
+    }
+
+    Set-OpenClawConfigJson -Path "gateway.controlUi.allowedOrigins" -Value @($origins) -AsArray
+    Write-Host "Configured Control UI allowed origins: $(@($origins) -join ', ')" -ForegroundColor Green
+}
+
+function Get-ManagedModelRefs {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$ResolvedStrongModelRef,
+        [string]$ResolvedResearchModelRef,
+        [string]$ResolvedLocalChatModelRef,
+        [string]$ResolvedHostedTelegramModelRef,
+        [string]$ResolvedLocalReviewModelRef,
+        [string]$ResolvedLocalCoderModelRef,
+        [string[]]$ExtraRefs = @()
+    )
+
+    $refs = @()
+
+    if ($Config.multiAgent -and $Config.multiAgent.enabled) {
+        if ($ResolvedStrongModelRef) {
+            $refs = Add-UniqueString -List $refs -Value $ResolvedStrongModelRef
+        }
+        elseif ($Config.multiAgent.strongAgent -and $Config.multiAgent.strongAgent.modelRef) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.strongAgent.modelRef)
+        }
+        foreach ($candidateRef in @($Config.multiAgent.strongAgent.candidateModelRefs)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
+        }
+        if ($ResolvedLocalChatModelRef) {
+            $refs = Add-UniqueString -List $refs -Value $ResolvedLocalChatModelRef
+        }
+        elseif ($Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled -and $Config.multiAgent.localChatAgent.modelRef) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localChatAgent.modelRef)
+        }
+        if ($Config.multiAgent.hostedTelegramAgent -and $Config.multiAgent.hostedTelegramAgent.enabled) {
+            if ($ResolvedHostedTelegramModelRef) {
+                $refs = Add-UniqueString -List $refs -Value $ResolvedHostedTelegramModelRef
+            }
+            elseif ($Config.multiAgent.hostedTelegramAgent.modelRef) {
+                $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.hostedTelegramAgent.modelRef)
+            }
+            foreach ($candidateRef in @($Config.multiAgent.hostedTelegramAgent.candidateModelRefs)) {
+                $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
+            }
+        }
+        if ($Config.multiAgent.researchAgent -and $Config.multiAgent.researchAgent.enabled) {
+            if ($ResolvedResearchModelRef) {
+                $refs = Add-UniqueString -List $refs -Value $ResolvedResearchModelRef
+            }
+            elseif ($Config.multiAgent.researchAgent.modelRef) {
+                $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.researchAgent.modelRef)
+            }
+            foreach ($candidateRef in @($Config.multiAgent.researchAgent.candidateModelRefs)) {
+                $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
+            }
+        }
+        if ($ResolvedLocalReviewModelRef) {
+            $refs = Add-UniqueString -List $refs -Value $ResolvedLocalReviewModelRef
+        }
+        elseif ($Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled -and $Config.multiAgent.localReviewAgent.modelRef) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localReviewAgent.modelRef)
+        }
+        if ($ResolvedLocalCoderModelRef) {
+            $refs = Add-UniqueString -List $refs -Value $ResolvedLocalCoderModelRef
+        }
+        elseif ($Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled -and $Config.multiAgent.localCoderAgent.modelRef) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localCoderAgent.modelRef)
+        }
+    }
+
+    if ($Config.ollama -and $Config.ollama.enabled) {
+        foreach ($model in @($Config.ollama.models)) {
+            if ($model.id) {
+                $refs = Add-UniqueString -List $refs -Value ("ollama/" + [string]$model.id)
+            }
+        }
+    }
+
+    foreach ($ref in @($ExtraRefs)) {
+        $refs = Add-UniqueString -List $refs -Value ([string]$ref)
+    }
+
+    return @($refs)
+}
+
+function Get-OllamaTags {
+    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", "http://127.0.0.1:11434/api/tags") -AllowFailure
+    if ($result.ExitCode -ne 0 -or -not $result.Output -or $result.Output -notmatch '"models"') {
+        return @()
+    }
+
+    try {
+        $parsed = $result.Output | ConvertFrom-Json -Depth 20
+        return @($parsed.models)
+    }
+    catch {
+        return @()
+    }
+}
+
+function Convert-OllamaTagToProviderModel {
+    param([Parameter(Mandatory = $true)]$Tag)
+
+    $inputKinds = @("text")
+    $tagText = ([string]::Join(" ", @(
+                [string]$Tag.model,
+                [string]$Tag.name,
+                [string]$Tag.details.family,
+                [string]::Join(" ", @($Tag.details.families))
+            ))).ToLowerInvariant()
+    if ($tagText -match 'vision|vl|llava|minicpm-v|qwen2\.5-vl|qwen-vl|gemma3') {
+        $inputKinds = @("text", "image")
+    }
+
+    return [ordered]@{
+        id    = [string]$Tag.model
+        name  = if ($Tag.name) { [string]$Tag.name } else { [string]$Tag.model }
+        input = $inputKinds
+        cost  = [ordered]@{
+            input      = 0
+            output     = 0
+            cacheRead  = 0
+            cacheWrite = 0
+        }
+    }
+}
+
+function Resolve-OllamaModelRef {
+    param(
+        [string]$DesiredRef,
+        [string[]]$AvailableRefs = @(),
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$Purpose
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DesiredRef) -or -not $DesiredRef.StartsWith("ollama/")) {
+        return $DesiredRef
+    }
+
+    if ($DesiredRef -in @($AvailableRefs)) {
+        return $DesiredRef
+    }
+
+    foreach ($model in @($Config.ollama.models)) {
+        if ($model.id) {
+            $candidate = "ollama/" + [string]$model.id
+            if ($candidate -in @($AvailableRefs)) {
+                Write-WarnLine "Preferred $Purpose model $DesiredRef is unavailable. Falling back to $candidate."
+                return $candidate
+            }
+        }
+    }
+
+    if (@($AvailableRefs).Count -gt 0) {
+        Write-WarnLine "Preferred $Purpose model $DesiredRef is unavailable. Falling back to $($AvailableRefs[0])."
+        return [string]$AvailableRefs[0]
+    }
+
+    Write-WarnLine "Preferred $Purpose model $DesiredRef is unavailable and no local Ollama fallback is present."
+    return $DesiredRef
+}
+
+function Ensure-OllamaState {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $state = [ordered]@{
+        Reachable                 = $false
+        Tags                      = @()
+        ProviderModels            = @()
+        AvailableRefs             = @()
+        ResolvedLocalChatModelRef = $null
+        ResolvedHostedTelegramModelRef = $null
+        ResolvedLocalReviewModelRef = $null
+        ResolvedLocalCoderModelRef = $null
+    }
+
+    $tags = @(Get-OllamaTags)
+    if ($tags.Count -eq 0) {
+        return [pscustomobject]$state
+    }
+
+    $state.Reachable = $true
+    $availableIds = @($tags | ForEach-Object { [string]$_.model })
+    $ollamaCommand = Get-Command "ollama" -ErrorAction SilentlyContinue
+
+    foreach ($configuredModel in @($Config.ollama.models)) {
+        if (-not $configuredModel.id) {
+            continue
+        }
+
+        $modelId = [string]$configuredModel.id
+        if ($modelId -in $availableIds) {
+            continue
+        }
+
+        if ($null -eq $ollamaCommand) {
+            Write-WarnLine "Ollama model '$modelId' is missing and the 'ollama' CLI is not available to pull it automatically."
+            continue
+        }
+
+        Write-Step "Pulling missing Ollama model $modelId"
+        $pull = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("pull", $modelId) -AllowFailure
+        if ($pull.ExitCode -ne 0) {
+            Write-WarnLine "Failed to pull Ollama model '$modelId'. Bootstrap will use another available local model if possible."
+        }
+    }
+
+    $tags = @(Get-OllamaTags)
+    if ($tags.Count -eq 0) {
+        return [pscustomobject]$state
+    }
+
+    $state.Reachable = $true
+    $state.Tags = $tags
+
+    $availableRefs = @()
+    foreach ($tag in $tags) {
+        if ($tag.model) {
+            $availableRefs = Add-UniqueString -List $availableRefs -Value ("ollama/" + [string]$tag.model)
+        }
+    }
+    $state.AvailableRefs = @($availableRefs)
+
+    $providerModels = @()
+    $configuredIds = @()
+    foreach ($configuredModel in @($Config.ollama.models)) {
+        if (-not $configuredModel.id) {
+            continue
+        }
+
+        $configuredIds = Add-UniqueString -List $configuredIds -Value ([string]$configuredModel.id)
+        $candidateRef = "ollama/" + [string]$configuredModel.id
+        if ($candidateRef -in $availableRefs) {
+            $providerModels += $configuredModel
+        }
+    }
+
+    foreach ($tag in $tags) {
+        $tagId = [string]$tag.model
+        if ($tagId -notin $configuredIds) {
+            $providerModels += (Convert-OllamaTagToProviderModel -Tag $tag)
+        }
+    }
+
+    $state.ProviderModels = @($providerModels)
+    if ($Config.multiAgent -and $Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled) {
+        $state.ResolvedLocalChatModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localChatAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "chat-local"
+    }
+    if ($Config.multiAgent -and $Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled) {
+        $state.ResolvedLocalReviewModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localReviewAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "review-local"
+    }
+    if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled) {
+        $state.ResolvedLocalCoderModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localCoderAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "coder-local"
+    }
+
+    return [pscustomobject]$state
+}
+
+function Get-AuthReadyHostedProviders {
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", "openclaw-openclaw-gateway-1",
+        "node", "dist/index.js",
+        "models", "status", "--json"
+    ) -AllowFailure
+
+    $providers = @()
+    if ($result.ExitCode -eq 0 -and $result.Output) {
+        try {
+            $parsed = $result.Output | ConvertFrom-Json -Depth 50
+            foreach ($providerEntry in @($parsed.auth.providers)) {
+                if ($providerEntry.provider -and $providerEntry.provider -ne "ollama" -and $providerEntry.effective.kind -and $providerEntry.effective.kind -ne "missing") {
+                    $providers = Add-UniqueString -List $providers -Value ([string]$providerEntry.provider)
+                }
+            }
+        }
+        catch {
+        }
+    }
+
+    return @($providers)
+}
+
+function Get-PreferredLocalFallbackRef {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string[]]$AvailableOllamaRefs = @()
+    )
+
+    foreach ($model in @($Config.ollama.models)) {
+        if ($model.id) {
+            $candidate = "ollama/" + [string]$model.id
+            if ($candidate -in @($AvailableOllamaRefs)) {
+                return $candidate
+            }
+        }
+    }
+
+    if (@($AvailableOllamaRefs).Count -gt 0) {
+        return [string]$AvailableOllamaRefs[0]
+    }
+
+    return $null
+}
+
+function Resolve-StrongModelRef {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string[]]$AvailableOllamaRefs = @()
+    )
+
+    $candidateRefs = @()
+    foreach ($candidate in @($Config.multiAgent.strongAgent.candidateModelRefs)) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidate)
+    }
+    if ($Config.multiAgent.strongAgent.modelRef) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$Config.multiAgent.strongAgent.modelRef)
+    }
+
+    $authReadyProviders = Get-AuthReadyHostedProviders
+    foreach ($candidateRef in @($candidateRefs)) {
+        if ($candidateRef -like "ollama/*") {
+            if ($candidateRef -in @($AvailableOllamaRefs)) {
+                return $candidateRef
+            }
+            continue
+        }
+
+        $providerId = ($candidateRef -split "/", 2)[0]
+        if ($providerId -in @($authReadyProviders)) {
+            return $candidateRef
+        }
+    }
+
+    if ($Config.multiAgent.strongAgent.allowLocalFallback) {
+        $localFallbackRef = Get-PreferredLocalFallbackRef -Config $Config -AvailableOllamaRefs $AvailableOllamaRefs
+        if ($localFallbackRef) {
+            Write-WarnLine "No authenticated hosted strong-model candidate is available. Falling back to local model $localFallbackRef."
+            return $localFallbackRef
+        }
+    }
+
+    if ($Config.multiAgent.strongAgent.modelRef) {
+        return [string]$Config.multiAgent.strongAgent.modelRef
+    }
+
+    return $null
+}
+
+function Resolve-HostedModelRef {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string[]]$CandidateRefs,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [switch]$FallbackToFirstCandidate
+    )
+
+    $candidateList = @()
+    foreach ($candidateRef in @($CandidateRefs)) {
+        $candidateList = Add-UniqueString -List $candidateList -Value ([string]$candidateRef)
+    }
+
+    if (@($candidateList).Count -eq 0) {
+        return $null
+    }
+
+    $authReadyProviders = Get-AuthReadyHostedProviders
+    foreach ($candidateRef in @($candidateList)) {
+        if ($candidateRef -like "ollama/*") {
+            continue
+        }
+
+        $providerId = ($candidateRef -split "/", 2)[0]
+        if ($providerId -in @($authReadyProviders)) {
+            return $candidateRef
+        }
+    }
+
+    if ($FallbackToFirstCandidate) {
+        $fallbackCandidate = [string](@($candidateList)[0])
+        Write-WarnLine "No authenticated hosted provider is ready for $Purpose. Keeping preferred model ref $fallbackCandidate until auth is completed."
+        return $fallbackCandidate
+    }
+
+    return $null
+}
+
+function Get-OpenClawConfigJsonValue {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", "openclaw-openclaw-gateway-1",
+        "node", "dist/index.js",
+        "config", "get", $Path
+    ) -AllowFailure
+
+    if ($result.ExitCode -ne 0) {
+        return $null
+    }
+
+    $raw = $result.Output.Trim()
+    if (-not $raw) {
+        return $null
+    }
+
+    try {
+        return $raw | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function Unset-OpenClawConfigPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $null = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", "openclaw-openclaw-gateway-1",
+        "node", "dist/index.js",
+        "config", "unset", $Path
+    )
+}
+
+function Clear-RedundantNodeDenyCommands {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (-not $Config.clearRedundantDangerousNodeDenyCommands) {
+        return
+    }
+
+    $nodesConfig = Get-OpenClawConfigJsonValue -Path "gateway.nodes"
+    if ($null -eq $nodesConfig) {
+        return
+    }
+
+    $allowCommands = @($nodesConfig.allowCommands | Where-Object {
+            $null -ne $_ -and $_.ToString().Trim().Length -gt 0
+        })
+    if ($allowCommands.Count -gt 0) {
+        Write-Host "Keeping gateway.nodes.denyCommands because custom allowCommands are configured."
+        return
+    }
+
+    $denyCommands = @($nodesConfig.denyCommands | Where-Object {
+            $null -ne $_ -and $_.ToString().Trim().Length -gt 0
+        })
+    if ($denyCommands.Count -eq 0) {
+        return
+    }
+
+    $dangerousCommands = @(
+        "camera.snap",
+        "camera.clip",
+        "screen.record",
+        "contacts.add",
+        "calendar.add",
+        "reminders.add",
+        "sms.send",
+        "sms.search"
+    )
+
+    $customEntries = @($denyCommands | Where-Object { $_ -notin $dangerousCommands })
+    if ($customEntries.Count -gt 0) {
+        Write-WarnLine "Keeping gateway.nodes.denyCommands because it contains custom entries: $($customEntries -join ', ')"
+        return
+    }
+
+    Unset-OpenClawConfigPath -Path "gateway.nodes.denyCommands"
+    Write-Host "Removed redundant gateway.nodes.denyCommands entries." -ForegroundColor Green
+}
+
+function Configure-TelegramSurface {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($null -eq $Config.telegram -or -not $Config.telegram.enabled) {
+        return
+    }
+
+    $telegramConfig = Get-OpenClawConfigJsonValue -Path "channels.telegram"
+    if ($null -eq $telegramConfig) {
+        return
+    }
+
+    if (-not $telegramConfig.enabled) {
+        return
+    }
+
+    if ($Config.telegram.dmPolicy) {
+        Set-OpenClawConfigValue -Path "channels.telegram.dmPolicy" -Value $Config.telegram.dmPolicy
+    }
+
+    if ($null -ne $Config.telegram.allowFrom) {
+        Set-OpenClawConfigJson -Path "channels.telegram.allowFrom" -Value @($Config.telegram.allowFrom) -AsArray
+    }
+
+    if ($Config.telegram.groupPolicy) {
+        Set-OpenClawConfigValue -Path "channels.telegram.groupPolicy" -Value $Config.telegram.groupPolicy
+    }
+
+    if ($Config.telegram.execApprovals) {
+        $execApprovals = [ordered]@{}
+        if ($null -ne $Config.telegram.execApprovals.enabled) {
+            $execApprovals.enabled = [bool]$Config.telegram.execApprovals.enabled
+        }
+        if ($null -ne $Config.telegram.execApprovals.approvers) {
+            $execApprovals.approvers = @($Config.telegram.execApprovals.approvers | ForEach-Object { [string]$_ })
+        }
+        if ($Config.telegram.execApprovals.target) {
+            $execApprovals.target = [string]$Config.telegram.execApprovals.target
+        }
+        if ($null -ne $Config.telegram.execApprovals.agentFilter) {
+            $execApprovals.agentFilter = @($Config.telegram.execApprovals.agentFilter | ForEach-Object { [string]$_ })
+        }
+        if ($null -ne $Config.telegram.execApprovals.sessionFilter) {
+            $execApprovals.sessionFilter = @($Config.telegram.execApprovals.sessionFilter | ForEach-Object { [string]$_ })
+        }
+        Set-OpenClawConfigJson -Path "channels.telegram.execApprovals" -Value $execApprovals
+    }
+
+    $configuredGroups = @($Config.telegram.groups)
+    if ($configuredGroups.Count -gt 0) {
+        $groupsMap = [ordered]@{}
+        foreach ($group in $configuredGroups) {
+            if (-not $group.id) {
+                continue
+            }
+
+            $groupEntry = [ordered]@{}
+            if ($null -ne $group.requireMention) {
+                $groupEntry.requireMention = [bool]$group.requireMention
+            }
+            if ($null -ne $group.allowFrom) {
+                $groupEntry.allowFrom = @($group.allowFrom)
+            }
+            $groupsMap[$group.id] = $groupEntry
+        }
+
+        if ($groupsMap.Count -gt 0) {
+            Set-OpenClawConfigJson -Path "channels.telegram.groups" -Value $groupsMap
+        }
+    }
+    elseif ($telegramConfig.groups) {
+        Unset-OpenClawConfigPath -Path "channels.telegram.groups"
+    }
+
+    Write-Host "Applied trusted Telegram allowlist configuration." -ForegroundColor Green
+}
+
+function Configure-VoiceNotes {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($null -eq $Config.voiceNotes) {
+        return
+    }
+
+    if (-not $Config.voiceNotes.enabled) {
+        Set-OpenClawConfigValue -Path "tools.media.audio.enabled" -Value "false"
+        Write-Host "Voice-note transcription disabled by bootstrap config."
+        return
+    }
+
+    $audioConfig = [ordered]@{
+        enabled = $true
+    }
+
+    if ($null -ne $Config.voiceNotes.maxBytes) {
+        $audioConfig.maxBytes = [int]$Config.voiceNotes.maxBytes
+    }
+
+    if ($null -ne $Config.voiceNotes.echoTranscript) {
+        $audioConfig.echoTranscript = [bool]$Config.voiceNotes.echoTranscript
+    }
+
+    if ($Config.voiceNotes.language) {
+        $audioConfig.language = $Config.voiceNotes.language
+    }
+
+    $modelEntries = @()
+    if ($Config.voiceNotes.mode -eq "local-whisper") {
+        $whisperModel = if ($Config.voiceNotes.whisperModel) {
+            [string]$Config.voiceNotes.whisperModel
+        }
+        else {
+            "base"
+        }
+
+        $entry = [ordered]@{
+            type    = "cli"
+            command = "whisper"
+            args    = @("--model", $whisperModel, "{{MediaPath}}")
+        }
+        if ($null -ne $Config.voiceNotes.timeoutSeconds) {
+            $entry.timeoutSeconds = [int]$Config.voiceNotes.timeoutSeconds
+        }
+        $modelEntries += $entry
+    }
+    elseif ($Config.voiceNotes.provider -and $Config.voiceNotes.model) {
+        $modelEntries += [ordered]@{
+            provider = $Config.voiceNotes.provider
+            model    = $Config.voiceNotes.model
+        }
+    }
+
+    if ($modelEntries.Count -gt 0) {
+        $audioConfig.models = $modelEntries
+    }
+
+    Set-OpenClawConfigJson -Path "tools.media.audio" -Value $audioConfig
+    Write-Host "Configured voice-note transcription." -ForegroundColor Green
+}
+
+function Configure-ToolPolicy {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($null -eq $Config.toolPolicy) {
+        return
+    }
+
+    if ($Config.toolPolicy.globalProfile) {
+        Set-OpenClawConfigValue -Path "tools.profile" -Value ([string]$Config.toolPolicy.globalProfile)
+    }
+
+    if ($Config.toolPolicy.PSObject.Properties.Name -contains "globalAllow") {
+        Set-OpenClawConfigJson -Path "tools.allow" -Value @($Config.toolPolicy.globalAllow) -AsArray
+    }
+
+    if ($Config.toolPolicy.PSObject.Properties.Name -contains "globalDeny") {
+        Set-OpenClawConfigJson -Path "tools.deny" -Value @($Config.toolPolicy.globalDeny) -AsArray
+    }
+
+    Write-Host "Configured managed tool policy baseline." -ForegroundColor Green
+}
+
+if (-not (Test-Path $ConfigPath)) {
+    throw "Config not found: $ConfigPath"
+}
+
+$ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+$config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+
+if (-not $SkipPrerequisites) {
+    Write-Step "Preparing Windows prerequisites"
+    & (Join-Path (Split-Path -Parent $PSCommandPath) "ensure-windows-prereqs.ps1") -ConfigPath $ConfigPath
+}
+
+Write-Step "Preflight"
+
+foreach ($cmd in @("git", "docker", "tailscale", "curl.exe")) {
+    if (-not (Test-CommandExists $cmd)) {
+        throw "Missing required command: $cmd"
+    }
+}
+
+Ensure-RepoPresent -Config $config
+
+if (-not (Test-Path $config.composeFilePath)) {
+    throw "Compose file not found: $($config.composeFilePath)"
+}
+
+Ensure-EnvFile -Config $config
+
+$hostConfigJson = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
+if (-not (Test-Path $hostConfigJson)) {
+    Write-WarnLine "Host OpenClaw state is not initialized yet at $hostConfigJson."
+    Write-WarnLine "Bootstrap can still continue, but you may need dashboard sign-in or other first-run onboarding on this machine."
+}
+
+Write-Step "Locking Docker host exposure to localhost"
+if ($config.requireLocalhostPublishedPorts) {
+    Ensure-LocalhostDockerPorts -ComposePath $config.composeFilePath
+}
+
+if ($config.sandbox.enabled) {
+    Write-Step "Enabling Docker Desktop sandbox runtime support"
+    Ensure-SandboxComposeSupport -ComposePath $config.composeFilePath -SandboxConfig $config.sandbox
+    Ensure-GatewayImageSupportsSandbox -Config $config
+    Ensure-SandboxImages -Config $config
+}
+
+Ensure-LocalWhisperGatewayImage -Config $config
+
+Write-Step "Starting the OpenClaw gateway container"
+    Push-Location $config.repoPath
+    try {
+        $null = Invoke-External -FilePath "docker" -Arguments @("compose", "up", "-d", "--force-recreate", "openclaw-gateway")
+    }
+    finally {
+        Pop-Location
+}
+
+Write-Step "Waiting for gateway health"
+Wait-ForGateway -HealthUrl $config.verification.healthUrl
+
+Write-Step "Applying security configuration"
+Set-OpenClawConfigValue -Path "gateway.bind" -Value $config.gatewayBind
+Set-OpenClawConfigValue -Path "gateway.auth.mode" -Value "token"
+Set-OpenClawConfigJson -Path "gateway.auth.rateLimit" -Value $config.gatewayAuthRateLimit
+
+if ($config.disableInsecureControlUiAuth) {
+Set-OpenClawConfigValue -Path "gateway.controlUi.allowInsecureAuth" -Value "false"
+}
+Ensure-ControlUiAllowedOrigins -Config $config
+
+Configure-ToolPolicy -Config $config
+
+Set-OpenClawConfigValue -Path "models.mode" -Value "merge"
+
+$ollamaState = $null
+if ($config.ollama.enabled) {
+    $ollamaState = Ensure-OllamaState -Config $config
+}
+
+$resolvedStrongModelRef = $null
+if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.strongAgent) {
+    $resolvedStrongModelRef = Resolve-StrongModelRef -Config $config -AvailableOllamaRefs $ollamaState.AvailableRefs
+}
+
+$resolvedResearchModelRef = $null
+if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
+    $researchCandidates = @()
+    foreach ($candidateRef in @($config.multiAgent.researchAgent.candidateModelRefs)) {
+        $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$candidateRef)
+    }
+    if ($config.multiAgent.researchAgent.modelRef) {
+        $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$config.multiAgent.researchAgent.modelRef)
+    }
+    $resolvedResearchModelRef = Resolve-HostedModelRef -Config $config -CandidateRefs $researchCandidates -Purpose "research agent" -FallbackToFirstCandidate
+}
+
+$resolvedHostedTelegramModelRef = $null
+if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled) {
+    $hostedTelegramCandidates = @()
+    foreach ($candidateRef in @($config.multiAgent.hostedTelegramAgent.candidateModelRefs)) {
+        $hostedTelegramCandidates = Add-UniqueString -List $hostedTelegramCandidates -Value ([string]$candidateRef)
+    }
+    if ($config.multiAgent.hostedTelegramAgent.modelRef) {
+        $hostedTelegramCandidates = Add-UniqueString -List $hostedTelegramCandidates -Value ([string]$config.multiAgent.hostedTelegramAgent.modelRef)
+    }
+    $resolvedHostedTelegramModelRef = Resolve-HostedModelRef -Config $config -CandidateRefs $hostedTelegramCandidates -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
+}
+
+$managedModelRefs = Get-ManagedModelRefs -Config $config -ResolvedStrongModelRef $resolvedStrongModelRef -ResolvedResearchModelRef $resolvedResearchModelRef -ResolvedLocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -ResolvedHostedTelegramModelRef $resolvedHostedTelegramModelRef -ResolvedLocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -ResolvedLocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -ExtraRefs $ollamaState.AvailableRefs
+if (@($managedModelRefs).Count -gt 0) {
+    $modelsAllowlist = [ordered]@{}
+    foreach ($modelRef in @($managedModelRefs)) {
+        $modelsAllowlist[$modelRef] = [ordered]@{}
+    }
+    Set-OpenClawConfigJson -Path "agents.defaults.models" -Value $modelsAllowlist
+    Write-Host "Configured managed model allowlist: $(@($managedModelRefs) -join ', ')" -ForegroundColor Green
+}
+
+if ($resolvedStrongModelRef) {
+    $strongPrimary = [ordered]@{
+        primary   = [string]$resolvedStrongModelRef
+        fallbacks = @()
+    }
+    Set-OpenClawConfigJson -Path "agents.defaults.model" -Value $strongPrimary
+    Write-Host "Configured strong default model: $resolvedStrongModelRef" -ForegroundColor Green
+}
+
+if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled -and $config.multiAgent.sharedWorkspace.path) {
+    Set-OpenClawConfigValue -Path "agents.defaults.workspace" -Value ([string]$config.multiAgent.sharedWorkspace.path)
+    Write-Host "Configured shared default agent workspace: $($config.multiAgent.sharedWorkspace.path)" -ForegroundColor Green
+}
+
+if ($config.contextManagement) {
+    if ($config.contextManagement.compaction) {
+        Set-OpenClawConfigJson -Path "agents.defaults.compaction" -Value $config.contextManagement.compaction
+        Write-Host "Configured session compaction policy." -ForegroundColor Green
+    }
+
+    if ($config.contextManagement.contextPruning) {
+        Set-OpenClawConfigJson -Path "agents.defaults.contextPruning" -Value $config.contextManagement.contextPruning
+        Write-Host "Configured context pruning policy." -ForegroundColor Green
+    }
+}
+
+if ($config.ollama.enabled) {
+    if ($ollamaState -and $ollamaState.Reachable) {
+        $ollamaProvider = [ordered]@{
+            baseUrl = $config.ollama.baseUrl
+            apiKey  = $config.ollama.apiKey
+            api     = "ollama"
+            models  = @($ollamaState.ProviderModels)
+        }
+        Set-OpenClawConfigJson -Path "models.providers.ollama" -Value $ollamaProvider
+        if ($config.ollama.clearFallbacks) {
+            Set-OpenClawConfigJson -Path "agents.defaults.model.fallbacks" -Value @()
+        }
+        if ($config.ollama.setAsDefaultModel -and @($ollamaState.AvailableRefs).Count -gt 0) {
+            $defaultModelId = [string]$ollamaState.AvailableRefs[0]
+            $null = Invoke-External -FilePath "docker" -Arguments @(
+                "exec", "openclaw-openclaw-gateway-1",
+                "node", "dist/index.js",
+                "models", "set", $defaultModelId
+            )
+        }
+    }
+    else {
+        Write-WarnLine "Ollama is not reachable on the Windows host right now. Skipping provider configuration."
+    }
+}
+
+if ($config.sandbox.enabled) {
+    Set-OpenClawConfigValue -Path "agents.defaults.sandbox.mode" -Value $config.sandbox.mode
+    Set-OpenClawConfigValue -Path "agents.defaults.sandbox.scope" -Value $config.sandbox.scope
+    Set-OpenClawConfigValue -Path "agents.defaults.sandbox.workspaceAccess" -Value $config.sandbox.workspaceAccess
+    Set-OpenClawConfigValue -Path "agents.defaults.sandbox.docker.image" -Value $config.sandbox.sandboxImage
+    if ($config.sandbox.toolsFsWorkspaceOnly) {
+        Set-OpenClawConfigValue -Path "tools.fs.workspaceOnly" -Value "true"
+    }
+    if ($config.sandbox.applyPatchWorkspaceOnly) {
+        Set-OpenClawConfigValue -Path "tools.exec.applyPatch.workspaceOnly" -Value "true"
+    }
+}
+
+Clear-RedundantNodeDenyCommands -Config $config
+Configure-TelegramSurface -Config $config
+Configure-VoiceNotes -Config $config
+& (Join-Path (Split-Path -Parent $PSCommandPath) "configure-agent-layout.ps1") -ConfigPath $ConfigPath -NoRestart -StrongModelRef $resolvedStrongModelRef -ResearchModelRef $resolvedResearchModelRef -LocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -HostedTelegramModelRef $resolvedHostedTelegramModelRef -LocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -LocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef
+
+Write-Step "Restarting gateway after config changes"
+Push-Location $config.repoPath
+try {
+    $null = Invoke-External -FilePath "docker" -Arguments @("compose", "restart", "openclaw-gateway")
+}
+finally {
+    Pop-Location
+}
+
+Wait-ForGateway -HealthUrl $config.verification.healthUrl
+
+Write-Step "Configuring Tailscale Serve"
+Ensure-TailscaleServe -Config $config
+
+Write-Step "Running verification"
+& (Join-Path (Split-Path -Parent $PSCommandPath) "verify-openclaw.ps1") -ConfigPath $ConfigPath
+
+Write-Host ""
+Write-Host "Bootstrap complete." -ForegroundColor Green
+Write-Host "Private dashboard: $(tailscale serve status | Select-Object -First 1)"
+Write-Host ""
+Write-Host "Recommended next commands:" -ForegroundColor Cyan
+Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd help"
+Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd start"
+Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd update"
+Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard"
+Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd status"
+if ($config.multiAgent -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
+    $authReadyProviders = Get-AuthReadyHostedProviders
+    if ("google" -notin @($authReadyProviders)) {
+        Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd gemini-auth" -ForegroundColor Yellow
+        Write-WarnLine "Gemini is configured as an optional hosted provider, but OpenClaw is not authenticated with Gemini yet."
+    }
+}
+
+

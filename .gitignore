@@ -1,0 +1,8 @@
+backups/
+bootstrap-report.txt
+*.zip
+*.bak
+*.tmp
+*.log
+Thumbs.db
+.DS_Store

@@ -1,0 +1,17 @@
+ARG BASE_IMAGE=openclaw:local
+FROM ${BASE_IMAGE}
+
+USER root
+
+RUN --mount=type=cache,id=openclaw-local-whisper-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=openclaw-local-whisper-apt-lists,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ffmpeg \
+      python3 \
+      python3-pip && \
+    pip3 install --no-cache-dir --break-system-packages openai-whisper && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+USER node
