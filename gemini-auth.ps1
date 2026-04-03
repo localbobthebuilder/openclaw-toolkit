@@ -134,7 +134,7 @@ if ($null -eq $researchAgent) {
 }
 
 $researchModel = if ($researchAgent.model) { [string]$researchAgent.model.primary } else { "" }
-if ($researchModel -ne "google/gemini-3.1-pro-preview") {
+if ($researchModel -ne "google/gemini-3.1-flash-lite-preview") {
     throw "Research agent is present but not using Gemini. Current model: $researchModel"
 }
 

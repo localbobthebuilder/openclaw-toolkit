@@ -16,10 +16,11 @@
   },
   "toolPolicy": {
     "globalProfile": "minimal",
-    "globalAllow": [
+    "globalAlsoAllow": [
       "read",
       "write",
       "edit",
+      "apply_patch",
       "exec",
       "process",
       "sessions_list",
@@ -39,7 +40,7 @@
       "cron",
       "gateway"
     ],
-    "researchAllow": [
+    "researchAlsoAllow": [
       "read",
       "sessions_list",
       "sessions_history",
@@ -240,11 +241,20 @@
       "id": "main",
       "name": "Strong Coder",
       "default": true,
+      "sandboxMode": "off",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": [
+          "research",
+          "review-local",
+          "coder-local"
+        ]
+      },
       "modelRef": "openai-codex/gpt-5.4",
       "candidateModelRefs": [
         "openai-codex/gpt-5.4",
         "anthropic/claude-sonnet-4-6",
-        "google/gemini-3.1-pro-preview"
+        "google/gemini-3.1-flash-lite-preview"
       ],
       "allowLocalFallback": true
     },
@@ -252,9 +262,13 @@
       "enabled": true,
       "id": "research",
       "name": "Gemini Research",
-      "modelRef": "google/gemini-3.1-pro-preview",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
+      "modelRef": "google/gemini-3.1-flash-lite-preview",
       "candidateModelRefs": [
-        "google/gemini-3.1-pro-preview"
+        "google/gemini-3.1-flash-lite-preview"
       ]
     },
     "localChatAgent": {
@@ -262,6 +276,10 @@
       "id": "chat-local",
       "name": "Local Chat",
       "sandboxMode": "off",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
       "modelRef": "ollama/glm-4.7-flash:latest",
       "routeTrustedTelegramGroups": true,
       "routeTrustedTelegramDms": true
@@ -271,6 +289,10 @@
       "id": "chat-openai",
       "name": "Telegram OpenAI",
       "sandboxMode": "off",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
       "modelRef": "openai-codex/gpt-5.4",
       "candidateModelRefs": [
         "openai-codex/gpt-5.4"
@@ -281,14 +303,26 @@
       "id": "review-local",
       "name": "Local Reviewer",
       "sandboxMode": "off",
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
       "modelRef": "ollama/qwen3-coder:30b"
     },
     "localCoderAgent": {
       "enabled": true,
       "id": "coder-local",
-      "name": "Local Coder",
+      "name": "Coder Delegate",
       "sandboxMode": "off",
-      "modelRef": "ollama/qwen3-coder:30b"
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      },
+      "modelRef": "openai-codex/gpt-5.4",
+      "candidateModelRefs": [
+        "openai-codex/gpt-5.4",
+        "anthropic/claude-sonnet-4-6"
+      ]
     },
     "rolePolicies": {
       "strongAgent": [
@@ -302,7 +336,7 @@
         "## Delegation Rules",
         "- Delegate web research, docs lookups, and broad comparison work to the `research` agent when it is available.",
         "- Delegate diff review, plan checking, and verification passes to the `review-local` agent when a second opinion is helpful.",
-        "- Delegate local coding drafts, mechanical refactors, and low-risk code transforms to the `coder-local` agent when the task fits inside its local-model limits.",
+        "- Delegate bounded implementation work, mechanical refactors, and low-risk code transforms to the `coder-local` agent when a second coding pass is useful.",
         "- Keep security-sensitive final decisions and high-consequence tool use with yourself unless the user explicitly wants otherwise.",
         "",
         "## Red Lines",
@@ -316,10 +350,12 @@
         "## Session Startup",
         "- You are the research specialist.",
         "- Focus on documentation, comparison, and synthesis work that helps the main agent move faster.",
+        "- Answer the user's actual question directly; do not prepend tool inventories, session metadata, or capability lists unless explicitly asked.",
         "",
         "## Role",
         "- Gather sources, summarize findings, compare options, and call out uncertainty.",
         "- Prefer concise, decision-oriented outputs that another agent can act on quickly.",
+        "- When asked for one sentence, return exactly one sentence.",
         "",
         "## Red Lines",
         "- Do not make risky system changes.",

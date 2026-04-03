@@ -71,6 +71,8 @@ Multi-agent note:
 - `chat-local`, `review-local`, `coder-local`, and optional `chat-openai`
   currently default to `sandbox.mode=off` on this Windows Docker Desktop setup
   so they can use the real shared workspace
+- `coder-local` is the dedicated coding delegate and now prefers hosted models
+  instead of Ollama
 - Active Windows workspace: `C:\Users\Deadline\.openclaw\workspace`
 - Ollama model files live under `C:\Users\Deadline\.ollama\models`
 - Docker Desktop VHDX compaction is separate and uses

@@ -531,7 +531,7 @@ The current starter layout creates:
 - `review-local`
   a local Ollama reviewer agent with a tighter read/session-only tool policy
 - `coder-local`
-  a local coding agent for bounded edits, refactors, and drafting work
+  a hosted coding delegate for bounded edits, refactors, and drafting work
 
 It also enables `tools.agentToAgent` so your stronger agent can delegate to the
 other configured agents.
@@ -571,7 +571,7 @@ Purpose routing note:
 - those managed `AGENTS.md` files give `main` standing instructions to use:
   - `research` for docs/research/synthesis
   - `review-local` for diff review and verification
-  - `coder-local` for bounded local coding chores
+  - `coder-local` for bounded delegated coding chores
 
 Important:
 
@@ -581,7 +581,7 @@ Important:
 - the strong hosted candidate order is now:
   - `openai-codex/gpt-5.4`
   - `anthropic/claude-sonnet-4-6`
-  - `google/gemini-3.1-pro-preview`
+  - `google/gemini-3.1-flash-lite-preview`
   - then local Ollama fallback if no hosted candidate is authenticated
 - for configured Ollama models, bootstrap now tries to pull missing models with
   `ollama pull`

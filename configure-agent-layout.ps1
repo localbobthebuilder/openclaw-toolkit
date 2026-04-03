@@ -234,7 +234,8 @@ function New-AgentEntry {
         [string]$ModelRef,
         [bool]$IsDefault = $false,
         $Tools,
-        $Sandbox
+        $Sandbox,
+        $Subagents
     )
 
     $entry = [ordered]@{
@@ -259,6 +260,39 @@ function New-AgentEntry {
     }
     if ($null -ne $Sandbox) {
         $entry.sandbox = $Sandbox
+    }
+    if ($null -ne $Subagents) {
+        $entry.subagents = $Subagents
+    }
+
+    return $entry
+}
+
+function Get-AgentSubagentPolicy {
+    param($AgentConfig)
+
+    if ($null -eq $AgentConfig) {
+        return $null
+    }
+    if (-not ($AgentConfig.PSObject.Properties.Name -contains "subagents")) {
+        return $null
+    }
+
+    $subagents = $AgentConfig.subagents
+    if ($null -eq $subagents) {
+        return $null
+    }
+
+    $entry = [ordered]@{}
+    if ($subagents.PSObject.Properties.Name -contains "requireAgentId") {
+        $entry.requireAgentId = [bool]$subagents.requireAgentId
+    }
+    if ($subagents.PSObject.Properties.Name -contains "allowAgents") {
+        $entry.allowAgents = @($subagents.allowAgents | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+
+    if ($entry.Count -eq 0) {
+        return $null
     }
 
     return $entry
@@ -444,6 +478,41 @@ function Resolve-OllamaModelRef {
     return $DesiredRef
 }
 
+function Resolve-PreferredAgentModelRef {
+    param(
+        [string]$ExplicitRef,
+        [Parameter(Mandatory = $true)]$AgentConfig,
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Purpose
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitRef)) {
+        if ($ExplicitRef.StartsWith("ollama/")) {
+            return (Resolve-OllamaModelRef -DesiredRef $ExplicitRef -Config $Config -Purpose $Purpose)
+        }
+        return $ExplicitRef
+    }
+
+    $candidateRefs = @()
+    foreach ($candidate in @($AgentConfig.candidateModelRefs)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+            $candidateRefs += [string]$candidate
+        }
+    }
+    if ($AgentConfig.modelRef -and ([string]$AgentConfig.modelRef -notin $candidateRefs)) {
+        $candidateRefs += [string]$AgentConfig.modelRef
+    }
+
+    foreach ($candidateRef in @($candidateRefs)) {
+        if ($candidateRef.StartsWith("ollama/")) {
+            return (Resolve-OllamaModelRef -DesiredRef $candidateRef -Config $Config -Purpose $Purpose)
+        }
+        return $candidateRef
+    }
+
+    return $null
+}
+
 function Wait-ForGateway {
     param([string]$HealthUrl = "http://127.0.0.1:18789/healthz")
 
@@ -491,14 +560,24 @@ $strongId = [string]$multi.strongAgent.id
 $strongName = if ($multi.strongAgent.name) { [string]$multi.strongAgent.name } else { "Strong Coder" }
 $resolvedStrongModelRef = if ($StrongModelRef) { $StrongModelRef } elseif ($multi.strongAgent.modelRef) { [string]$multi.strongAgent.modelRef } else { $null }
 $strongWorkspace = Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.strongAgent
-$desiredAgents += (New-AgentEntry -Id $strongId -Name $strongName -Workspace $strongWorkspace -ModelRef $resolvedStrongModelRef -IsDefault ([bool]$multi.strongAgent.default))
+$strongSandbox = $null
+$strongSubagents = Get-AgentSubagentPolicy -AgentConfig $multi.strongAgent
+if ($multi.strongAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.strongAgent.sandboxMode) {
+    $strongSandbox = [ordered]@{
+        mode = [string]$multi.strongAgent.sandboxMode
+    }
+}
+$desiredAgents += (New-AgentEntry -Id $strongId -Name $strongName -Workspace $strongWorkspace -ModelRef $resolvedStrongModelRef -IsDefault ([bool]$multi.strongAgent.default) -Sandbox $strongSandbox -Subagents $strongSubagents)
 
 if ($multi.researchAgent -and $multi.researchAgent.enabled) {
     $researchTools = $null
-    if ($config.toolPolicy -and (($config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") -or ($config.toolPolicy.PSObject.Properties.Name -contains "researchDeny"))) {
+    if ($config.toolPolicy -and (($config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") -or ($config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") -or ($config.toolPolicy.PSObject.Properties.Name -contains "researchDeny"))) {
         $researchTools = [ordered]@{}
+        if ($config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") {
+            $researchTools.alsoAllow = @($config.toolPolicy.researchAlsoAllow)
+        }
         if ($config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") {
-            $researchTools.allow = @($config.toolPolicy.researchAllow)
+            $researchTools.alsoAllow = @($config.toolPolicy.researchAllow)
         }
         if ($config.toolPolicy.PSObject.Properties.Name -contains "researchDeny") {
             $researchTools.deny = @($config.toolPolicy.researchDeny)
@@ -516,7 +595,7 @@ if ($multi.researchAgent -and $multi.researchAgent.enabled) {
         $resolvedResearchModelRef = [string](@($multi.researchAgent.candidateModelRefs) | Select-Object -First 1)
     }
 
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.researchAgent.id) -Name ([string]$multi.researchAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.researchAgent) -ModelRef $resolvedResearchModelRef -Tools $researchTools)
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.researchAgent.id) -Name ([string]$multi.researchAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.researchAgent) -ModelRef $resolvedResearchModelRef -Tools $researchTools -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.researchAgent))
 }
 
 $chatAgentId = $null
@@ -529,12 +608,12 @@ if ($multi.localChatAgent.enabled) {
             mode = [string]$multi.localChatAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id $chatAgentId -Name ([string]$multi.localChatAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localChatAgent) -ModelRef $resolvedChatModelRef -Sandbox $chatSandbox)
+    $desiredAgents += (New-AgentEntry -Id $chatAgentId -Name ([string]$multi.localChatAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localChatAgent) -ModelRef $resolvedChatModelRef -Sandbox $chatSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localChatAgent))
 }
 
 if ($multi.localReviewAgent.enabled) {
     $reviewTools = [ordered]@{
-        allow = @(
+        alsoAllow = @(
             "read",
             "sessions_list",
             "sessions_history",
@@ -560,7 +639,7 @@ if ($multi.localReviewAgent.enabled) {
             mode = [string]$multi.localReviewAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localReviewAgent.id) -Name ([string]$multi.localReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localReviewAgent) -ModelRef $resolvedReviewModelRef -Tools $reviewTools -Sandbox $reviewSandbox)
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localReviewAgent.id) -Name ([string]$multi.localReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localReviewAgent) -ModelRef $resolvedReviewModelRef -Tools $reviewTools -Sandbox $reviewSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localReviewAgent))
 }
 
 if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
@@ -571,12 +650,12 @@ if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
             mode = [string]$multi.hostedTelegramAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.hostedTelegramAgent.id) -Name ([string]$multi.hostedTelegramAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent) -ModelRef $resolvedHostedChatModelRef -Sandbox $hostedTelegramSandbox)
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.hostedTelegramAgent.id) -Name ([string]$multi.hostedTelegramAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent) -ModelRef $resolvedHostedChatModelRef -Sandbox $hostedTelegramSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.hostedTelegramAgent))
 }
 
 if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
     $coderTools = [ordered]@{
-        allow = @(
+        alsoAllow = @(
             "read",
             "write",
             "edit",
@@ -595,14 +674,14 @@ if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
         )
     }
 
-    $resolvedCoderModelRef = if ($LocalCoderModelRef) { $LocalCoderModelRef } else { Resolve-OllamaModelRef -DesiredRef ([string]$multi.localCoderAgent.modelRef) -Config $config -Purpose "coder-local" }
+    $resolvedCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalCoderModelRef -AgentConfig $multi.localCoderAgent -Config $config -Purpose "coder-local"
     $coderSandbox = $null
     if ($multi.localCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localCoderAgent.sandboxMode) {
         $coderSandbox = [ordered]@{
             mode = [string]$multi.localCoderAgent.sandboxMode
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localCoderAgent.id) -Name ([string]$multi.localCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localCoderAgent) -ModelRef $resolvedCoderModelRef -Tools $coderTools -Sandbox $coderSandbox)
+    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localCoderAgent.id) -Name ([string]$multi.localCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localCoderAgent) -ModelRef $resolvedCoderModelRef -Tools $coderTools -Sandbox $coderSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localCoderAgent))
 }
 
 $mergedAgents = @()

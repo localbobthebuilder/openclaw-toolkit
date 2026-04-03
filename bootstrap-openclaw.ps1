@@ -937,7 +937,7 @@ function Ensure-OllamaState {
         $state.ResolvedLocalReviewModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localReviewAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "review-local"
     }
     if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled) {
-        $state.ResolvedLocalCoderModelRef = Resolve-OllamaModelRef -DesiredRef ([string]$Config.multiAgent.localCoderAgent.modelRef) -AvailableRefs $availableRefs -Config $Config -Purpose "coder-local"
+        $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $availableRefs -Purpose "coder-local" -FallbackToFirstCandidate
     }
 
     return [pscustomobject]$state
@@ -1071,6 +1071,53 @@ function Resolve-HostedModelRef {
     return $null
 }
 
+function Resolve-AgentPreferredModelRef {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig,
+        [string[]]$AvailableOllamaRefs = @(),
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [switch]$FallbackToFirstCandidate
+    )
+
+    $candidateRefs = @()
+    foreach ($candidateRef in @($AgentConfig.candidateModelRefs)) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidateRef)
+    }
+    if ($AgentConfig.modelRef) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$AgentConfig.modelRef)
+    }
+
+    $authReadyProviders = Get-AuthReadyHostedProviders
+    foreach ($candidateRef in @($candidateRefs)) {
+        if ($candidateRef -like "ollama/*") {
+            if ($candidateRef -in @($AvailableOllamaRefs)) {
+                return $candidateRef
+            }
+            continue
+        }
+
+        $providerId = ($candidateRef -split "/", 2)[0]
+        if ($providerId -in @($authReadyProviders)) {
+            return $candidateRef
+        }
+    }
+
+    foreach ($candidateRef in @($candidateRefs)) {
+        if ($candidateRef -like "ollama/*") {
+            return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose)
+        }
+    }
+
+    if ($FallbackToFirstCandidate -and @($candidateRefs).Count -gt 0) {
+        $fallbackCandidate = [string](@($candidateRefs)[0])
+        Write-WarnLine "No authenticated preferred provider is ready for $Purpose. Keeping preferred model ref $fallbackCandidate until auth is completed."
+        return $fallbackCandidate
+    }
+
+    return $null
+}
+
 function Get-OpenClawConfigJsonValue {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -1100,11 +1147,21 @@ function Get-OpenClawConfigJsonValue {
 function Unset-OpenClawConfigPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $null = Invoke-External -FilePath "docker" -Arguments @(
+    $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", "openclaw-openclaw-gateway-1",
         "node", "dist/index.js",
         "config", "unset", $Path
-    )
+    ) -AllowFailure
+
+    if ($result.ExitCode -eq 0) {
+        return
+    }
+
+    if ($result.Output -match "Config path not found") {
+        return
+    }
+
+    throw "Failed to unset config path '$Path'.`n$($result.Output)"
 }
 
 function Clear-RedundantNodeDenyCommands {
@@ -1307,7 +1364,12 @@ function Configure-ToolPolicy {
     }
 
     if ($Config.toolPolicy.PSObject.Properties.Name -contains "globalAllow") {
-        Set-OpenClawConfigJson -Path "tools.allow" -Value @($Config.toolPolicy.globalAllow) -AsArray
+        Unset-OpenClawConfigPath -Path "tools.allow"
+        Set-OpenClawConfigJson -Path "tools.alsoAllow" -Value @($Config.toolPolicy.globalAllow) -AsArray
+    }
+    elseif ($Config.toolPolicy.PSObject.Properties.Name -contains "globalAlsoAllow") {
+        Unset-OpenClawConfigPath -Path "tools.allow"
+        Set-OpenClawConfigJson -Path "tools.alsoAllow" -Value @($Config.toolPolicy.globalAlsoAllow) -AsArray
     }
 
     if ($Config.toolPolicy.PSObject.Properties.Name -contains "globalDeny") {

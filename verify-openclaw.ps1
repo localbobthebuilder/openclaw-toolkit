@@ -883,15 +883,22 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled) {
             $coderAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.localCoderAgent.id } | Select-Object -First 1
             $actualCoderModel = if ($coderAgent -and $coderAgent.model) { [string]$coderAgent.model.primary } else { "" }
-            $desiredCoderModel = [string]$config.multiAgent.localCoderAgent.modelRef
-            if ($actualCoderModel -eq $desiredCoderModel) {
+            $expectedCoderModels = @()
+            foreach ($candidateRef in @($config.multiAgent.localCoderAgent.candidateModelRefs)) {
+                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value ([string]$candidateRef)
+            }
+            if ($config.multiAgent.localCoderAgent.modelRef) {
+                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value ([string]$config.multiAgent.localCoderAgent.modelRef)
+            }
+            $desiredCoderModel = if (@($expectedCoderModels).Count -gt 0) { [string]$expectedCoderModels[0] } else { [string]$config.multiAgent.localCoderAgent.modelRef }
+            if ($actualCoderModel -in @($expectedCoderModels)) {
                 $multiAgentVerification += "PASS: coder-local model is $actualCoderModel"
             }
             elseif ($actualCoderModel -like "ollama/*" -and $actualCoderModel -in $actualModelAllowlist) {
                 $multiAgentVerification += "PASS: coder-local fell back from $desiredCoderModel to available local model $actualCoderModel"
             }
             else {
-                $multiAgentVerification += "FAIL: coder-local model mismatch. Expected $desiredCoderModel or another available ollama/* model, got $actualCoderModel"
+                $multiAgentVerification += "FAIL: coder-local model mismatch. Expected one of $(@($expectedCoderModels) -join ', ') or another available ollama/* model, got $actualCoderModel"
             }
             if ($coderAgent) {
                 $actualCoderWorkspace = if ($coderAgent.workspace) { [string]$coderAgent.workspace } else { [string]$liveConfig.agents.defaults.workspace }
@@ -937,6 +944,38 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 else {
                     $multiAgentVerification += "FAIL: agent-to-agent allowlist is missing '$agentId'"
                 }
+            }
+        }
+
+        if ($config.multiAgent.strongAgent -and $config.multiAgent.strongAgent.subagents) {
+            $mainAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.strongAgent.id } | Select-Object -First 1
+            $expectedAllowAgents = @($config.multiAgent.strongAgent.subagents.allowAgents | ForEach-Object { [string]$_ })
+            $actualAllowAgents = @()
+            if ($mainAgent -and $mainAgent.subagents -and $mainAgent.subagents.allowAgents) {
+                $actualAllowAgents = @($mainAgent.subagents.allowAgents | ForEach-Object { [string]$_ })
+            }
+            foreach ($agentId in $expectedAllowAgents) {
+                if ($agentId -in $actualAllowAgents) {
+                    $multiAgentVerification += "PASS: main subagent allowlist includes '$agentId'"
+                }
+                else {
+                    $multiAgentVerification += "FAIL: main subagent allowlist is missing '$agentId'"
+                }
+            }
+
+            $expectedRequireAgentId = $false
+            if ($config.multiAgent.strongAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
+                $expectedRequireAgentId = [bool]$config.multiAgent.strongAgent.subagents.requireAgentId
+            }
+            $actualRequireAgentId = $false
+            if ($mainAgent -and $mainAgent.subagents -and $mainAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
+                $actualRequireAgentId = [bool]$mainAgent.subagents.requireAgentId
+            }
+            if ($actualRequireAgentId -eq $expectedRequireAgentId) {
+                $multiAgentVerification += "PASS: main subagent requireAgentId is $actualRequireAgentId"
+            }
+            else {
+                $multiAgentVerification += "FAIL: main subagent requireAgentId mismatch. Expected $expectedRequireAgentId, got $actualRequireAgentId"
             }
         }
 
