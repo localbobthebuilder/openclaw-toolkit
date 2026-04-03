@@ -92,6 +92,21 @@ function Stop-OllamaModel {
     }
 }
 
+function Get-ErrorCategory {
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return "unknown"
+    }
+
+    $normalized = $Message.ToLowerInvariant()
+    if ($normalized -match '429|resource_exhausted|quota|rate limit|too many requests') { return "provider-quota" }
+    if ($normalized -match '401|403|unauthorized|forbidden|auth|api key|not authenticated') { return "provider-auth" }
+    if ($normalized -match 'gateway closed|service restart|container .+ is not running|econnrefused') { return "gateway" }
+    if ($normalized -match 'model.+not found|unknown model|could not resolve any ollama model|no configured ollama models') { return "model-missing" }
+    return "task"
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker is required for the local model smoke test."
 }
@@ -108,7 +123,15 @@ $cfg = Get-Content -Raw $ConfigFilePath | ConvertFrom-Json
 $ollamaEntries = @($cfg.models.providers.ollama.models)
 
 if ($ollamaEntries.Count -eq 0) {
+    $skipResult = [pscustomobject]@{
+        status   = "skip"
+        agentId  = $AgentId
+        modelRef = ""
+        category = "disabled"
+        detail   = "No configured Ollama models."
+    }
     Write-Output "Local model smoke test skipped: no configured Ollama models."
+    Write-Output "__SMOKE_JSON__: $(ConvertTo-Json $skipResult -Compress)"
     exit 0
 }
 
@@ -194,7 +217,21 @@ try {
         "Model: $targetModelRef"
         "Runtime provider/model: $provider/$model"
         "Reply: $payloadText"
+        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='pass';agentId=$AgentId;modelRef=$targetModelRef;runtime=($provider + '/' + $model);category='';detail='Local model replied correctly.'}) -Compress)"
     ) | Write-Output
+}
+catch {
+    $message = ($_ | Out-String).Trim()
+    $category = Get-ErrorCategory -Message $message
+    @(
+        "Local model smoke test failed."
+        "Agent: $AgentId"
+        "Model: $targetModelRef"
+        "Category: $category"
+        $message
+        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='fail';agentId=$AgentId;modelRef=$targetModelRef;runtime='';category=$category;detail=$message}) -Compress)"
+    ) | Write-Output
+    throw
 }
 finally {
     Stop-OllamaModel -ModelId ([string]$preferred.id)

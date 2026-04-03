@@ -51,6 +51,7 @@ Most important commands:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks voice`
 - Multiple targeted verifications in one run:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks "local-model agent"`
+- `agent` smoke covers `chat-local`, `research`, `review-local`, and `coder-local`, and now reports categorized failure reasons.
 - Apply the configured starter multi-agent layout:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agents`
 - Compact Docker Desktop storage:

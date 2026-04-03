@@ -730,6 +730,15 @@ D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks "local-model agent"
 D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks "sandbox audit"
 ```
 
+The `agent` smoke test now exercises all configured collaboration roles that matter in day-to-day use:
+
+- `chat-local` for useful git/file work in the shared workspace
+- `research` for a real web-backed research task
+- `review-local` for read/verification behavior
+- `coder-local` for bounded write behavior
+
+When one of those fails, the verifier now reports the specific category, such as `provider-quota`, `provider-auth`, `gateway`, `model-missing`, or `tooling`, so it is easier to tell “bad provider state” from “bad agent wiring”.
+
 Valid check names are:
 
 - `health`

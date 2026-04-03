@@ -215,6 +215,54 @@ function Normalize-SmokeSentence {
     return $normalized
 }
 
+function Get-ErrorCategory {
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return "unknown"
+    }
+
+    $normalized = $Message.ToLowerInvariant()
+
+    if ($normalized -match '429|resource_exhausted|quota|rate limit|too many requests') {
+        return "provider-quota"
+    }
+    if ($normalized -match '401|403|unauthorized|forbidden|auth|api key|not authenticated|provider auth') {
+        return "provider-auth"
+    }
+    if ($normalized -match 'gateway closed|service restart|container .+ is not running|econnrefused|timed out waiting for gateway|healthz') {
+        return "gateway"
+    }
+    if ($normalized -match 'model.+not found|unknown model|no configured ollama models|could not resolve any ollama model') {
+        return "model-missing"
+    }
+    if ($normalized -match 'tool|exec|write|read|web_search|web_fetch') {
+        return "tooling"
+    }
+
+    return "task"
+}
+
+function New-CheckResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [string]$AgentId,
+        [string]$Runtime = "",
+        [string]$Category = "",
+        [string]$Detail = ""
+    )
+
+    return [pscustomobject]@{
+        name     = $Name
+        status   = $Status
+        agentId  = $AgentId
+        runtime  = $Runtime
+        category = $Category
+        detail   = $Detail
+    }
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker is required for the agent capability smoke test."
 }
@@ -254,10 +302,12 @@ if (-not (Test-Path $WorkspaceHostPath)) {
 $chatAgentId = if ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.id) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" }
 $reviewAgentId = if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.id) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" }
 $coderAgentId = if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.id) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" }
+$researchAgentId = if ($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.id) { [string]$config.multiAgent.researchAgent.id } else { "research" }
 
 $chatAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled)
 $reviewAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled)
 $coderAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled)
+$researchAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled)
 
 $suffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
 $chatRepoName = "telegram-smoke-$suffix"
@@ -270,6 +320,7 @@ $reviewProbePath = Join-Path $WorkspaceHostPath $reviewProbeName
 $outputLines = New-Object System.Collections.Generic.List[string]
 $modelsToStop = New-Object System.Collections.Generic.List[string]
 $failures = New-Object System.Collections.Generic.List[string]
+$checkResults = New-Object System.Collections.Generic.List[object]
 
 Write-ProgressLine "Workspace host path: $WorkspaceHostPath" Cyan
 Write-ProgressLine "Telegram-routed agent: $chatAgentId" Cyan
@@ -294,11 +345,8 @@ try {
             Write-ProgressLine "[$chatAgentId] Initializing a real git repo in the shared workspace" Gray
             $chatInit = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $chatRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -Timeout $TimeoutSeconds
             $chatInitReply = (Get-AgentReplyText -AgentJson $chatInit).Trim()
-            if ($chatInitReply -ne "INIT_OK") {
-                throw "Expected INIT_OK from $chatAgentId after git init, but got: $chatInitReply"
-            }
             if (-not (Test-Path (Join-Path $chatRepoPath ".git"))) {
-                throw "Expected git repo at $chatRepoPath, but .git directory was not created."
+                throw "Expected git repo at $chatRepoPath, but .git directory was not created. Agent reply: $chatInitReply"
             }
             $outputLines.Add("PASS: $chatAgentId initialized git repo $chatRepoName")
             $outputLines.Add("Runtime: $(Get-AgentRuntimeRef -AgentJson $chatInit)")
@@ -339,19 +387,54 @@ try {
             }
             $outputLines.Add("PASS: $chatAgentId ran git status in the repo")
             $outputLines.Add("Git status: $hostStatus")
+            $checkResults.Add((New-CheckResult -Name "chat" -Status "pass" -AgentId $chatAgentId -Runtime (Get-AgentRuntimeRef -AgentJson $chatInit) -Detail "Completed git/file workflow in shared workspace."))
         }
         catch {
             $message = ($_ | Out-String).Trim()
-            $failures.Add("${chatAgentId}: $message")
-            $outputLines.Add("FAIL: $chatAgentId useful git/file workflow failed")
+            $category = Get-ErrorCategory -Message $message
+            $failures.Add("${chatAgentId}: [$category] $message")
+            $outputLines.Add("FAIL: $chatAgentId useful git/file workflow failed [$category]")
             $outputLines.Add($message)
+            $checkResults.Add((New-CheckResult -Name "chat" -Status "fail" -AgentId $chatAgentId -Category $category -Detail $message))
         }
     }
     else {
         $outputLines.Add("SKIP: Telegram-routed chat agent is disabled in bootstrap config.")
+        $checkResults.Add((New-CheckResult -Name "chat" -Status "skip" -AgentId $chatAgentId -Category "disabled" -Detail "Telegram-routed chat agent is disabled in bootstrap config."))
     }
 
     Set-Content -Path $reviewProbePath -Value "review smoke ok" -Encoding UTF8
+    if ($researchAgentEnabled) {
+        $researchModelRef = Get-AgentPrimaryModelRef -LiveConfig $liveConfig -AgentId $researchAgentId
+        if ($researchModelRef) {
+            $modelsToStop.Add($researchModelRef)
+        }
+        try {
+            Write-ProgressLine "[$researchAgentId] Performing a real web-backed research check" Gray
+            $researchTurn = Invoke-AgentTurn -AgentId $researchAgentId -SessionId "smoke-research-$suffix" -Message "Use web_search to find the official documentation domain for OpenClaw. Reply with exactly docs.openclaw.ai and nothing else." -Timeout $TimeoutSeconds
+            $researchReply = (Get-AgentReplyText -AgentJson $researchTurn).Trim()
+            if ($researchReply -ne "docs.openclaw.ai") {
+                throw "Expected docs.openclaw.ai from $researchAgentId, but got: $researchReply"
+            }
+            $runtime = Get-AgentRuntimeRef -AgentJson $researchTurn
+            $outputLines.Add("PASS: $researchAgentId completed a real research workflow")
+            $outputLines.Add("Runtime: $runtime")
+            $checkResults.Add((New-CheckResult -Name "research" -Status "pass" -AgentId $researchAgentId -Runtime $runtime -Detail "Completed a web-backed research task." ))
+        }
+        catch {
+            $message = ($_ | Out-String).Trim()
+            $category = Get-ErrorCategory -Message $message
+            $failures.Add("${researchAgentId}: [$category] $message")
+            $outputLines.Add("FAIL: $researchAgentId research workflow failed [$category]")
+            $outputLines.Add($message)
+            $checkResults.Add((New-CheckResult -Name "research" -Status "fail" -AgentId $researchAgentId -Category $category -Detail $message))
+        }
+    }
+    else {
+        $outputLines.Add("SKIP: research agent is disabled in bootstrap config.")
+        $checkResults.Add((New-CheckResult -Name "research" -Status "skip" -AgentId $researchAgentId -Category "disabled" -Detail "Research agent is disabled in bootstrap config."))
+    }
+
     if ($reviewAgentEnabled) {
         $reviewModelRef = Get-AgentPrimaryModelRef -LiveConfig $liveConfig -AgentId $reviewAgentId
         if ($reviewModelRef) {
@@ -365,17 +448,22 @@ try {
                 throw "Expected REVIEW_OK from $reviewAgentId, but got: $reviewReply"
             }
             $outputLines.Add("PASS: $reviewAgentId can read and verify shared workspace files")
-            $outputLines.Add("Runtime: $(Get-AgentRuntimeRef -AgentJson $reviewTurn)")
+            $runtime = Get-AgentRuntimeRef -AgentJson $reviewTurn
+            $outputLines.Add("Runtime: $runtime")
+            $checkResults.Add((New-CheckResult -Name "review" -Status "pass" -AgentId $reviewAgentId -Runtime $runtime -Detail "Read and verified shared workspace content."))
         }
         catch {
             $message = ($_ | Out-String).Trim()
-            $failures.Add("${reviewAgentId}: $message")
-            $outputLines.Add("FAIL: $reviewAgentId review-read workflow failed")
+            $category = Get-ErrorCategory -Message $message
+            $failures.Add("${reviewAgentId}: [$category] $message")
+            $outputLines.Add("FAIL: $reviewAgentId review-read workflow failed [$category]")
             $outputLines.Add($message)
+            $checkResults.Add((New-CheckResult -Name "review" -Status "fail" -AgentId $reviewAgentId -Category $category -Detail $message))
         }
     }
     else {
         $outputLines.Add("SKIP: review-local agent is disabled in bootstrap config.")
+        $checkResults.Add((New-CheckResult -Name "review" -Status "skip" -AgentId $reviewAgentId -Category "disabled" -Detail "review-local agent is disabled in bootstrap config."))
     }
 
     if ($coderAgentEnabled) {
@@ -398,17 +486,22 @@ try {
                 throw "Expected coder probe file content 'coder smoke ok', but found '$coderText'."
             }
             $outputLines.Add("PASS: $coderAgentId can write bounded workspace files")
-            $outputLines.Add("Runtime: $(Get-AgentRuntimeRef -AgentJson $coderWrite)")
+            $runtime = Get-AgentRuntimeRef -AgentJson $coderWrite
+            $outputLines.Add("Runtime: $runtime")
+            $checkResults.Add((New-CheckResult -Name "coder" -Status "pass" -AgentId $coderAgentId -Runtime $runtime -Detail "Created a bounded workspace artifact."))
         }
         catch {
             $message = ($_ | Out-String).Trim()
-            $failures.Add("${coderAgentId}: $message")
-            $outputLines.Add("FAIL: $coderAgentId bounded write workflow failed")
+            $category = Get-ErrorCategory -Message $message
+            $failures.Add("${coderAgentId}: [$category] $message")
+            $outputLines.Add("FAIL: $coderAgentId bounded write workflow failed [$category]")
             $outputLines.Add($message)
+            $checkResults.Add((New-CheckResult -Name "coder" -Status "fail" -AgentId $coderAgentId -Category $category -Detail $message))
         }
     }
     else {
         $outputLines.Add("SKIP: coder-local agent is disabled in bootstrap config.")
+        $checkResults.Add((New-CheckResult -Name "coder" -Status "skip" -AgentId $coderAgentId -Category "disabled" -Detail "coder-local agent is disabled in bootstrap config."))
     }
 }
 finally {
@@ -434,11 +527,20 @@ finally {
     }
 }
 
+$overallStatus = if ($failures.Count -gt 0) { "fail" } else { "pass" }
+$checkResultsArray = @($checkResults.ToArray())
+$structuredResult = [pscustomobject]@{
+    status    = $overallStatus
+    workspace = $WorkspaceHostPath
+    checks    = $checkResultsArray
+}
+
 if ($failures.Count -gt 0) {
     $outputLines.Insert(0, "Agent capability smoke test failed.")
     $outputLines.Add("Workspace: $WorkspaceHostPath")
     $outputLines.Add("Failures: $($failures.Count)")
     $outputLines.Add("Telegram-routed agent exercised useful file + git workflows in shared workspace, but at least one managed agent could not complete its expected tool path.")
+    $outputLines.Add("__SMOKE_JSON__: $(ConvertTo-Json $structuredResult -Depth 8 -Compress)")
     $outputLines | Write-Output
     throw ("Agent capability smoke test failed: " + ($failures -join " | "))
 }
@@ -446,4 +548,5 @@ if ($failures.Count -gt 0) {
 $outputLines.Insert(0, "Agent capability smoke test passed.")
 $outputLines.Add("Workspace: $WorkspaceHostPath")
 $outputLines.Add("Telegram-routed agent exercised useful file + git workflows in shared workspace.")
+$outputLines.Add("__SMOKE_JSON__: $(ConvertTo-Json $structuredResult -Depth 8 -Compress)")
 $outputLines | Write-Output

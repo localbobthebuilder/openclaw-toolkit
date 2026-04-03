@@ -281,6 +281,45 @@ function Invoke-LoggedScript {
     }
 }
 
+function Get-SmokeStructuredResult {
+    param([string]$Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Output, '__SMOKE_JSON__:\s*(\{.*\})')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    try {
+        return ($match.Groups[1].Value | ConvertFrom-Json -Depth 20)
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-SmokeSummaryLabel {
+    param(
+        [string]$Output,
+        $StructuredResult
+    )
+
+    if ($null -ne $StructuredResult -and $StructuredResult.PSObject.Properties.Name -contains "status") {
+        switch -Regex ([string]$StructuredResult.status) {
+            '^pass$' { return "PASS" }
+            '^fail$' { return "FAIL" }
+            '^skip$' { return "SKIP/INFO" }
+        }
+    }
+
+    if ($Output -match 'passed|Voice-note transcription result') { return "PASS" }
+    if ($Output -match 'failed') { return "FAIL" }
+    return "SKIP/INFO"
+}
+
 function Get-HostConfigDir {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -586,6 +625,8 @@ if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $c
     }
     $chatWorkspaceWriteSmokeTestOutput = Invoke-LoggedScript -Label "Chat workspace write smoke test" -ScriptPath $chatWorkspaceScript -ScriptParameters $chatWorkspaceParams -SkipMessage "Chat workspace write smoke test skipped: script not found."
 }
+$localModelSmokeStructured = Get-SmokeStructuredResult -Output $localModelSmokeTestOutput
+$agentCapabilitiesSmokeStructured = Get-SmokeStructuredResult -Output $agentCapabilitiesSmokeTestOutput
 $sandboxExplain = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("sandbox")) {
     $sandboxExplain = Invoke-LoggedExternal -Label "Sandbox runtime summary" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "sandbox", "explain", "--json") -AllowFailure -SuccessSummary "Collected sandbox runtime summary." -FailureSummary "Could not collect sandbox runtime summary."
@@ -1175,9 +1216,36 @@ Write-Host ""
 Write-Host "==> Verification summary" -ForegroundColor Cyan
 Write-Detail "Requested checks: $(@($script:RequestedChecks) -join ', ')"
 if (Test-CheckRequested -Names @("health")) { Write-Detail "Health exit code: $($health.ExitCode)" }
-if (Test-CheckRequested -Names @("voice")) { Write-Detail "Voice smoke test: $(if ($voiceSmokeTestOutput -match 'passed|Voice-note transcription result') { 'PASS' } elseif ($voiceSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
-if (Test-CheckRequested -Names @("local-model")) { Write-Detail "Local model smoke test: $(if ($localModelSmokeTestOutput -match 'passed') { 'PASS' } elseif ($localModelSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
-if (Test-CheckRequested -Names @("agent")) { Write-Detail "Agent capability smoke test: $(if ($agentCapabilitiesSmokeTestOutput -match 'passed') { 'PASS' } elseif ($agentCapabilitiesSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
+if (Test-CheckRequested -Names @("voice")) { Write-Detail "Voice smoke test: $(Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null)" }
+if (Test-CheckRequested -Names @("local-model")) {
+    Write-Detail "Local model smoke test: $(Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured)"
+    if ($localModelSmokeStructured -and [string]$localModelSmokeStructured.status -eq "fail") {
+        Write-Detail "Local model failure category: $($localModelSmokeStructured.category)" ([ConsoleColor]::Yellow)
+        Write-Detail "Local model detail: $($localModelSmokeStructured.detail)" ([ConsoleColor]::Yellow)
+    }
+}
+if (Test-CheckRequested -Names @("agent")) {
+    Write-Detail "Agent capability smoke test: $(Get-SmokeSummaryLabel -Output $agentCapabilitiesSmokeTestOutput -StructuredResult $agentCapabilitiesSmokeStructured)"
+    if ($agentCapabilitiesSmokeStructured -and $agentCapabilitiesSmokeStructured.checks) {
+        foreach ($check in @($agentCapabilitiesSmokeStructured.checks)) {
+            $label = ("Agent check {0} ({1})" -f $check.name, $check.agentId)
+            $status = [string]$check.status
+            if ($status -eq "fail") {
+                Write-Detail ("{0}: FAIL [{1}]" -f $label, $check.category) ([ConsoleColor]::Yellow)
+                if ($check.detail) {
+                    Write-Detail "Reason: $($check.detail)" ([ConsoleColor]::Yellow)
+                }
+            }
+            elseif ($status -eq "pass") {
+                $runtimeSuffix = if ($check.runtime) { " via $($check.runtime)" } else { "" }
+                Write-Detail ("{0}: PASS{1}" -f $label, $runtimeSuffix)
+            }
+            else {
+                Write-Detail ("{0}: SKIP/INFO ({1})" -f $label, $check.detail)
+            }
+        }
+    }
+}
 if (Test-CheckRequested -Names @("sandbox")) { Write-Detail "Sandbox smoke test: $(if ($sandboxSmokeTestOutput -match 'passed') { 'PASS' } elseif ($sandboxSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
 if (Test-CheckRequested -Names @("chat-write")) { Write-Detail "Chat workspace write smoke test: $(if ($chatWorkspaceWriteSmokeTestOutput -match 'passed') { 'PASS' } elseif ($chatWorkspaceWriteSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
 if (Test-CheckRequested -Names @("multi-agent")) { Write-Detail "Multi-agent verification: $(if ((@($multiAgentVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($multiAgentVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' })" }
