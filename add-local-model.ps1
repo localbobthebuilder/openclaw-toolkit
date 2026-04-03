@@ -3,14 +3,21 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Model,
     [string]$Name,
-    [string[]]$Contexts = @("131072", "114688", "98304", "81920", "65536", "57344", "49152", "32768"),
-    [int]$BudgetMiB = 29000,
+    [string]$EndpointKey,
     [string[]]$InputKinds = @("text"),
     [switch]$Reasoning,
     [int]$MaxTokens = 8192,
+    [int]$StartContextWindow = 4096,
+    [int]$ContextStep = 20480,
+    [int]$MaxContextWindow = 262144,
+    [int]$HeadroomMiB = 1536,
+    [int]$MinimumContextWindow = 24576,
+    [double]$RawSizeLimitRatio = 0.70,
+    [string]$FallbackModel,
     [string]$AssignTo,
     [string]$ConfigPath,
-    [switch]$SkipBootstrap
+    [switch]$SkipBootstrap,
+    [string[]]$Contexts
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +27,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-Step {
     param([string]$Message)
@@ -72,13 +80,121 @@ function Invoke-External {
     }
 }
 
-function Test-CommandExists {
-    param([string]$Name)
-    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+function Invoke-OllamaCli {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [switch]$AllowFailure
+    )
+
+    $command = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "The 'ollama' CLI is required."
+    }
+
+    $oldHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $output = & $command.Source @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $oldHost) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:OLLAMA_HOST = $oldHost
+        }
+    }
+
+    $text = (@($output) | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if (-not $AllowFailure -and $exitCode -ne 0) {
+        throw "Command failed ($exitCode): ollama $($Arguments -join ' ')`n$text"
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output   = $text
+    }
+}
+
+function Get-LocalGpuSnapshot {
+    $query = & nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader,nounits 2>$null
+    if (-not $query) {
+        throw "Could not query nvidia-smi."
+    }
+
+    $firstLine = @($query)[0]
+    $parts = @($firstLine -split ',') | ForEach-Object { $_.Trim() }
+    if ($parts.Count -lt 3) {
+        throw "Could not parse nvidia-smi output."
+    }
+
+    return [pscustomobject]@{
+        Name     = [string]$parts[0]
+        TotalMiB = [int]$parts[1]
+        UsedMiB  = [int]$parts[2]
+    }
+}
+
+function Get-EndpointGpuTotalMiB {
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    $telemetry = if ($Endpoint.PSObject.Properties.Name -contains "telemetry") { $Endpoint.telemetry } else { $null }
+    $kind = if ($telemetry -and $telemetry.PSObject.Properties.Name -contains "kind" -and $telemetry.kind) {
+        ([string]$telemetry.kind).ToLowerInvariant()
+    }
+    else {
+        "local-nvidia-smi"
+    }
+
+    switch ($kind) {
+        "local-nvidia-smi" { return [int](Get-LocalGpuSnapshot).TotalMiB }
+        "static-gpu-total" {
+            if (-not $telemetry.gpuTotalMiB) {
+                throw "Endpoint '$($Endpoint.key)' has no telemetry.gpuTotalMiB configured."
+            }
+            return [int]$telemetry.gpuTotalMiB
+        }
+        default {
+            throw "Unsupported telemetry kind '$kind' for endpoint '$($Endpoint.key)'."
+        }
+    }
+}
+
+function Get-EndpointDiskFreeBytes {
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    $telemetry = if ($Endpoint.PSObject.Properties.Name -contains "telemetry") { $Endpoint.telemetry } else { $null }
+    $kind = if ($telemetry -and $telemetry.PSObject.Properties.Name -contains "kind" -and $telemetry.kind) {
+        ([string]$telemetry.kind).ToLowerInvariant()
+    }
+    else {
+        "local-nvidia-smi"
+    }
+
+    switch ($kind) {
+        "local-nvidia-smi" {
+            $ollamaRoot = Join-Path $env:USERPROFILE ".ollama"
+            $drive = (Get-Item -LiteralPath $ollamaRoot).PSDrive
+            return [int64]$drive.Free
+        }
+        "static-gpu-total" {
+            if ($telemetry.PSObject.Properties.Name -contains "diskFreeBytes" -and $telemetry.diskFreeBytes) {
+                return [int64]$telemetry.diskFreeBytes
+            }
+            throw "Endpoint '$($Endpoint.key)' needs telemetry.diskFreeBytes for pre-pull disk checks."
+        }
+        default {
+            throw "Unsupported telemetry kind '$kind' for endpoint '$($Endpoint.key)'."
+        }
+    }
 }
 
 function Get-OllamaInstalledIds {
-    $result = Invoke-External -FilePath "ollama" -Arguments @("list") -AllowFailure
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    $result = Invoke-OllamaCli -Endpoint $Endpoint -Arguments @("list") -AllowFailure
     if ($result.ExitCode -ne 0 -or -not $result.Output) {
         return @()
     }
@@ -99,17 +215,66 @@ function Get-OllamaInstalledIds {
     return @($ids | Select-Object -Unique)
 }
 
-function Ensure-ModelPulled {
+function Get-OllamaRegistryManifest {
     param([Parameter(Mandatory = $true)][string]$ModelId)
 
-    $installed = @(Get-OllamaInstalledIds)
-    if ($ModelId -in $installed) {
-        Write-Host "Ollama model $ModelId is already installed." -ForegroundColor Green
-        return
+    $parts = $ModelId -split ':', 2
+    $repo = $parts[0]
+    $tag = if ($parts.Count -gt 1) { $parts[1] } else { "latest" }
+    if ($repo -notmatch "/") {
+        $repo = "library/$repo"
     }
 
-    Write-Step "Pulling Ollama model $ModelId"
-    $null = Invoke-External -FilePath "ollama" -Arguments @("pull", $ModelId)
+    $url = "https://registry.ollama.ai/v2/$repo/manifests/$tag"
+    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-fsS", $url) -AllowFailure
+    if ($result.ExitCode -ne 0 -or -not $result.Output) {
+        throw "Could not fetch Ollama registry manifest for $ModelId from $url"
+    }
+
+    return ($result.Output | ConvertFrom-Json -Depth 20)
+}
+
+function Get-OllamaRegistryModelSizeBytes {
+    param([Parameter(Mandatory = $true)][string]$ModelId)
+
+    $manifest = Get-OllamaRegistryManifest -ModelId $ModelId
+    $sum = [int64]0
+    foreach ($layer in @($manifest.layers)) {
+        if ($layer.size) {
+            $sum += [int64]$layer.size
+        }
+    }
+    return $sum
+}
+
+function Set-AgentLocalModel {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$TargetAgentId,
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [Parameter(Mandatory = $true)][string]$EndpointKey
+    )
+
+    $mapping = @{
+        "chat-local"   = "localChatAgent"
+        "review-local" = "localReviewAgent"
+        "coder-local"  = "localCoderAgent"
+    }
+
+    if (-not $mapping.ContainsKey($TargetAgentId)) {
+        throw "Unknown local agent id for -AssignTo: $TargetAgentId"
+    }
+
+    $propertyName = $mapping[$TargetAgentId]
+    $agent = $Config.multiAgent.$propertyName
+    if ($null -eq $agent) {
+        throw "Config does not contain multiAgent.$propertyName"
+    }
+
+    $agent.modelSource = "local"
+    $agent.endpointKey = $EndpointKey
+    $agent.modelRef = "ollama/$ModelId"
+    return $true
 }
 
 function New-LocalModelEntry {
@@ -119,82 +284,156 @@ function New-LocalModelEntry {
         [Parameter(Mandatory = $true)][int]$ContextWindow,
         [Parameter(Mandatory = $true)][int]$MaxTokensValue,
         [string[]]$Inputs = @("text"),
-        [switch]$ReasoningModel
+        [switch]$ReasoningModel,
+        [int]$MinimumContextWindowValue = 24576,
+        [string]$FallbackModelId
     )
 
     $entry = [ordered]@{
-        id    = $ModelId
-        name  = $DisplayName
-        input = @($Inputs)
-        cost  = [ordered]@{
+        id                   = $ModelId
+        name                 = $DisplayName
+        input                = @($Inputs)
+        cost                 = [ordered]@{
             input      = 0
             output     = 0
             cacheRead  = 0
             cacheWrite = 0
         }
-        contextWindow = $ContextWindow
-        maxTokens     = $MaxTokensValue
+        minimumContextWindow = $MinimumContextWindowValue
+        contextWindow        = $ContextWindow
+        maxTokens            = $MaxTokensValue
     }
 
     if ($ReasoningModel) {
         $entry.reasoning = $true
     }
+    if (-not [string]::IsNullOrWhiteSpace($FallbackModelId)) {
+        $entry.fallbackModelId = $FallbackModelId
+    }
 
     return [pscustomobject]$entry
 }
 
-function Set-AgentModelRef {
+function Resolve-ConfiguredFallbackModelId {
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [string]$TargetAgentId,
-        [Parameter(Mandatory = $true)][string]$ModelRef
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [string]$ExplicitFallbackModel
     )
 
-    if ([string]::IsNullOrWhiteSpace($TargetAgentId)) {
-        return $false
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitFallbackModel)) {
+        return $ExplicitFallbackModel
     }
 
-    $mapping = @{
-        "chat-local"   = "localChatAgent"
-        "review-local" = "localReviewAgent"
-        "coder-local"  = "localCoderAgent"
-        "chat-openai"  = "hostedTelegramAgent"
-        "research"     = "researchAgent"
-        "main"         = "strongAgent"
+    $entry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId
+    if ($entry -and $entry.PSObject.Properties.Name -contains "fallbackModelId" -and $entry.fallbackModelId) {
+        return [string]$entry.fallbackModelId
     }
 
-    if (-not $mapping.ContainsKey($TargetAgentId)) {
-        throw "Unknown agent id for -AssignTo: $TargetAgentId"
-    }
-
-    $propertyName = $mapping[$TargetAgentId]
-    if (-not $Config.multiAgent -or -not $Config.multiAgent.$propertyName) {
-        throw "Config does not contain multiAgent.$propertyName"
-    }
-
-    $Config.multiAgent.$propertyName.modelRef = $ModelRef
-    return $true
+    return $null
 }
 
-if (-not (Test-CommandExists "ollama")) {
+function Resolve-UpperContextBound {
+    param(
+        [int]$RequestedMaxContextWindow,
+        [string[]]$LegacyContexts
+    )
+
+    $maxValue = [int]$RequestedMaxContextWindow
+    foreach ($entry in @($LegacyContexts)) {
+        foreach ($piece in @($entry -split '[,;\s]+')) {
+            if (-not $piece) { continue }
+            $parsed = 0
+            if ([int]::TryParse($piece, [ref]$parsed) -and $parsed -gt $maxValue) {
+                $maxValue = $parsed
+            }
+        }
+    }
+
+    return $maxValue
+}
+
+function Resolve-ModelPlan {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [string]$DisplayName,
+        [string]$FallbackModelId,
+        [bool]$AlreadyInstalled,
+        [System.Collections.Generic.HashSet[string]]$Visited
+    )
+
+    if ($Visited.Contains($ModelId)) {
+        throw "Fallback loop detected while resolving local model plan: $ModelId"
+    }
+    $Visited.Add($ModelId) | Out-Null
+
+    $gpuTotalMiB = Get-EndpointGpuTotalMiB -Endpoint $Endpoint
+    $rawBytes = Get-OllamaRegistryModelSizeBytes -ModelId $ModelId
+    $rawMiB = [int][math]::Ceiling($rawBytes / 1MB)
+    $rawLimitMiB = [int][math]::Floor($gpuTotalMiB * $RawSizeLimitRatio)
+    $diskFreeBytes = $null
+    $requiredDiskBytes = [int64][math]::Ceiling($rawBytes * 1.10)
+
+    if ($rawMiB -gt $rawLimitMiB) {
+        if ($FallbackModelId) {
+            Write-Warning "Skipping $ModelId on endpoint '$($Endpoint.key)': raw size ${rawMiB}MiB exceeds 70% VRAM threshold (${rawLimitMiB}MiB). Falling back to $FallbackModelId."
+            return (Resolve-ModelPlan -Config $Config -Endpoint $Endpoint -ModelId $FallbackModelId -DisplayName $DisplayName -FallbackModelId (Resolve-ConfiguredFallbackModelId -Config $Config -ModelId $FallbackModelId) -AlreadyInstalled:$false -Visited $Visited)
+        }
+
+        throw "Model '$ModelId' raw size ${rawMiB}MiB exceeds 70% of endpoint GPU VRAM (${rawLimitMiB}MiB). Configure a smaller fallback model."
+    }
+
+    if (-not $AlreadyInstalled) {
+        $diskFreeBytes = Get-EndpointDiskFreeBytes -Endpoint $Endpoint
+        if ($diskFreeBytes -lt $requiredDiskBytes) {
+            throw "Endpoint '$($Endpoint.key)' has insufficient free disk for $ModelId. Need about $([math]::Round($requiredDiskBytes / 1GB, 2)) GB, free is $([math]::Round($diskFreeBytes / 1GB, 2)) GB."
+        }
+    }
+
+    return [pscustomobject]@{
+        ModelId     = $ModelId
+        DisplayName = if ([string]::IsNullOrWhiteSpace($DisplayName)) { $ModelId } else { $DisplayName }
+        RawBytes    = [int64]$rawBytes
+        RawMiB      = [int]$rawMiB
+        GpuTotalMiB = [int]$gpuTotalMiB
+    }
+}
+
+if (-not (Get-Command "ollama" -ErrorAction SilentlyContinue)) {
     throw "The 'ollama' CLI is required."
 }
-if (-not (Test-CommandExists "pwsh")) {
+if (-not (Get-Command "pwsh" -ErrorAction SilentlyContinue)) {
     throw "PowerShell 7 (pwsh) is required for add-local-model."
-}
-if ([string]::IsNullOrWhiteSpace($Name)) {
-    $Name = $Model
 }
 
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$endpoint = Get-ToolkitOllamaEndpoint -Config $config -EndpointKey $EndpointKey
+if ($null -eq $endpoint) {
+    throw "Unknown Ollama endpoint key: $EndpointKey"
+}
+$installed = @(Get-OllamaInstalledIds -Endpoint $endpoint)
+$alreadyInstalled = $Model -in $installed
 
-Ensure-ModelPulled -ModelId $Model
+$upperContextBound = Resolve-UpperContextBound -RequestedMaxContextWindow $MaxContextWindow -LegacyContexts $Contexts
+$visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$fallbackModelId = Resolve-ConfiguredFallbackModelId -Config $config -ModelId $Model -ExplicitFallbackModel $FallbackModel
+$plan = Resolve-ModelPlan -Config $config -Endpoint $endpoint -ModelId $Model -DisplayName $Name -FallbackModelId $fallbackModelId -AlreadyInstalled:$alreadyInstalled -Visited $visited
+
+if ($plan.ModelId -notin $installed) {
+    Write-Step "Pulling Ollama model $($plan.ModelId) on endpoint $($endpoint.key)"
+    Invoke-OllamaCli -Endpoint $endpoint -Arguments @("pull", $plan.ModelId) | Out-Null
+}
+else {
+    Write-Host "Ollama model $($plan.ModelId) is already installed on endpoint $($endpoint.key)." -ForegroundColor Green
+}
 
 $probeScript = Join-Path (Split-Path -Parent $PSCommandPath) "probe-ollama-gpu-fit.ps1"
-Write-Step "Probing GPU-fit context for $Model"
-$probeOutput = & $probeScript -Model $Model -Contexts $Contexts -BudgetMiB $BudgetMiB -Json
+Write-Step "Probing GPU-fit context for $($plan.ModelId) on $($endpoint.key)"
+$probeOutput = & $probeScript -Model $plan.ModelId -EndpointKey $endpoint.key -ConfigPath $ConfigPath -StartContextWindow $StartContextWindow -ContextStep $ContextStep -MaxContextWindow $upperContextBound -HeadroomMiB $HeadroomMiB -MinimumContextWindow $MinimumContextWindow -Json
 if (-not $probeOutput) {
     throw "Model probe returned no output."
 }
@@ -211,18 +450,30 @@ if (-not $probeJsonLine) {
 }
 
 $probeResult = $probeJsonLine | ConvertFrom-Json -Depth 20
-if ($null -eq $probeResult.selectedContextWindow) {
-    throw "No tested context met the full-GPU + <= $BudgetMiB MiB budget rule for $Model."
+$selectedContextWindow = if ($null -ne $probeResult.selectedContextWindow) { [int]$probeResult.selectedContextWindow } else { $null }
+
+if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumContextWindow) {
+    $finalFallback = Resolve-ConfiguredFallbackModelId -Config $config -ModelId $plan.ModelId -ExplicitFallbackModel $FallbackModel
+    if ($finalFallback -and $finalFallback -ne $plan.ModelId) {
+        Write-Warning "Model '$($plan.ModelId)' did not fit with a useful context on endpoint '$($endpoint.key)'. Falling back to '$finalFallback'."
+        & $PSCommandPath -Model $finalFallback -Name $Name -EndpointKey $endpoint.key -InputKinds $InputKinds -Reasoning:$Reasoning -MaxTokens $MaxTokens -StartContextWindow $StartContextWindow -ContextStep $ContextStep -MaxContextWindow $upperContextBound -HeadroomMiB $HeadroomMiB -MinimumContextWindow $MinimumContextWindow -RawSizeLimitRatio $RawSizeLimitRatio -AssignTo $AssignTo -ConfigPath $ConfigPath -SkipBootstrap:$SkipBootstrap
+        exit $LASTEXITCODE
+    }
+
+    if ($null -eq $selectedContextWindow) {
+        throw "No tested context met the full-GPU + headroom rule for $($plan.ModelId) on endpoint '$($endpoint.key)'."
+    }
+
+    throw "Model '$($plan.ModelId)' only fit with contextWindow=$selectedContextWindow, which is below the minimum useful threshold of $MinimumContextWindow."
 }
 
-$selectedContextWindow = [int]$probeResult.selectedContextWindow
-$newEntry = New-LocalModelEntry -ModelId $Model -DisplayName $Name -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -Inputs $InputKinds -ReasoningModel:$Reasoning
+$newEntry = New-LocalModelEntry -ModelId $plan.ModelId -DisplayName $plan.DisplayName -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -Inputs $InputKinds -ReasoningModel:$Reasoning -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
 
 Write-Step "Updating bootstrap config"
 $newModels = New-Object System.Collections.Generic.List[object]
 $replaced = $false
 foreach ($existingModel in @($config.ollama.models)) {
-    if ([string]$existingModel.id -eq $Model) {
+    if ([string]$existingModel.id -eq $plan.ModelId) {
         $newModels.Add($newEntry)
         $replaced = $true
     }
@@ -233,23 +484,19 @@ foreach ($existingModel in @($config.ollama.models)) {
 if (-not $replaced) {
     $newModels.Add($newEntry)
 }
-$config.ollama.models = @(
-    foreach ($entry in $newModels) {
-        $entry
-    }
-)
+$config.ollama.models = $newModels.ToArray()
 
 $assigned = $false
 if ($AssignTo) {
-    $assigned = Set-AgentModelRef -Config $config -TargetAgentId $AssignTo -ModelRef ("ollama/" + $Model)
+    $assigned = Set-AgentLocalModel -Config $config -TargetAgentId $AssignTo -ModelId $plan.ModelId -EndpointKey $endpoint.key
 }
 
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 
-Write-Host "Updated bootstrap config for ollama/$Model with contextWindow=$selectedContextWindow and maxTokens=$MaxTokens." -ForegroundColor Green
+Write-Host "Updated bootstrap config for $($endpoint.providerId)/$($plan.ModelId) with contextWindow=$selectedContextWindow and maxTokens=$MaxTokens." -ForegroundColor Green
 if ($assigned) {
-    Write-Host "Assigned ollama/$Model to agent $AssignTo." -ForegroundColor Green
+    Write-Host "Assigned $($endpoint.providerId)/$($plan.ModelId) to agent $AssignTo on endpoint $($endpoint.key)." -ForegroundColor Green
 }
 
 if (-not $SkipBootstrap) {

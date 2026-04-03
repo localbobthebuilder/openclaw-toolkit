@@ -8,6 +8,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
+
 function Write-ProgressLine {
     param(
         [string]$Message,
@@ -120,7 +122,25 @@ if (-not (Test-Path $ConfigFilePath)) {
 }
 
 $cfg = Get-Content -Raw $ConfigFilePath | ConvertFrom-Json
-$ollamaEntries = @($cfg.models.providers.ollama.models)
+$localProviderIds = @(
+    foreach ($providerName in @($cfg.models.providers.PSObject.Properties.Name)) {
+        if ($providerName -like "ollama*") {
+            [string]$providerName
+        }
+    }
+)
+$ollamaEntries = @(
+    foreach ($providerName in $localProviderIds) {
+        foreach ($model in @($cfg.models.providers.$providerName.models)) {
+            [pscustomobject]@{
+                providerId = $providerName
+                id         = [string]$model.id
+                name       = [string]$model.name
+                input      = @($model.input)
+            }
+        }
+    }
+)
 
 if ($ollamaEntries.Count -eq 0) {
     $skipResult = [pscustomobject]@{
@@ -137,9 +157,14 @@ if ($ollamaEntries.Count -eq 0) {
 
 $agentConfig = @($cfg.agents.list) | Where-Object { $_.id -eq $AgentId } | Select-Object -First 1
 $preferred = $null
-if ($agentConfig -and $agentConfig.model -and $agentConfig.model.primary -and [string]$agentConfig.model.primary -like "ollama/*") {
-    $agentModelId = ([string]$agentConfig.model.primary).Substring("ollama/".Length)
-    $preferred = $ollamaEntries | Where-Object { $_.id -eq $agentModelId } | Select-Object -First 1
+if ($agentConfig -and $agentConfig.model -and $agentConfig.model.primary) {
+    $primaryRef = [string]$agentConfig.model.primary
+    if ($primaryRef -match '^[^/]+/.+$') {
+        $providerId, $agentModelId = $primaryRef -split '/', 2
+        if ($providerId -like "ollama*") {
+            $preferred = $ollamaEntries | Where-Object { $_.providerId -eq $providerId -and $_.id -eq $agentModelId } | Select-Object -First 1
+        }
+    }
 }
 if ($null -eq $preferred) {
     $preferred = $ollamaEntries | Where-Object { $_.id -match 'flash|mini|small' } | Select-Object -First 1
@@ -155,7 +180,7 @@ if ($null -eq $preferred -or -not $preferred.id) {
     throw "Could not resolve any Ollama model candidate from $ConfigFilePath."
 }
 
-$targetModelRef = "ollama/$($preferred.id)"
+$targetModelRef = "$($preferred.providerId)/$($preferred.id)"
 $sessionId = "smoke-localmodel-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 Write-ProgressLine "Using container $ContainerName" Cyan
 Write-ProgressLine "Agent $AgentId will target $targetModelRef" Cyan
@@ -204,8 +229,8 @@ try {
     $provider = [string]$json.result.meta.agentMeta.provider
     $model = [string]$json.result.meta.agentMeta.model
 
-    if ($provider -ne "ollama") {
-        throw "Expected provider 'ollama' but got '$provider'."
+    if ($provider -notlike "ollama*") {
+        throw "Expected provider 'ollama*' but got '$provider'."
     }
     if ($payloadText.Trim() -ne "LOCAL_MODEL_OK") {
         throw "Expected LOCAL_MODEL_OK but got: $payloadText"

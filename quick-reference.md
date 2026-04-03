@@ -100,9 +100,9 @@ Useful extras:
 - Local delegated coder diagnostic:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test`
 - Ollama GPU fit probe:
-  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -Contexts "131072 114688 98304" -BudgetMiB 29000`
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072`
 - Add a new local model end to end:
-  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -Contexts "131072 114688 98304" -BudgetMiB 29000 -AssignTo coder-local`
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc`
 - Remove a local model:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b`
 - Sandbox smoke test:

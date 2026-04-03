@@ -12,6 +12,7 @@ if (-not $ConfigPath) {
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-upstream-patches.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -858,9 +859,11 @@ function Get-ManagedModelRefs {
     }
 
     if ($Config.ollama -and $Config.ollama.enabled) {
-        foreach ($model in @($Config.ollama.models)) {
-            if ($model.id) {
-                $refs = Add-UniqueString -List $refs -Value ("ollama/" + [string]$model.id)
+        foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+            foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+                if ($model.id) {
+                    $refs = Add-UniqueString -List $refs -Value (Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey ([string]$endpoint.key))
+                }
             }
         }
     }
@@ -873,7 +876,10 @@ function Get-ManagedModelRefs {
 }
 
 function Get-OllamaTags {
-    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", "http://127.0.0.1:11434/api/tags") -AllowFailure
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    $tagsUrl = ([string]$Endpoint.baseUrl).TrimEnd("/") + "/api/tags"
+    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $tagsUrl) -AllowFailure
     if ($result.ExitCode -ne 0 -or -not $result.Output -or $result.Output -notmatch '"models"') {
         return @()
     }
@@ -914,39 +920,135 @@ function Convert-OllamaTagToProviderModel {
     }
 }
 
+function Convert-ConfiguredLocalModelToProviderModel {
+    param([Parameter(Mandatory = $true)]$Model)
+
+    $entry = [ordered]@{
+        id    = [string]$Model.id
+        name  = if ($Model.name) { [string]$Model.name } else { [string]$Model.id }
+        input = @($Model.input)
+        cost  = [ordered]@{
+            input      = 0
+            output     = 0
+            cacheRead  = 0
+            cacheWrite = 0
+        }
+    }
+
+    if ($Model.PSObject.Properties.Name -contains "reasoning" -and $Model.reasoning) {
+        $entry.reasoning = $true
+    }
+    if ($Model.PSObject.Properties.Name -contains "contextWindow" -and $Model.contextWindow) {
+        $entry.contextWindow = [int]$Model.contextWindow
+    }
+    if ($Model.PSObject.Properties.Name -contains "maxTokens" -and $Model.maxTokens) {
+        $entry.maxTokens = [int]$Model.maxTokens
+    }
+    if ($Model.PSObject.Properties.Name -contains "cost" -and $Model.cost) {
+        $entry.cost = [ordered]@{
+            input      = if ($Model.cost.input -ne $null) { $Model.cost.input } else { 0 }
+            output     = if ($Model.cost.output -ne $null) { $Model.cost.output } else { 0 }
+            cacheRead  = if ($Model.cost.cacheRead -ne $null) { $Model.cost.cacheRead } else { 0 }
+            cacheWrite = if ($Model.cost.cacheWrite -ne $null) { $Model.cost.cacheWrite } else { 0 }
+        }
+    }
+
+    return $entry
+}
+
+function Invoke-OllamaCli {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [switch]$AllowFailure
+    )
+
+    $command = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "The 'ollama' CLI is required."
+    }
+
+    $oldHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $output = & $command.Source @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $oldHost) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:OLLAMA_HOST = $oldHost
+        }
+    }
+
+    $text = (@($output) | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if (-not $AllowFailure -and $exitCode -ne 0) {
+        throw "Command failed ($exitCode): ollama $($Arguments -join ' ')`n$text"
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output   = $text
+    }
+}
+
+function Get-AgentOllamaEndpointKey {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $AgentConfig
+    )
+
+    if ($null -ne $AgentConfig -and
+        $AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
+        return [string]$AgentConfig.endpointKey
+    }
+
+    $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
+    if ($null -ne $defaultEndpoint) {
+        return [string]$defaultEndpoint.key
+    }
+
+    return "local"
+}
+
 function Resolve-OllamaModelRef {
     param(
         [string]$DesiredRef,
         [string[]]$AvailableRefs = @(),
         [Parameter(Mandatory = $true)]$Config,
-        [string]$Purpose
+        [string]$Purpose,
+        [string]$EndpointKey
     )
 
-    if ([string]::IsNullOrWhiteSpace($DesiredRef) -or -not $DesiredRef.StartsWith("ollama/")) {
+    if ([string]::IsNullOrWhiteSpace($DesiredRef) -or (-not (Test-IsToolkitLocalModelRef -Config $Config -ModelRef $DesiredRef) -and -not $DesiredRef.StartsWith("ollama/"))) {
         return $DesiredRef
     }
 
-    if ($DesiredRef -in @($AvailableRefs)) {
-        return $DesiredRef
+    $desiredResolvedRef = Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $DesiredRef -EndpointKey $EndpointKey
+    if ($desiredResolvedRef -in @($AvailableRefs)) {
+        return $desiredResolvedRef
     }
 
-    foreach ($model in @($Config.ollama.models)) {
+    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
         if ($model.id) {
-            $candidate = "ollama/" + [string]$model.id
+            $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $EndpointKey
             if ($candidate -in @($AvailableRefs)) {
-                Write-WarnLine "Preferred $Purpose model $DesiredRef is unavailable. Falling back to $candidate."
+                Write-WarnLine "Preferred $Purpose model $desiredResolvedRef is unavailable. Falling back to $candidate."
                 return $candidate
             }
         }
     }
 
     if (@($AvailableRefs).Count -gt 0) {
-        Write-WarnLine "Preferred $Purpose model $DesiredRef is unavailable. Falling back to $($AvailableRefs[0])."
+        Write-WarnLine "Preferred $Purpose model $desiredResolvedRef is unavailable. Falling back to $($AvailableRefs[0])."
         return [string]$AvailableRefs[0]
     }
 
-    Write-WarnLine "Preferred $Purpose model $DesiredRef is unavailable and no local Ollama fallback is present."
-    return $DesiredRef
+    Write-WarnLine "Preferred $Purpose model $desiredResolvedRef is unavailable and no local Ollama fallback is present."
+    return $desiredResolvedRef
 }
 
 function Ensure-OllamaState {
@@ -954,92 +1056,120 @@ function Ensure-OllamaState {
 
     $state = [ordered]@{
         Reachable                 = $false
-        Tags                      = @()
-        ProviderModels            = @()
+        EndpointStates            = @{}
         AvailableRefs             = @()
+        ProviderEntries           = @{}
         ResolvedLocalChatModelRef = $null
         ResolvedHostedTelegramModelRef = $null
         ResolvedLocalReviewModelRef = $null
         ResolvedLocalCoderModelRef = $null
     }
 
-    $tags = @(Get-OllamaTags)
-    if ($tags.Count -eq 0) {
-        return [pscustomobject]$state
-    }
-
-    $state.Reachable = $true
-    $availableIds = @($tags | ForEach-Object { [string]$_.model })
-    $ollamaCommand = Get-Command "ollama" -ErrorAction SilentlyContinue
-
-    foreach ($configuredModel in @($Config.ollama.models)) {
-        if (-not $configuredModel.id) {
+    $referencedLocalModels = New-Object System.Collections.Generic.List[object]
+    foreach ($agentConfig in @(
+            $Config.multiAgent.localChatAgent,
+            $Config.multiAgent.localReviewAgent,
+            $Config.multiAgent.localCoderAgent
+        )) {
+        if ($null -eq $agentConfig -or -not ($agentConfig.PSObject.Properties.Name -contains "enabled") -or -not $agentConfig.enabled) {
+            continue
+        }
+        $modelSource = if ($agentConfig.PSObject.Properties.Name -contains "modelSource" -and $agentConfig.modelSource) {
+            ([string]$agentConfig.modelSource).ToLowerInvariant()
+        }
+        else {
+            "static"
+        }
+        if ($modelSource -ne "local") {
             continue
         }
 
-        $modelId = [string]$configuredModel.id
-        if ($modelId -in $availableIds) {
-            continue
+        $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $agentConfig
+        foreach ($candidate in @($agentConfig.candidateModelRefs)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$candidate) -and ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef ([string]$candidate)) -or ([string]$candidate).StartsWith("ollama/"))) {
+                $modelId = Get-ToolkitModelIdFromRef -ModelRef ([string]$candidate)
+                $referencedLocalModels.Add([pscustomobject]@{ endpointKey = $endpointKey; modelId = $modelId })
+            }
         }
-
-        if ($null -eq $ollamaCommand) {
-            Write-WarnLine "Ollama model '$modelId' is missing and the 'ollama' CLI is not available to pull it automatically."
-            continue
-        }
-
-        Write-Step "Pulling missing Ollama model $modelId"
-        $pull = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("pull", $modelId) -AllowFailure
-        if ($pull.ExitCode -ne 0) {
-            Write-WarnLine "Failed to pull Ollama model '$modelId'. Bootstrap will use another available local model if possible."
+        if ($agentConfig.modelRef -and ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef ([string]$agentConfig.modelRef)) -or ([string]$agentConfig.modelRef).StartsWith("ollama/"))) {
+            $referencedLocalModels.Add([pscustomobject]@{ endpointKey = $endpointKey; modelId = (Get-ToolkitModelIdFromRef -ModelRef ([string]$agentConfig.modelRef)) })
         }
     }
 
-    $tags = @(Get-OllamaTags)
-    if ($tags.Count -eq 0) {
-        return [pscustomobject]$state
-    }
+    foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        $tags = @(Get-OllamaTags -Endpoint $endpoint)
+        $availableIds = @($tags | ForEach-Object { [string]$_.model })
 
-    $state.Reachable = $true
-    $state.Tags = $tags
+        if ($endpoint.autoPullMissingModels) {
+            foreach ($request in @($referencedLocalModels | Where-Object { $_.endpointKey -eq $endpoint.key })) {
+                if ($request.modelId -in $availableIds) {
+                    continue
+                }
 
-    $availableRefs = @()
-    foreach ($tag in $tags) {
-        if ($tag.model) {
-            $availableRefs = Add-UniqueString -List $availableRefs -Value ("ollama/" + [string]$tag.model)
-        }
-    }
-    $state.AvailableRefs = @($availableRefs)
+                Write-Step "Pulling missing Ollama model $($request.modelId) on endpoint $($endpoint.key)"
+                $pull = Invoke-OllamaCli -Endpoint $endpoint -Arguments @("pull", [string]$request.modelId) -AllowFailure
+                if ($pull.ExitCode -ne 0) {
+                    Write-WarnLine "Failed to pull Ollama model '$($request.modelId)' on endpoint '$($endpoint.key)'. Bootstrap will use another available local model if possible."
+                }
+            }
 
-    $providerModels = @()
-    $configuredIds = @()
-    foreach ($configuredModel in @($Config.ollama.models)) {
-        if (-not $configuredModel.id) {
-            continue
+            $tags = @(Get-OllamaTags -Endpoint $endpoint)
+            $availableIds = @($tags | ForEach-Object { [string]$_.model })
         }
 
-        $configuredIds = Add-UniqueString -List $configuredIds -Value ([string]$configuredModel.id)
-        $candidateRef = "ollama/" + [string]$configuredModel.id
-        if ($candidateRef -in $availableRefs) {
-            $providerModels += $configuredModel
+        if ($tags.Count -gt 0) {
+            $state.Reachable = $true
+        }
+
+        $availableRefs = @()
+        foreach ($tag in $tags) {
+            if ($tag.model) {
+                $availableRefs = Add-UniqueString -List $availableRefs -Value (Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$tag.model) -EndpointKey ([string]$endpoint.key))
+            }
+        }
+
+        foreach ($ref in @($availableRefs)) {
+            $state.AvailableRefs = Add-UniqueString -List $state.AvailableRefs -Value $ref
+        }
+
+        $providerModels = @()
+        $configuredIds = @()
+        foreach ($configuredModel in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+            if (-not $configuredModel.id) {
+                continue
+            }
+            $configuredIds = Add-UniqueString -List $configuredIds -Value ([string]$configuredModel.id)
+            $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $configuredModel)
+        }
+
+        foreach ($tag in $tags) {
+            $tagId = [string]$tag.model
+            if ($tagId -notin $configuredIds) {
+                $providerModels += (Convert-OllamaTagToProviderModel -Tag $tag)
+            }
+        }
+
+        $state.EndpointStates[$endpoint.key] = [ordered]@{
+            endpoint      = $endpoint
+            tags          = @($tags)
+            availableRefs = @($availableRefs)
+        }
+        $state.ProviderEntries[$endpoint.providerId] = [ordered]@{
+            baseUrl = [string]$endpoint.baseUrl
+            apiKey  = [string]$endpoint.apiKey
+            api     = "ollama"
+            models  = @($providerModels)
         }
     }
 
-    foreach ($tag in $tags) {
-        $tagId = [string]$tag.model
-        if ($tagId -notin $configuredIds) {
-            $providerModels += (Convert-OllamaTagToProviderModel -Tag $tag)
-        }
-    }
-
-    $state.ProviderModels = @($providerModels)
     if ($Config.multiAgent -and $Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled) {
-        $state.ResolvedLocalChatModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localChatAgent -AvailableOllamaRefs $availableRefs -Purpose "chat-local" -FallbackToFirstCandidate
+        $state.ResolvedLocalChatModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localChatAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "chat-local" -FallbackToFirstCandidate
     }
     if ($Config.multiAgent -and $Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled) {
-        $state.ResolvedLocalReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localReviewAgent -AvailableOllamaRefs $availableRefs -Purpose "review-local" -FallbackToFirstCandidate
+        $state.ResolvedLocalReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localReviewAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-local" -FallbackToFirstCandidate
     }
     if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled) {
-        $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $availableRefs -Purpose "coder-local" -FallbackToFirstCandidate
+        $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-local" -FallbackToFirstCandidate
     }
 
     return [pscustomobject]$state
@@ -1075,9 +1205,11 @@ function Get-PreferredLocalFallbackRef {
         [string[]]$AvailableOllamaRefs = @()
     )
 
-    foreach ($model in @($Config.ollama.models)) {
+    $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
+    $defaultEndpointKey = if ($null -ne $defaultEndpoint) { [string]$defaultEndpoint.key } else { "local" }
+    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
         if ($model.id) {
-            $candidate = "ollama/" + [string]$model.id
+            $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $defaultEndpointKey
             if ($candidate -in @($AvailableOllamaRefs)) {
                 return $candidate
             }
@@ -1164,9 +1296,11 @@ function Resolve-AgentPreferredModelRef {
     if ($modelSource -eq "hosted") {
         $authReadyProviders = Get-AuthReadyHostedProviders
         foreach ($candidateRef in @($candidateRefs)) {
-            if ($candidateRef -like "ollama/*") {
-                if ($candidateRef -in @($AvailableOllamaRefs) -and $AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
-                    return $candidateRef
+            if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRef) -or $candidateRef -like "ollama/*") {
+                $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+                $resolvedLocalCandidate = Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $candidateRef -EndpointKey $endpointKey
+                if ($resolvedLocalCandidate -in @($AvailableOllamaRefs) -and $AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
+                    return $resolvedLocalCandidate
                 }
                 continue
             }
@@ -1179,8 +1313,8 @@ function Resolve-AgentPreferredModelRef {
 
         if ($AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
             foreach ($candidateRef in @($candidateRefs)) {
-                if ($candidateRef -like "ollama/*") {
-                    return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose)
+                if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRef) -or $candidateRef -like "ollama/*") {
+                    return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig))
                 }
             }
             $localFallbackRef = Get-PreferredLocalFallbackRef -Config $Config -AvailableOllamaRefs $AvailableOllamaRefs
@@ -1201,8 +1335,8 @@ function Resolve-AgentPreferredModelRef {
 
     if ($modelSource -eq "local") {
         foreach ($candidateRef in @($candidateRefs)) {
-            if ($candidateRef -like "ollama/*") {
-                return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose)
+            if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRef) -or $candidateRef -like "ollama/*") {
+                return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig))
             }
         }
 
@@ -1674,13 +1808,11 @@ if ($config.contextManagement) {
 
 if ($config.ollama.enabled) {
     if ($ollamaState -and $ollamaState.Reachable) {
-        $ollamaProvider = [ordered]@{
-            baseUrl = $config.ollama.baseUrl
-            apiKey  = $config.ollama.apiKey
-            api     = "ollama"
-            models  = @($ollamaState.ProviderModels)
+        foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $config)) {
+            if ($ollamaState.ProviderEntries.Contains($endpoint.providerId)) {
+                Set-OpenClawConfigJson -Path ("models.providers." + [string]$endpoint.providerId) -Value $ollamaState.ProviderEntries[$endpoint.providerId]
+            }
         }
-        Set-OpenClawConfigJson -Path "models.providers.ollama" -Value $ollamaProvider
         if ($config.ollama.clearFallbacks) {
             Set-OpenClawConfigJson -Path "agents.defaults.model.fallbacks" -Value @()
         }

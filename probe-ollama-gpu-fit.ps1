@@ -2,8 +2,13 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Model,
-    [string[]]$Contexts,
-    [int]$BudgetMiB = 29000,
+    [string]$EndpointKey,
+    [string]$ConfigPath,
+    [int]$StartContextWindow = 4096,
+    [int]$ContextStep = 20480,
+    [int]$MaxContextWindow = 262144,
+    [int]$HeadroomMiB = 1536,
+    [int]$MinimumContextWindow = 24576,
     [string]$Prompt = "Reply with OK only.",
     [string]$KeepAlive = "5m",
     [int]$Samples = 4,
@@ -12,6 +17,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ConfigPath) {
+    $ConfigPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "openclaw-bootstrap.config.json"
+}
+
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-Step {
     param([string]$Message)
@@ -28,28 +40,74 @@ function Write-Detail {
     Write-Host "    $Message" -ForegroundColor $Color
 }
 
-function Get-GpuSnapshot {
-    $text = (& nvidia-smi) -join [Environment]::NewLine
-    $match = [regex]::Match(
-        $text,
-        '\|\s*0\s+NVIDIA GeForce RTX 5090.*?\|\s*([0-9]+)MiB /\s*([0-9]+)MiB\s*\|\s*([0-9]+)%',
-        'Singleline'
+function Invoke-OllamaCli {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [switch]$AllowFailure
     )
-    if (-not $match.Success) {
-        throw "Could not parse nvidia-smi output."
+
+    $command = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "The 'ollama' CLI is required."
+    }
+
+    $oldHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = [string]$Endpoint.baseUrl
+        $output = & $command.Source @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $oldHost) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:OLLAMA_HOST = $oldHost
+        }
+    }
+
+    $text = (@($output) | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if (-not $AllowFailure -and $exitCode -ne 0) {
+        throw "Command failed ($exitCode): ollama $($Arguments -join ' ')`n$text"
     }
 
     return [pscustomobject]@{
-        UsedMiB  = [int]$match.Groups[1].Value
-        TotalMiB = [int]$match.Groups[2].Value
-        GpuUtil  = [int]$match.Groups[3].Value
+        ExitCode = $exitCode
+        Output   = $text
+    }
+}
+
+function Convert-DisplayedSizeToMiB {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Text.Trim(), '^(?<value>[0-9]+(?:\.[0-9]+)?)\s*(?<unit>[KMGTP]?B)$', 'IgnoreCase')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $value = [double]$match.Groups["value"].Value
+    $unit = $match.Groups["unit"].Value.ToUpperInvariant()
+    switch ($unit) {
+        "KB" { return [int][math]::Round($value / 1024) }
+        "MB" { return [int][math]::Round($value) }
+        "GB" { return [int][math]::Round($value * 1024) }
+        "TB" { return [int][math]::Round($value * 1024 * 1024) }
+        default { return $null }
     }
 }
 
 function Get-OllamaLine {
-    param([Parameter(Mandatory = $true)][string]$TargetModel)
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string]$TargetModel
+    )
 
-    $psText = (& ollama ps) -join [Environment]::NewLine
+    $psText = (Invoke-OllamaCli -Endpoint $Endpoint -Arguments @("ps") -AllowFailure).Output
     return ($psText -split "(`r`n|`n|`r)" | Where-Object { $_ -match [regex]::Escape($TargetModel) } | Select-Object -First 1)
 }
 
@@ -59,6 +117,7 @@ function Parse-OllamaLine {
     if ([string]::IsNullOrWhiteSpace($Line)) {
         return [pscustomobject]@{
             Size      = ""
+            SizeMiB   = $null
             Processor = ""
             Context   = ""
         }
@@ -69,56 +128,113 @@ function Parse-OllamaLine {
     if ($parts.Count -lt 5) {
         return [pscustomobject]@{
             Size      = ""
+            SizeMiB   = $null
             Processor = ""
             Context   = ""
         }
     }
 
+    $size = $parts[2].Trim()
     return [pscustomobject]@{
-        Size      = $parts[2].Trim()
+        Size      = $size
+        SizeMiB   = Convert-DisplayedSizeToMiB -Text $size
         Processor = $parts[3].Trim()
         Context   = $parts[4].Trim()
     }
 }
 
-if (-not $Contexts -or $Contexts.Count -eq 0) {
-    throw "Provide at least one context size via -Contexts."
-}
+function Get-LocalGpuSnapshot {
+    $query = & nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader,nounits 2>$null
+    if (-not $query) {
+        throw "Could not query nvidia-smi."
+    }
 
-$normalizedContexts = @()
-foreach ($entry in @($Contexts)) {
-    $pieces = @($entry -split '[,;\s]+') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-    foreach ($piece in @($pieces)) {
-        $parsed = 0
-        if (-not [int]::TryParse($piece, [ref]$parsed)) {
-            throw "Invalid context value: $piece"
-        }
-        $normalizedContexts += $parsed
+    $firstLine = @($query)[0]
+    $parts = @($firstLine -split ',') | ForEach-Object { $_.Trim() }
+    if ($parts.Count -lt 3) {
+        throw "Could not parse nvidia-smi output."
+    }
+
+    return [pscustomobject]@{
+        Name     = [string]$parts[0]
+        TotalMiB = [int]$parts[1]
+        UsedMiB  = [int]$parts[2]
     }
 }
 
-if (@($normalizedContexts).Count -eq 0) {
-    throw "No valid context values were parsed from -Contexts."
+function Get-EndpointGpuTelemetry {
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    $telemetry = $null
+    if ($Endpoint.PSObject.Properties.Name -contains "telemetry") {
+        $telemetry = $Endpoint.telemetry
+    }
+
+    $kind = if ($telemetry -and $telemetry.PSObject.Properties.Name -contains "kind" -and $telemetry.kind) {
+        ([string]$telemetry.kind).ToLowerInvariant()
+    }
+    else {
+        "local-nvidia-smi"
+    }
+
+    switch ($kind) {
+        "local-nvidia-smi" {
+            $snapshot = Get-LocalGpuSnapshot
+            return [pscustomobject]@{
+                Kind     = $kind
+                TotalMiB = [int]$snapshot.TotalMiB
+                UsedMiB  = [int]$snapshot.UsedMiB
+                Name     = [string]$snapshot.Name
+            }
+        }
+        "static-gpu-total" {
+            if (-not $telemetry.gpuTotalMiB) {
+                throw "Endpoint '$($Endpoint.key)' uses telemetry.kind=static-gpu-total but has no telemetry.gpuTotalMiB."
+            }
+
+            return [pscustomobject]@{
+                Kind     = $kind
+                TotalMiB = [int]$telemetry.gpuTotalMiB
+                UsedMiB  = $null
+                Name     = if ($telemetry.PSObject.Properties.Name -contains "gpuName") { [string]$telemetry.gpuName } else { "" }
+            }
+        }
+        default {
+            throw "Unsupported endpoint telemetry kind '$kind' for endpoint '$($Endpoint.key)'."
+        }
+    }
 }
 
-Write-Detail ("Parsed contexts: " + (@($normalizedContexts) -join ", "))
-
-if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command "ollama" -ErrorAction SilentlyContinue)) {
     throw "The 'ollama' CLI is required."
 }
 
-if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
-    throw "The 'nvidia-smi' CLI is required."
+$ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+$config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+
+$endpoint = Get-ToolkitOllamaEndpoint -Config $config -EndpointKey $EndpointKey
+if ($null -eq $endpoint) {
+    throw "Unknown Ollama endpoint key: $EndpointKey"
 }
 
-$apiUrl = "http://127.0.0.1:11434/api/generate"
+$gpu = Get-EndpointGpuTelemetry -Endpoint $endpoint
+$budgetMiB = [int]($gpu.TotalMiB - $HeadroomMiB)
+if ($budgetMiB -le 0) {
+    throw "HeadroomMiB=$HeadroomMiB leaves no usable VRAM budget on endpoint '$($endpoint.key)'."
+}
+
 $results = New-Object System.Collections.Generic.List[object]
 $selected = $null
+$context = [int]$StartContextWindow
 
-foreach ($ctx in $normalizedContexts) {
-    Write-Step "$Model at ctx=$ctx"
-    & ollama stop $Model | Out-Null
-    Start-Sleep -Seconds 4
+Write-Detail ("Endpoint: {0} ({1})" -f $endpoint.key, $endpoint.baseUrl)
+Write-Detail ("GPU total={0} MiB, required headroom={1} MiB, budget={2} MiB" -f $gpu.TotalMiB, $HeadroomMiB, $budgetMiB)
+
+while ($context -le $MaxContextWindow) {
+    Write-Step "$Model at ctx=$context"
+    Invoke-OllamaCli -Endpoint $endpoint -Arguments @("stop", $Model) -AllowFailure | Out-Null
+    Start-Sleep -Seconds 3
 
     $payload = @{
         model      = $Model
@@ -126,27 +242,30 @@ foreach ($ctx in $normalizedContexts) {
         stream     = $false
         keep_alive = $KeepAlive
         options    = @{
-            num_ctx     = $ctx
+            num_ctx     = $context
             num_predict = 8
         }
     }
 
     $job = Start-Job -ScriptBlock {
-        param($Url, $Body)
-        $json = $Body | ConvertTo-Json -Depth 6
+        param($BaseUrl, $Body)
+        $json = $Body | ConvertTo-Json -Depth 10
+        $uri = ([string]$BaseUrl).TrimEnd("/") + "/api/generate"
         try {
-            Invoke-RestMethod -Method Post -Uri $Url -ContentType "application/json" -Body $json | Out-Null
+            Invoke-RestMethod -Method Post -Uri $uri -ContentType "application/json" -Body $json | Out-Null
         }
         catch {
         }
-    } -ArgumentList $apiUrl, $payload
+    } -ArgumentList $endpoint.baseUrl, $payload
 
     $peak = 0
     for ($i = 0; $i -lt $Samples; $i++) {
         Start-Sleep -Seconds $SampleIntervalSeconds
-        $gpu = Get-GpuSnapshot
-        if ($gpu.UsedMiB -gt $peak) {
-            $peak = $gpu.UsedMiB
+        if ($gpu.Kind -eq "local-nvidia-smi") {
+            $gpuSample = Get-LocalGpuSnapshot
+            if ($gpuSample.UsedMiB -gt $peak) {
+                $peak = [int]$gpuSample.UsedMiB
+            }
         }
         if ($job.State -match "Completed|Failed|Stopped") {
             break
@@ -158,47 +277,56 @@ foreach ($ctx in $normalizedContexts) {
     Remove-Job $job -Force
 
     Start-Sleep -Seconds 2
-    $parsed = Parse-OllamaLine -Line (Get-OllamaLine -TargetModel $Model)
-    & ollama stop $Model | Out-Null
-    Start-Sleep -Seconds 5
+    $parsed = Parse-OllamaLine -Line (Get-OllamaLine -Endpoint $endpoint -TargetModel $Model)
+    Invoke-OllamaCli -Endpoint $endpoint -Arguments @("stop", $Model) -AllowFailure | Out-Null
+    Start-Sleep -Seconds 4
 
-    $fitsBudget = $peak -le $BudgetMiB
+    $estimatedUsageMiB = if ($gpu.Kind -eq "local-nvidia-smi") { $peak } else { $parsed.SizeMiB }
+    $fitsBudget = $null -ne $estimatedUsageMiB -and $estimatedUsageMiB -le $budgetMiB
     $fullGpu = $parsed.Processor -eq "100% GPU"
+
     $result = [pscustomobject]@{
-        Model         = $Model
-        ContextWindow = $ctx
-        PeakMiB       = $peak
-        Size          = $parsed.Size
-        Processor     = $parsed.Processor
-        LoadedContext = $parsed.Context
-        FitsBudget    = $fitsBudget
-        FullGpu       = $fullGpu
+        Model             = $Model
+        EndpointKey       = [string]$endpoint.key
+        ContextWindow     = [int]$context
+        EstimatedUsageMiB = $estimatedUsageMiB
+        PeakMiB           = if ($gpu.Kind -eq "local-nvidia-smi") { [int]$peak } else { $null }
+        Size              = $parsed.Size
+        SizeMiB           = $parsed.SizeMiB
+        Processor         = $parsed.Processor
+        LoadedContext     = $parsed.Context
+        FitsBudget        = [bool]$fitsBudget
+        FullGpu           = [bool]$fullGpu
+        MeetsMinimum      = [bool]($context -ge $MinimumContextWindow)
     }
     $results.Add($result)
 
-    $status = if ($fitsBudget -and $fullGpu) { "PASS" } elseif ($fullGpu) { "Too much VRAM" } else { "Offload" }
+    $status = if ($fitsBudget -and $fullGpu) { "PASS" } elseif ($fullGpu) { "Budget exceeded" } else { "Offload" }
     $color = if ($fitsBudget -and $fullGpu) { [ConsoleColor]::Green } else { [ConsoleColor]::Yellow }
-    Write-Detail ("peak={0} MiB, size={1}, processor={2}, loadedCtx={3}, verdict={4}" -f $peak, $parsed.Size, $parsed.Processor, $parsed.Context, $status) $color
+    Write-Detail ("usage={0} MiB, size={1}, processor={2}, loadedCtx={3}, verdict={4}" -f $estimatedUsageMiB, $parsed.Size, $parsed.Processor, $parsed.Context, $status) $color
 
     if ($fitsBudget -and $fullGpu) {
         $selected = $result
-        break
+        $context += [int]$ContextStep
+        continue
     }
+
+    break
 }
 
 Write-Step "Summary"
 foreach ($result in $results) {
     $marker = if ($selected -and $result.ContextWindow -eq $selected.ContextWindow) { "*" } else { "-" }
-    Write-Detail ("{0} ctx={1} peak={2} MiB processor={3} size={4}" -f $marker, $result.ContextWindow, $result.PeakMiB, $result.Processor, $result.Size)
+    Write-Detail ("{0} ctx={1} usage={2} MiB processor={3} size={4}" -f $marker, $result.ContextWindow, $result.EstimatedUsageMiB, $result.Processor, $result.Size)
 }
 
 if ($selected) {
     Write-Host ""
-    Write-Host ("Selected context for {0}: {1}" -f $Model, $selected.ContextWindow) -ForegroundColor Green
+    Write-Host ("Selected context for {0} on {1}: {2}" -f $Model, $endpoint.key, $selected.ContextWindow) -ForegroundColor Green
 }
 else {
     Write-Host ""
-    Write-Host ("No tested context met the full-GPU + <= {0} MiB budget rule." -f $BudgetMiB) -ForegroundColor Yellow
+    Write-Host ("No tested context met the full-GPU + {0} MiB headroom rule." -f $HeadroomMiB) -ForegroundColor Yellow
 }
 
 if ($Json) {
@@ -206,40 +334,20 @@ if ($Json) {
     if ($selected) {
         $selectedContextWindow = [int]$selected.ContextWindow
     }
-    $selectedSummary = $null
-    if ($selected) {
-        $selectedSummary = [pscustomobject]@{
-            Model         = $selected.Model
-            ContextWindow = [int]$selected.ContextWindow
-            PeakMiB       = [int]$selected.PeakMiB
-            Size          = $selected.Size
-            Processor     = $selected.Processor
-            LoadedContext = $selected.LoadedContext
-            FitsBudget    = [bool]$selected.FitsBudget
-            FullGpu       = [bool]$selected.FullGpu
-        }
-    }
-    $resultsSummary = @(
-        foreach ($result in $results) {
-            [pscustomobject]@{
-                Model         = $result.Model
-                ContextWindow = [int]$result.ContextWindow
-                PeakMiB       = [int]$result.PeakMiB
-                Size          = $result.Size
-                Processor     = $result.Processor
-                LoadedContext = $result.LoadedContext
-                FitsBudget    = [bool]$result.FitsBudget
-                FullGpu       = [bool]$result.FullGpu
-            }
-        }
-    )
 
     $summary = [ordered]@{
         model                 = $Model
-        budgetMiB             = $BudgetMiB
+        endpointKey           = [string]$endpoint.key
+        endpointBaseUrl       = [string]$endpoint.baseUrl
+        gpuTelemetryKind      = [string]$gpu.Kind
+        gpuTotalMiB           = [int]$gpu.TotalMiB
+        headroomMiB           = [int]$HeadroomMiB
+        budgetMiB             = [int]$budgetMiB
+        minimumContextWindow  = [int]$MinimumContextWindow
         selectedContextWindow = $selectedContextWindow
-        selected              = $selectedSummary
-        results               = $resultsSummary
+        selected              = $selected
+        results               = $results.ToArray()
     }
+
     Write-Output ($summary | ConvertTo-Json -Depth 10 -Compress)
 }

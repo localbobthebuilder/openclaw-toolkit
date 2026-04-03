@@ -75,10 +75,10 @@ Main operator wrapper:
   Smoke-test OpenClaw through the configured Ollama model path.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke`
   Smoke-test the shared-workspace agent roles, especially the Telegram-routed agent's real file and git workflows.
-- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model <ollama-model> -Contexts "<ctx1 ctx2 ...>" -BudgetMiB <MiB>`
-  Probe a local Ollama model and pick the first context that stays fully on GPU under your VRAM budget.
-- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -Contexts "<ctx1 ctx2 ...>" -BudgetMiB <MiB> [-AssignTo <agent-id>]`
-  Pull a missing Ollama model, auto-probe a safe context, write it into bootstrap config, and optionally assign it to an agent before reapplying bootstrap.
+- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
+  Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
+- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-AssignTo <agent-id>]`
+  Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, and optionally assign it to an agent before reapplying bootstrap.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model <ollama-model> [-ReplaceWith <other-ollama-model>]`
   Remove a local Ollama model from managed config and host Ollama storage. If the model is managed, retarget any managed local-agent references before reapplying bootstrap.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd compact-storage`
@@ -386,7 +386,7 @@ To probe a local model against your GPU budget before writing its context into
 bootstrap, run:
 
 ```powershell
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -Contexts "131072 114688 98304" -BudgetMiB 29000
+D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
 ```
 
 Do not hand-edit `ollama.models` in the bootstrap config unless you are fixing
@@ -401,13 +401,13 @@ tunes the context window for your GPU budget. If you want to add a brand-new
 local model end to end, use:
 
 ```powershell
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -Contexts "131072 114688 98304 65536" -BudgetMiB 29000 -AssignTo coder-local
+D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc
 ```
 
 That one command will:
 
 - pull the Ollama model if it is missing
-- probe the candidate context windows against your GPU budget
+- probe context automatically from 4k upward while keeping 1.5GB VRAM headroom
 - write the chosen `contextWindow` and `maxTokens` into `openclaw-bootstrap.config.json`
 - optionally point a managed agent at that model
 - rerun bootstrap so the live gateway picks it up

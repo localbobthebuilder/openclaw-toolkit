@@ -231,10 +231,10 @@ echo   run-openclaw.cmd local-delegate-test
 echo     Diagnose the exact main -^> coder-local spawned local-model path and detect raw fake tool-call output.
 echo.
 echo   run-openclaw.cmd model-fit
-echo     Probe an Ollama model across context sizes and pick the first full-GPU fit under a VRAM budget.
+echo     Probe an Ollama model on a named endpoint, starting at 4k context and increasing until the VRAM headroom rule is hit.
 echo.
 echo   run-openclaw.cmd add-local-model
-echo     Pull a local Ollama model if needed, auto-probe a safe context, write it into bootstrap config, and optionally assign it to an agent.
+echo     Preflight raw size and disk space, pull a local Ollama model on a named endpoint, auto-tune context, and optionally assign it to an agent.
 echo.
 echo   run-openclaw.cmd remove-local-model
 echo     Remove a managed local Ollama model from bootstrap config and retarget any managed local-agent references.
@@ -256,10 +256,10 @@ echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks "local-model
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd compact-storage
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd update -Channel beta
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd update -Ref main
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -Contexts "131072 114688 98304" -BudgetMiB 29000
+echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -Contexts "131072 114688 98304" -BudgetMiB 29000 -AssignTo coder-local
+echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -EndpointKey local -AssignTo coder-local
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd stop -StopDockerDesktop
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard-repair
