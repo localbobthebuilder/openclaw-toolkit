@@ -1523,6 +1523,21 @@ Ensure-TailscaleServe -Config $config
 Write-Step "Running verification"
 & (Join-Path (Split-Path -Parent $PSCommandPath) "verify-openclaw.ps1") -ConfigPath $ConfigPath
 
+if ($config.PSObject.Properties.Name -contains "watchdog" -and $config.watchdog.installScheduledTask) {
+    Write-Step "Installing watchdog scheduled task"
+    $watchdogArgs = @("-EveryMinutes", [string]$config.watchdog.everyMinutes)
+    if ($config.watchdog.restartOnFailure) {
+        $watchdogArgs += "-RestartOnFailure"
+    }
+    if ($config.watchdog.alertOnFailure) {
+        $watchdogArgs += "-AlertOnFailure"
+    }
+    if ($config.watchdog.skipInternetCheck) {
+        $watchdogArgs += "-SkipInternetCheck"
+    }
+    & (Join-Path (Split-Path -Parent $PSCommandPath) "install-watchdog-task.ps1") @watchdogArgs
+}
+
 Write-Host ""
 Write-Host "Bootstrap complete." -ForegroundColor Green
 Write-Host "Private dashboard: $(tailscale serve status | Select-Object -First 1)"
@@ -1533,6 +1548,9 @@ Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd start"
 Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd update"
 Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard"
 Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd status"
+if ($config.PSObject.Properties.Name -contains "watchdog" -and -not $config.watchdog.installScheduledTask) {
+    Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd install-watchdog" -ForegroundColor DarkGray
+}
 if ($config.multiAgent -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
     $authReadyProviders = Get-AuthReadyHostedProviders
     if ("google" -notin @($authReadyProviders)) {

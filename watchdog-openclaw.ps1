@@ -75,6 +75,47 @@ function Test-InternetReachable {
     }
 }
 
+function Test-GatewayHealthEndpoint {
+    param([Parameter(Mandatory = $true)][string]$HealthUrl)
+
+    try {
+        $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 15
+        if (-not $response.Content) {
+            return $false
+        }
+
+        $payload = $response.Content | ConvertFrom-Json
+        return ($null -ne $payload -and $payload.ok -eq $true)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-DockerReady {
+    $result = Invoke-External -FilePath "docker" -Arguments @("info") -AllowFailure
+    return $result.ExitCode -eq 0
+}
+
+function Get-ContainerState {
+    param([Parameter(Mandatory = $true)][string]$ContainerName)
+
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "inspect", $ContainerName,
+        "--format", "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
+    ) -AllowFailure
+
+    if ($result.ExitCode -ne 0 -or -not $result.Output) {
+        return $null
+    }
+
+    $parts = @($result.Output -split '\|', 2)
+    [pscustomobject]@{
+        Status = if ($parts.Count -ge 1) { [string]$parts[0] } else { "" }
+        Health = if ($parts.Count -ge 2) { [string]$parts[1] } else { "" }
+    }
+}
+
 function Get-HostConfigDir {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -159,6 +200,7 @@ $bootstrapConfig = Resolve-PortableConfigPaths -Config $bootstrapConfig -BaseDir
 $repoPath = [string]$bootstrapConfig.repoPath
 $containerName = "openclaw-openclaw-gateway-1"
 $openClawConfigFile = Join-Path (Get-HostConfigDir -Config $bootstrapConfig) "openclaw.json"
+$healthUrl = [string]$bootstrapConfig.verification.healthUrl
 $alertConfig = $null
 
 Write-Step "Running watchdog health check"
@@ -170,17 +212,30 @@ if (-not $SkipInternetCheck) {
     }
 }
 
-$health = Get-HealthReport -ContainerName $containerName
-if ($null -ne $health -and $health.ok) {
+$dockerReady = Test-DockerReady
+$containerState = if ($dockerReady) { Get-ContainerState -ContainerName $containerName } else { $null }
+$httpHealthy = if ($dockerReady) { Test-GatewayHealthEndpoint -HealthUrl $healthUrl } else { $false }
+$health = if ($dockerReady -and $null -ne $containerState -and $containerState.Status -eq "running") { Get-HealthReport -ContainerName $containerName } else { $null }
+
+if ($httpHealthy -or ($null -ne $health -and $health.ok)) {
     Write-Host "OpenClaw health is OK." -ForegroundColor Green
     exit 0
 }
 
-$failureSummary = if ($null -ne $health) {
+$failureSummary = if (-not $dockerReady) {
+    "docker engine unavailable"
+}
+elseif ($null -eq $containerState) {
+    "gateway container missing"
+}
+elseif ($containerState.Status -ne "running") {
+    "gateway container state=$($containerState.Status)"
+}
+elseif ($null -ne $health) {
     ($health | ConvertTo-Json -Depth 8 -Compress)
 }
 else {
-    "health probe failed"
+    "health probe failed (http endpoint=$httpHealthy, container health=$($containerState.Health))"
 }
 
 Write-Host "OpenClaw health check failed." -ForegroundColor Yellow
@@ -206,20 +261,32 @@ if (-not $RestartOnFailure) {
     exit 1
 }
 
-Write-Step "Restarting the OpenClaw gateway"
-$restart = Invoke-External -FilePath "docker" -Arguments @(
-    "compose", "-f", (Join-Path $repoPath "docker-compose.yml"),
-    "restart", "openclaw-gateway"
-) -AllowFailure
+if (-not $dockerReady) {
+    Write-Step "Starting Docker Desktop and OpenClaw"
+    $startScript = Join-Path (Split-Path -Parent $PSCommandPath) "start-openclaw.ps1"
+    if (-not (Test-Path $startScript)) {
+        throw "Start helper not found: $startScript"
+    }
 
-if ($restart.ExitCode -ne 0) {
-    throw "Gateway restart failed.`n$($restart.Output)"
+    & $startScript -RepoPath $repoPath -HealthUrl $healthUrl -NoOpenDashboard
+}
+else {
+    Write-Step "Restarting the OpenClaw gateway"
+    $restart = Invoke-External -FilePath "docker" -Arguments @(
+        "compose", "-f", (Join-Path $repoPath "docker-compose.yml"),
+        "up", "-d", "openclaw-gateway"
+    ) -AllowFailure
+
+    if ($restart.ExitCode -ne 0) {
+        throw "Gateway restart failed.`n$($restart.Output)"
+    }
 }
 
 Start-Sleep -Seconds $RecoveryWaitSeconds
 
-$recheck = Get-HealthReport -ContainerName $containerName
-if ($null -ne $recheck -and $recheck.ok) {
+$recheckHttpHealthy = (Test-DockerReady) -and (Test-GatewayHealthEndpoint -HealthUrl $healthUrl)
+$recheck = if (Test-DockerReady) { Get-HealthReport -ContainerName $containerName } else { $null }
+if ($recheckHttpHealthy -or ($null -ne $recheck -and $recheck.ok)) {
     Write-Host "Gateway recovered after restart." -ForegroundColor Green
     if ($AlertOnFailure -and $null -ne $alertConfig) {
         try {

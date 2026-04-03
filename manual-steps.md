@@ -894,8 +894,10 @@ Recommended policy:
 ## 11. Watchdog health checks
 
 Another worthwhile extraction from the Gemini notes was a watchdog. On this
-machine it uses OpenClaw's native `health --json` probe instead of only testing
-whether the local port is open.
+machine it runs on the Windows host, not inside the gateway container. That
+means it can still detect failures when the gateway is unresponsive or Docker
+Desktop is down. It also uses OpenClaw's native `health --json` probe when the
+container is available instead of only testing whether the local port is open.
 
 Run one manual watchdog check:
 
@@ -912,8 +914,10 @@ D:\openclaw\openclaw-toolkit\run-openclaw.cmd watchdog -RestartOnFailure -AlertO
 The watchdog behavior is:
 
 - optional internet pre-check first, to reduce false alerts during local ISP outages
-- native OpenClaw health probe through the running gateway container
-- optional `docker compose restart openclaw-gateway`
+- host-side Docker engine availability check
+- host-side gateway HTTP health check through `verification.healthUrl`
+- native OpenClaw health probe through the running gateway container when available
+- optional self-heal by starting Docker/OpenClaw if the engine is down, or `docker compose up -d openclaw-gateway` if Docker is available
 - optional Telegram DM to your allowlisted account using your existing bot token
 
 If you want it to run automatically every 5 minutes on Windows, install the
@@ -924,6 +928,25 @@ D:\openclaw\openclaw-toolkit\run-openclaw.cmd install-watchdog
 ```
 
 This creates a Windows Scheduled Task named `OpenClaw Watchdog`.
+
+Bootstrap can also install it for you if you enable this in
+`D:\openclaw\openclaw-toolkit\openclaw-bootstrap.config.json`:
+
+```json
+"watchdog": {
+  "installScheduledTask": true,
+  "everyMinutes": 5,
+  "restartOnFailure": true,
+  "alertOnFailure": true,
+  "skipInternetCheck": false
+}
+```
+
+Recommended default:
+
+- keep `installScheduledTask: false` until you explicitly want recurring monitoring
+- use manual `watchdog` checks first
+- enable the scheduled task later as an operator choice, not as an automatic bootstrap surprise
 
 ## 12. Access from phone
 

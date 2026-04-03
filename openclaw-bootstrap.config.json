@@ -134,6 +134,13 @@
     "enableServe": true,
     "proxyTarget": "http://127.0.0.1:18789"
   },
+  "watchdog": {
+    "installScheduledTask": false,
+    "everyMinutes": 5,
+    "restartOnFailure": true,
+    "alertOnFailure": true,
+    "skipInternetCheck": false
+  },
   "ollama": {
     "enabled": true,
     "baseUrl": "http://host.docker.internal:11434",

@@ -102,6 +102,7 @@ Useful extras:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd watchdog`
 - Install recurring watchdog task:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd install-watchdog`
+- The watchdog runs on the Windows host, not inside the gateway, so it can still catch Docker/gateway outages.
 - Telegram exec approvals are configured to arrive in your Telegram DM by
   default, so host-exec approval prompts do not require the dashboard in normal
   use

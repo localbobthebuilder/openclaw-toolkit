@@ -2,7 +2,8 @@
 param(
     [int]$EveryMinutes = 5,
     [switch]$RestartOnFailure = $true,
-    [switch]$AlertOnFailure = $true
+    [switch]$AlertOnFailure = $true,
+    [switch]$SkipInternetCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,9 @@ if ($RestartOnFailure) {
 }
 if ($AlertOnFailure) {
     $args += "-AlertOnFailure"
+}
+if ($SkipInternetCheck) {
+    $args += "-SkipInternetCheck"
 }
 
 $action = New-ScheduledTaskAction -Execute $shell -Argument ($args -join " ")
