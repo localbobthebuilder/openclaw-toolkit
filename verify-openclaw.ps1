@@ -1107,27 +1107,85 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         }
 
         if ($config.multiAgent.manageWorkspaceAgentsMd) {
-            $workspaceChecks = @(
-                @{ Name = "main"; Enabled = $true; Workspace = $null },
-                @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled); Workspace = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.workspace } else { $null } },
-                @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); Workspace = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.workspace } else { $null } },
-                @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); Workspace = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.workspace } else { $null } },
-                @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); Workspace = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.workspace } else { $null } },
-                @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } }
-            )
+            $overlayDirName = "bootstrap"
+            if ($config.PSObject.Properties.Name -contains "managedHooks" -and
+                $config.managedHooks -and
+                $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
+                $config.managedHooks.agentBootstrapOverlays -and
+                $config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
+                $config.managedHooks.agentBootstrapOverlays.overlayDirName) {
+                $overlayDirName = [string]$config.managedHooks.agentBootstrapOverlays.overlayDirName
+            }
 
-            foreach ($workspaceCheck in $workspaceChecks) {
-                if (-not $workspaceCheck.Enabled) {
-                    continue
-                }
-
-                $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspaceCheck.Workspace)) "AGENTS.md"
-                if (Test-Path $agentsFilePath) {
-                    $multiAgentVerification += "PASS: Managed AGENTS.md exists for $($workspaceCheck.Name) at $agentsFilePath"
+            if ($config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled) {
+                $sharedAgentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$config.multiAgent.sharedWorkspace.path)) "AGENTS.md"
+                if (Test-Path $sharedAgentsFilePath) {
+                    $multiAgentVerification += "PASS: Shared workspace AGENTS.md exists at $sharedAgentsFilePath"
                 }
                 else {
-                    $multiAgentVerification += "FAIL: Managed AGENTS.md is missing for $($workspaceCheck.Name) at $agentsFilePath"
+                    $multiAgentVerification += "FAIL: Shared workspace AGENTS.md is missing at $sharedAgentsFilePath"
                 }
+
+                $overlayChecks = @(
+                    @{ Name = "main"; Enabled = $true; AgentId = if ($config.multiAgent.strongAgent) { [string]$config.multiAgent.strongAgent.id } else { "main" } },
+                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled); AgentId = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.id } else { "research" } },
+                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); AgentId = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" } },
+                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); AgentId = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.id } else { "chat-openai" } },
+                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); AgentId = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" } },
+                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); AgentId = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" } }
+                )
+
+                foreach ($overlayCheck in $overlayChecks) {
+                    if (-not $overlayCheck.Enabled) {
+                        continue
+                    }
+
+                    $overlayAgentsPath = Join-Path (Join-Path (Join-Path (Join-Path (Get-HostConfigDir -Config $config) "agents") ([string]$overlayCheck.AgentId)) $overlayDirName) "AGENTS.md"
+                    if (Test-Path $overlayAgentsPath) {
+                        $multiAgentVerification += "PASS: Agent bootstrap overlay AGENTS.md exists for $($overlayCheck.Name) at $overlayAgentsPath"
+                    }
+                    else {
+                        $multiAgentVerification += "FAIL: Agent bootstrap overlay AGENTS.md is missing for $($overlayCheck.Name) at $overlayAgentsPath"
+                    }
+                }
+            }
+            else {
+                $workspaceChecks = @(
+                    @{ Name = "main"; Enabled = $true; Workspace = $null },
+                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled); Workspace = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.workspace } else { $null } },
+                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); Workspace = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.workspace } else { $null } },
+                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); Workspace = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.workspace } else { $null } },
+                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); Workspace = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.workspace } else { $null } },
+                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } }
+                )
+
+                foreach ($workspaceCheck in $workspaceChecks) {
+                    if (-not $workspaceCheck.Enabled) {
+                        continue
+                    }
+
+                    $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspaceCheck.Workspace)) "AGENTS.md"
+                    if (Test-Path $agentsFilePath) {
+                        $multiAgentVerification += "PASS: Managed AGENTS.md exists for $($workspaceCheck.Name) at $agentsFilePath"
+                    }
+                    else {
+                        $multiAgentVerification += "FAIL: Managed AGENTS.md is missing for $($workspaceCheck.Name) at $agentsFilePath"
+                    }
+                }
+            }
+        }
+
+        if ($config.PSObject.Properties.Name -contains "managedHooks" -and
+            $config.managedHooks -and
+            $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
+            $config.managedHooks.agentBootstrapOverlays -and
+            $config.managedHooks.agentBootstrapOverlays.enabled) {
+            $liveHookEntry = $liveConfig.hooks.internal.entries."agent-bootstrap-overlays"
+            if ($null -ne $liveHookEntry -and [bool]$liveHookEntry.enabled) {
+                $multiAgentVerification += "PASS: Managed agent-bootstrap-overlays hook is enabled"
+            }
+            else {
+                $multiAgentVerification += "FAIL: Managed agent-bootstrap-overlays hook is not enabled in live config"
             }
         }
         }

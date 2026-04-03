@@ -16,6 +16,8 @@ Config note:
 - Current managed defaults: `safeguard` compaction + `cache-ttl` pruning.
 - Current managed tool baseline: `minimal` profile + explicit allow/deny lists,
   with extra web tools only on the `research` agent.
+- Toolkit-managed upstream source patches are reapplied during `bootstrap` and
+  `update`, so the OpenClaw repo can stay upstream-clean between releases.
 
 Most important commands:
 
@@ -95,6 +97,8 @@ Useful extras:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-model-test`
 - Agent capability smoke test:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke`
+- Local delegated coder diagnostic:
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test`
 - Ollama GPU fit probe:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -Contexts "131072 114688 98304" -BudgetMiB 29000`
 - Add a new local model end to end:

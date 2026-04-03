@@ -11,6 +11,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-upstream-patches.ps1")
 
 $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -40,10 +41,47 @@ function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
-        [switch]$AllowFailure
+        [switch]$AllowFailure,
+        [switch]$StreamOutput,
+        [switch]$Quiet
     )
 
-    Write-Host ">> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkGray
+    if (-not $Quiet) {
+        Write-Host ">> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkGray
+    }
+    if ($StreamOutput) {
+        $capturedLines = [System.Collections.Generic.List[string]]::new()
+        Push-Location (Get-Location).Path
+        try {
+            & $FilePath @Arguments 2>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                    $line = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+                }
+                else {
+                    $line = $_.ToString()
+                }
+                $capturedLines.Add($line)
+                if (-not $Quiet) {
+                    Write-Host $line
+                }
+            }
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            Pop-Location
+        }
+
+        $text = ($capturedLines.ToArray() -join [Environment]::NewLine).Trim()
+        if (-not $AllowFailure -and $exitCode -ne 0) {
+            throw "Command failed ($exitCode): $FilePath $($Arguments -join ' ')"
+        }
+
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output   = $text
+        }
+    }
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
     $psi.UseShellExecute = $false
@@ -72,7 +110,7 @@ function Invoke-External {
     $exitCode = $process.ExitCode
     $text = (($stdout, $stderr) | Where-Object { $_ -and $_.Trim().Length -gt 0 }) -join [Environment]::NewLine
 
-    if ($text) {
+    if ($text -and -not $Quiet) {
         Write-Host $text
     }
 
@@ -84,6 +122,56 @@ function Invoke-External {
         ExitCode = $exitCode
         Output   = $text
     }
+}
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($bytes)
+    }
+    finally {
+        $sha.Dispose()
+    }
+
+    return -join ($hash | ForEach-Object { $_.ToString("x2") })
+}
+
+function Get-ManagedUpstreamPatchFingerprint {
+    param([Parameter(Mandatory = $true)][object[]]$Patches)
+
+    if ($Patches.Count -eq 0) {
+        return ""
+    }
+
+    $parts = foreach ($patch in ($Patches | Sort-Object Name, Path)) {
+        $hash = (Get-FileHash -LiteralPath $patch.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$($patch.Name)|$($patch.Path)|$hash"
+    }
+
+    return Get-Sha256Hex -Text ($parts -join "`n")
+}
+
+function Get-DockerImageLabelValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$ImageTag,
+        [Parameter(Mandatory = $true)][string]$LabelName
+    )
+
+    $format = "{{ index .Config.Labels `"$LabelName`" }}"
+    $probe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", "--format", $format, $ImageTag) -AllowFailure
+    if ($probe.ExitCode -ne 0) {
+        return ""
+    }
+
+    $value = ($probe.Output ?? "").Trim()
+    if ($value -eq "<no value>") {
+        return ""
+    }
+
+    return $value
 }
 
 function Backup-File {
@@ -279,6 +367,8 @@ function Ensure-GatewayImageSupportsSandbox {
 
     $sourceVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
     $imageVersion = Get-OpenClawImageVersion -ImageTag ([string]$Config.sandbox.gatewayImageTag)
+    $patchFingerprint = Get-ManagedUpstreamPatchFingerprint -Patches $managedUpstreamPatches
+    $imagePatchFingerprint = Get-DockerImageLabelValue -ImageTag ([string]$Config.sandbox.gatewayImageTag) -LabelName "io.openclaw.toolkit.upstream-patches-sha"
 
     $dockerProbe = Invoke-External -FilePath "docker" -Arguments @(
         "run", "--rm", "--entrypoint", "sh", $Config.sandbox.gatewayImageTag,
@@ -288,6 +378,10 @@ function Ensure-GatewayImageSupportsSandbox {
     $needsRebuild = $dockerProbe.ExitCode -ne 0
     if (-not $needsRebuild -and $sourceVersion -and $imageVersion -and $sourceVersion -ne $imageVersion) {
         Write-WarnLine "Gateway image $($Config.sandbox.gatewayImageTag) is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
+        $needsRebuild = $true
+    }
+    if (-not $needsRebuild -and $patchFingerprint -ne $imagePatchFingerprint) {
+        Write-WarnLine "Gateway image $($Config.sandbox.gatewayImageTag) is missing the current managed patch fingerprint. Rebuilding."
         $needsRebuild = $true
     }
 
@@ -301,9 +395,10 @@ function Ensure-GatewayImageSupportsSandbox {
     try {
         $null = Invoke-External -FilePath "docker" -Arguments @(
             "build", "-t", $Config.sandbox.gatewayImageTag,
+            "--label", "io.openclaw.toolkit.upstream-patches-sha=$patchFingerprint",
             "--build-arg", "OPENCLAW_INSTALL_DOCKER_CLI=1",
             "-f", "Dockerfile", "."
-        )
+        ) -StreamOutput
     }
     finally {
         Pop-Location
@@ -362,6 +457,8 @@ function Ensure-LocalWhisperGatewayImage {
 
     $sourceVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
     $imageVersion = Get-OpenClawImageVersion -ImageTag $targetImage
+    $patchFingerprint = Get-ManagedUpstreamPatchFingerprint -Patches $managedUpstreamPatches
+    $imagePatchFingerprint = Get-DockerImageLabelValue -ImageTag $targetImage -LabelName "io.openclaw.toolkit.upstream-patches-sha"
 
     $probe = Invoke-External -FilePath "docker" -Arguments @(
         "run", "--rm", "--entrypoint", "sh", $targetImage,
@@ -371,6 +468,10 @@ function Ensure-LocalWhisperGatewayImage {
     $needsRebuild = $probe.ExitCode -ne 0
     if (-not $needsRebuild -and $sourceVersion -and $imageVersion -and $sourceVersion -ne $imageVersion) {
         Write-WarnLine "Gateway image $targetImage is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
+        $needsRebuild = $true
+    }
+    if (-not $needsRebuild -and $patchFingerprint -ne $imagePatchFingerprint) {
+        Write-WarnLine "Gateway image $targetImage is missing the current managed patch fingerprint. Rebuilding."
         $needsRebuild = $true
     }
 
@@ -384,10 +485,11 @@ function Ensure-LocalWhisperGatewayImage {
         $null = Invoke-External -FilePath "docker" -Arguments @(
             "build",
             "-t", $targetImage,
+            "--label", "io.openclaw.toolkit.upstream-patches-sha=$patchFingerprint",
             "--build-arg", "BASE_IMAGE=$($Config.sandbox.gatewayImageTag)",
             "-f", $dockerfilePath,
             (Split-Path -Parent $dockerfilePath)
-        )
+        ) -StreamOutput
     }
     else {
         Write-Host "Gateway image already includes local whisper support and matches repo version." -ForegroundColor Green
@@ -1377,13 +1479,66 @@ function Configure-ToolPolicy {
     Write-Host "Configured managed tool policy baseline." -ForegroundColor Green
 }
 
+function Sync-ManagedHookDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    if (-not (Test-Path $SourceDir)) {
+        throw "Managed hook source directory not found: $SourceDir"
+    }
+
+    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+    Get-ChildItem -LiteralPath $SourceDir -Recurse -File | ForEach-Object {
+        $relativePath = $_.FullName.Substring($SourceDir.Length).TrimStart('\', '/')
+        $destinationPath = Join-Path $TargetDir $relativePath
+        $destinationDir = Split-Path -Parent $destinationPath
+        if (-not (Test-Path $destinationDir)) {
+            New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $destinationPath -Force
+    }
+}
+
+function Ensure-AgentBootstrapOverlayHook {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (-not ($Config.PSObject.Properties.Name -contains "managedHooks") -or
+        $null -eq $Config.managedHooks -or
+        -not ($Config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays") -or
+        $null -eq $Config.managedHooks.agentBootstrapOverlays -or
+        -not $Config.managedHooks.agentBootstrapOverlays.enabled) {
+        return
+    }
+
+    $hookName = "agent-bootstrap-overlays"
+    $toolkitHookDir = Join-Path (Split-Path -Parent $PSCommandPath) (Join-Path "managed-hooks" $hookName)
+    $managedHooksRoot = Join-Path (Get-HostConfigDir -Config $Config) "hooks"
+    $managedHookDir = Join-Path $managedHooksRoot $hookName
+    Sync-ManagedHookDirectory -SourceDir $toolkitHookDir -TargetDir $managedHookDir
+
+    $hookEntry = [ordered]@{
+        enabled = $true
+    }
+    if ($Config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
+        $Config.managedHooks.agentBootstrapOverlays.overlayDirName) {
+        $hookEntry.overlayDirName = [string]$Config.managedHooks.agentBootstrapOverlays.overlayDirName
+    }
+
+    Set-OpenClawConfigJson -Path "hooks.internal.entries.agent-bootstrap-overlays" -Value $hookEntry
+    Write-Host "Configured managed hook: $hookName" -ForegroundColor Green
+}
+
 if (-not (Test-Path $ConfigPath)) {
     throw "Config not found: $ConfigPath"
 }
 
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$configBaseDir = Split-Path -Parent $ConfigPath
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
-$config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Resolve-PortableConfigPaths -Config $config -BaseDir $configBaseDir
+$managedUpstreamPatches = @(Get-ManagedUpstreamPatches -Config $config -BaseDir $configBaseDir)
 
 if (-not $SkipPrerequisites) {
     Write-Step "Preparing Windows prerequisites"
@@ -1399,6 +1554,14 @@ foreach ($cmd in @("git", "docker", "tailscale", "curl.exe")) {
 }
 
 Ensure-RepoPresent -Config $config
+
+if ($managedUpstreamPatches.Count -gt 0) {
+    Write-Step "Applying managed OpenClaw source patches"
+    Invoke-ApplyManagedUpstreamPatches -RepoPath $config.repoPath -Patches $managedUpstreamPatches -InvokeExternal ${function:Invoke-External} -WriteStatus {
+        param([string]$Message)
+        Write-Host $Message -ForegroundColor Green
+    }
+}
 
 if (-not (Test-Path $config.composeFilePath)) {
     throw "Compose file not found: $($config.composeFilePath)"
@@ -1449,6 +1612,7 @@ Set-OpenClawConfigValue -Path "gateway.controlUi.allowInsecureAuth" -Value "fals
 Ensure-ControlUiAllowedOrigins -Config $config
 
 Configure-ToolPolicy -Config $config
+Ensure-AgentBootstrapOverlayHook -Config $config
 
 Set-OpenClawConfigValue -Path "models.mode" -Value "merge"
 

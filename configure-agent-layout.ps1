@@ -241,6 +241,53 @@ function Ensure-WorkspaceAgentsFile {
     return $agentsPath
 }
 
+function Ensure-ManagedTextFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$ContentLines
+    )
+
+    if (@($ContentLines).Count -eq 0) {
+        return $null
+    }
+
+    $parentDir = Split-Path -Parent $Path
+    if (-not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    }
+
+    $content = (@($ContentLines) -join [Environment]::NewLine).TrimEnd() + [Environment]::NewLine
+    $current = if (Test-Path $Path) { Get-Content -Raw $Path } else { $null }
+    if ($current -ne $content) {
+        Set-Content -Path $Path -Value $content -Encoding UTF8
+    }
+
+    return $Path
+}
+
+function Get-AgentBootstrapOverlayDir {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$AgentId,
+        [string]$OverlayDirName = "bootstrap"
+    )
+
+    return (Join-Path (Join-Path (Join-Path (Get-HostConfigDir -Config $Config) "agents") $AgentId) $OverlayDirName)
+}
+
+function Ensure-AgentBootstrapOverlayFile {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$AgentId,
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [string[]]$ContentLines,
+        [string]$OverlayDirName = "bootstrap"
+    )
+
+    $overlayDir = Get-AgentBootstrapOverlayDir -Config $Config -AgentId $AgentId -OverlayDirName $OverlayDirName
+    return (Ensure-ManagedTextFile -Path (Join-Path $overlayDir $FileName) -ContentLines $ContentLines)
+}
+
 function New-AgentEntry {
     param(
         [Parameter(Mandatory = $true)][string]$Id,
@@ -608,6 +655,7 @@ $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
 $multi = $config.multiAgent
+$rolePolicies = if ($multi -and $multi.PSObject.Properties.Name -contains "rolePolicies") { $multi.rolePolicies } else { $null }
 
 if ($null -eq $multi -or -not $multi.enabled) {
     Write-Host "Multi-agent starter layout is disabled in openclaw-bootstrap.config.json." -ForegroundColor Yellow
@@ -846,32 +894,75 @@ if ($multi.enableAgentToAgent) {
 
 $managedAgentsFiles = @()
 if ($multi.manageWorkspaceAgentsMd) {
-    $mainAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $null -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.strongAgent -DefaultKey "strongAgent"))
-    if ($mainAgentsPath) { $managedAgentsFiles += $mainAgentsPath }
-
-    if ($multi.researchAgent -and $multi.researchAgent.enabled) {
-        $researchAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.researchAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.researchAgent -DefaultKey "researchAgent"))
-        if ($researchAgentsPath) { $managedAgentsFiles += $researchAgentsPath }
+    $overlayDirName = "bootstrap"
+    if ($config.PSObject.Properties.Name -contains "managedHooks" -and
+        $config.managedHooks -and
+        $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
+        $config.managedHooks.agentBootstrapOverlays -and
+        $config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
+        $config.managedHooks.agentBootstrapOverlays.overlayDirName) {
+        $overlayDirName = [string]$config.managedHooks.agentBootstrapOverlays.overlayDirName
     }
 
-    if ($multi.localChatAgent -and $multi.localChatAgent.enabled) {
-        $chatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localChatAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localChatAgent -DefaultKey "localChatAgent"))
-        if ($chatAgentsPath) { $managedAgentsFiles += $chatAgentsPath }
-    }
+    $sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $multi
+    if ($sharedWorkspacePath) {
+        $sharedPolicyKey = "sharedWorkspace"
+        if ($multi.sharedWorkspace -and
+            $multi.sharedWorkspace.PSObject.Properties.Name -contains "rolePolicyKey" -and
+            -not [string]::IsNullOrWhiteSpace([string]$multi.sharedWorkspace.rolePolicyKey)) {
+            $sharedPolicyKey = [string]$multi.sharedWorkspace.rolePolicyKey
+        }
 
-    if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
-        $hostedChatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.hostedTelegramAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.hostedTelegramAgent -DefaultKey "hostedTelegramAgent"))
-        if ($hostedChatAgentsPath) { $managedAgentsFiles += $hostedChatAgentsPath }
-    }
+        $sharedAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $sharedWorkspacePath -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key $sharedPolicyKey)
+        if ($sharedAgentsPath) { $managedAgentsFiles += $sharedAgentsPath }
 
-    if ($multi.localReviewAgent -and $multi.localReviewAgent.enabled) {
-        $reviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localReviewAgent -DefaultKey "localReviewAgent"))
-        if ($reviewAgentsPath) { $managedAgentsFiles += $reviewAgentsPath }
-    }
+        foreach ($desiredAgent in @($desiredAgents)) {
+            $agentConfig = $null
+            switch ([string]$desiredAgent.id) {
+                $strongId { $agentConfig = $multi.strongAgent; break }
+                { $_ -eq [string]$multi.researchAgent.id } { $agentConfig = $multi.researchAgent; break }
+                { $multi.localChatAgent -and $_ -eq [string]$multi.localChatAgent.id } { $agentConfig = $multi.localChatAgent; break }
+                { $multi.hostedTelegramAgent -and $_ -eq [string]$multi.hostedTelegramAgent.id } { $agentConfig = $multi.hostedTelegramAgent; break }
+                { $multi.localReviewAgent -and $_ -eq [string]$multi.localReviewAgent.id } { $agentConfig = $multi.localReviewAgent; break }
+                { $multi.localCoderAgent -and $_ -eq [string]$multi.localCoderAgent.id } { $agentConfig = $multi.localCoderAgent; break }
+            }
 
-    if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
-        $coderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localCoderAgent -DefaultKey "localCoderAgent"))
-        if ($coderAgentsPath) { $managedAgentsFiles += $coderAgentsPath }
+            if ($null -eq $agentConfig) {
+                continue
+            }
+
+            $overlayAgentsPath = Ensure-AgentBootstrapOverlayFile -Config $config -AgentId ([string]$desiredAgent.id) -FileName "AGENTS.md" -OverlayDirName $overlayDirName -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$desiredAgent.id)))
+            if ($overlayAgentsPath) { $managedAgentsFiles += $overlayAgentsPath }
+        }
+    }
+    else {
+        $mainAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $null -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.strongAgent -DefaultKey "strongAgent"))
+        if ($mainAgentsPath) { $managedAgentsFiles += $mainAgentsPath }
+
+        if ($multi.researchAgent -and $multi.researchAgent.enabled) {
+            $researchAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.researchAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.researchAgent -DefaultKey "researchAgent"))
+            if ($researchAgentsPath) { $managedAgentsFiles += $researchAgentsPath }
+        }
+
+        if ($multi.localChatAgent -and $multi.localChatAgent.enabled) {
+            $chatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localChatAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localChatAgent -DefaultKey "localChatAgent"))
+            if ($chatAgentsPath) { $managedAgentsFiles += $chatAgentsPath }
+        }
+
+        if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
+            $hostedChatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.hostedTelegramAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.hostedTelegramAgent -DefaultKey "hostedTelegramAgent"))
+            if ($hostedChatAgentsPath) { $managedAgentsFiles += $hostedChatAgentsPath }
+        }
+
+        if ($multi.localReviewAgent -and $multi.localReviewAgent.enabled) {
+            $reviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localReviewAgent -DefaultKey "localReviewAgent"))
+            if ($reviewAgentsPath) { $managedAgentsFiles += $reviewAgentsPath }
+        }
+
+        if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
+            $coderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localCoderAgent -DefaultKey "localCoderAgent"))
+            if ($coderAgentsPath) { $managedAgentsFiles += $coderAgentsPath }
+        }
     }
 }
 
@@ -881,7 +972,7 @@ Write-Host "Configured agents:" -ForegroundColor Green
     Write-Host "- $($_.id): $model"
 }
 if (@($managedAgentsFiles).Count -gt 0) {
-    Write-Host "Managed workspace AGENTS.md files:" -ForegroundColor Green
+    Write-Host "Managed bootstrap prompt files:" -ForegroundColor Green
     foreach ($managedFile in @($managedAgentsFiles)) {
         Write-Host "- $managedFile"
     }

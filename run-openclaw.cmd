@@ -37,6 +37,7 @@ if /I "%ACTION%"=="compact-storage" goto :compact_storage
 if /I "%ACTION%"=="voice-test" goto :voice_test
 if /I "%ACTION%"=="local-model-test" goto :local_model_test
 if /I "%ACTION%"=="agent-smoke" goto :agent_smoke
+if /I "%ACTION%"=="local-delegate-test" goto :local_delegate_test
 if /I "%ACTION%"=="model-fit" goto :model_fit
 if /I "%ACTION%"=="add-local-model" goto :add_local_model
 if /I "%ACTION%"=="remove-local-model" goto :remove_local_model
@@ -132,6 +133,10 @@ goto :eof
 call "%SCRIPT_DIR%run-agent-smoke.cmd" %FORWARD_ARGS%
 goto :eof
 
+:local_delegate_test
+call "%SCRIPT_DIR%run-local-delegated-coder-test.cmd" %FORWARD_ARGS%
+goto :eof
+
 :model_fit
 call "%SCRIPT_DIR%run-model-fit.cmd" %FORWARD_ARGS%
 goto :eof
@@ -222,6 +227,9 @@ echo.
 echo   run-openclaw.cmd agent-smoke
 echo     Smoke-test the shared-workspace agent roles, especially the Telegram-routed agent's file and git workflows.
 echo.
+echo   run-openclaw.cmd local-delegate-test
+echo     Diagnose the exact main -^> coder-local spawned local-model path and detect raw fake tool-call output.
+echo.
 echo   run-openclaw.cmd model-fit
 echo     Probe an Ollama model across context sizes and pick the first full-GPU fit under a VRAM budget.
 echo.
@@ -250,6 +258,7 @@ echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd update -Channel beta
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd update -Ref main
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -Contexts "131072 114688 98304" -BudgetMiB 29000
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke
+echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -Contexts "131072 114688 98304" -BudgetMiB 29000 -AssignTo coder-local
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd stop -StopDockerDesktop

@@ -13,6 +13,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-upstream-patches.ps1")
 
 function Write-Step {
     param([string]$Message)
@@ -29,9 +30,13 @@ function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
-        [switch]$AllowFailure
+        [switch]$AllowFailure,
+        [switch]$Quiet
     )
 
+    if (-not $Quiet) {
+        Write-Host ">> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkGray
+    }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
     $psi.UseShellExecute = $false
@@ -64,6 +69,10 @@ function Invoke-External {
         throw "Command failed ($exitCode): $FilePath $($Arguments -join ' ')`n$text"
     }
 
+    if ($text -and -not $Quiet) {
+        Write-Host $text
+    }
+
     [pscustomobject]@{
         ExitCode = $exitCode
         Output   = $text
@@ -74,6 +83,21 @@ function Get-NonEmptyLines {
     param([string]$Text)
 
     return @($Text -split "`r?`n" | Where-Object { $_.Trim().Length -gt 0 })
+}
+
+function Test-IsManagedStatusLine {
+    param(
+        [Parameter(Mandatory = $true)][string]$Line,
+        [Parameter(Mandatory = $true)][string[]]$ManagedPaths
+    )
+
+    foreach ($managedPath in $ManagedPaths) {
+        if ($Line -like "* $managedPath") {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function Test-PrereleaseTag {
@@ -163,8 +187,11 @@ if (-not (Test-Path $ConfigPath)) {
 }
 
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$configBaseDir = Split-Path -Parent $ConfigPath
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
-$config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Resolve-PortableConfigPaths -Config $config -BaseDir $configBaseDir
+$managedUpstreamPatches = @(Get-ManagedUpstreamPatches -Config $config -BaseDir $configBaseDir)
+$managedUpstreamPaths = @(Get-ManagedUpstreamPatchPaths -Patches $managedUpstreamPatches)
 $repoPath = [string]$config.repoPath
 $bootstrapScript = Join-Path (Split-Path -Parent $PSCommandPath) "bootstrap-openclaw.ps1"
 $backupScript = Join-Path (Split-Path -Parent $PSCommandPath) "backup-openclaw.ps1"
@@ -191,8 +218,8 @@ if (-not (Test-Path $repoPath)) {
 Write-Step "Checking repo state"
 $statusResult = Invoke-External -FilePath "git" -Arguments @("-C", $repoPath, "status", "--porcelain")
 $statusLines = Get-NonEmptyLines -Text $statusResult.Output
-$allowedManagedStatus = " M docker-compose.yml"
-$unexpectedLines = @($statusLines | Where-Object { $_ -ne $allowedManagedStatus })
+$managedRepoPaths = @("docker-compose.yml") + $managedUpstreamPaths
+$unexpectedLines = @($statusLines | Where-Object { -not (Test-IsManagedStatusLine -Line $_ -ManagedPaths $managedRepoPaths) })
 
 if ($unexpectedLines.Count -gt 0) {
     throw "Update aborted because the repo has unexpected local changes:`n$($unexpectedLines -join [Environment]::NewLine)"
@@ -208,14 +235,16 @@ try {
         throw "Backup failed before update."
     }
 
-    if ($statusLines -contains $allowedManagedStatus) {
-        Write-Step "Stashing managed docker-compose override"
-        $null = Invoke-External -FilePath "git" -Arguments @(
+    $managedDirtyLines = @($statusLines | Where-Object { Test-IsManagedStatusLine -Line $_ -ManagedPaths $managedRepoPaths })
+    if ($managedDirtyLines.Count -gt 0) {
+        Write-Step "Stashing managed repo overrides"
+        $stashArgs = @(
             "-C", $repoPath,
-            "stash", "push",
+            "stash", "push", "-u",
             "-m", "openclaw-managed-compose-before-update",
             "--", "docker-compose.yml"
-        )
+        ) + $managedUpstreamPaths
+        $null = Invoke-External -FilePath "git" -Arguments $stashArgs
 
         $stashList = Invoke-External -FilePath "git" -Arguments @("-C", $repoPath, "stash", "list")
         $stashRef = @(

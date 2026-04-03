@@ -142,6 +142,24 @@
     "alertOnFailure": true,
     "skipInternetCheck": false
   },
+  "managedHooks": {
+    "agentBootstrapOverlays": {
+      "enabled": true,
+      "overlayDirName": "bootstrap"
+    }
+  },
+  "upstreamPatches": [
+    {
+      "enabled": true,
+      "name": "local-subagent-tool-safe-prompts",
+      "path": ".\\upstream-patches\\openclaw-local-subagent-tool-safe-prompts.patch",
+      "managedPaths": [
+        "src/agents/subagent-announce.ts",
+        "src/agents/subagent-spawn.ts",
+        "src/agents/subagent-announce.prompt.test.ts"
+      ]
+    }
+  ],
   "ollama": {
     "enabled": true,
     "baseUrl": "http://host.docker.internal:11434",
@@ -196,21 +214,6 @@
         },
         "contextWindow": 90000,
         "maxTokens": 8192
-      },
-      {
-        "id": "deepseek-coder-v2:16b",
-        "name": "DeepSeek Coder V2 16B",
-        "input": [
-          "text"
-        ],
-        "cost": {
-          "input": 0,
-          "output": 0,
-          "cacheRead": 0,
-          "cacheWrite": 0
-        },
-        "contextWindow": 57344,
-        "maxTokens": 8192
       }
     ]
   },
@@ -232,10 +235,11 @@
   "multiAgent": {
     "enabled": true,
     "enableAgentToAgent": true,
-    "manageWorkspaceAgentsMd": false,
+    "manageWorkspaceAgentsMd": true,
     "sharedWorkspace": {
       "enabled": true,
-      "path": "/home/node/.openclaw/workspace"
+      "path": "/home/node/.openclaw/workspace",
+      "rolePolicyKey": "sharedWorkspace"
     },
     "strongAgent": {
       "id": "main",
@@ -337,6 +341,23 @@
       ]
     },
     "rolePolicies": {
+      "sharedWorkspace": [
+        "# AGENTS.md - Shared Project Workspace",
+        "",
+        "## Workspace Role",
+        "- This workspace is the shared project area used by multiple agents.",
+        "- Keep durable code, notes, repos, and project artifacts here.",
+        "- Agent-specific role instructions may be injected separately at runtime.",
+        "",
+        "## Collaboration Rules",
+        "- Treat the workspace as shared state: do not surprise other agents with destructive edits.",
+        "- Prefer clear file names, readable commit-worthy changes, and concise status notes.",
+        "- Keep temporary throwaway experiments out of `/app`; use the shared workspace instead.",
+        "",
+        "## Red Lines",
+        "- Do not assume this shared workspace file replaces your agent-specific role.",
+        "- If agent-specific overlay instructions conflict with this file, follow the agent-specific overlay."
+      ],
       "orchestrator": [
         "# AGENTS.md - Strong Coder",
         "",
@@ -416,6 +437,7 @@
         "## Role",
         "- Good fits: drafting code, mechanical refactors, targeted edits, test writing from obvious patterns, and code transformations with clear acceptance criteria.",
         "- Return concise implementation summaries plus any risks or uncertainties.",
+        "- When a real tool is needed, invoke the actual tool call. Do not emit pseudo XML, pseudo JSON, or textual tool markup in the reply.",
         "",
         "## Red Lines",
         "- Do not take on high-stakes security decisions or ambiguous architectural changes without escalation.",

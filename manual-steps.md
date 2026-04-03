@@ -130,6 +130,8 @@ Direct scripts:
   Run the local-model smoke test directly.
 - `D:\openclaw\openclaw-toolkit\run-agent-smoke.cmd`
   Run the shared-workspace agent capability smoke test directly.
+- `D:\openclaw\openclaw-toolkit\run-local-delegated-coder-test.cmd`
+  Diagnose the exact `main -> coder-local` spawned local-model path and detect raw fake tool-call output.
 - `D:\openclaw\openclaw-toolkit\run-add-local-model.cmd`
   Pull, tune, and register a local Ollama model directly.
 - `D:\openclaw\openclaw-toolkit\run-remove-local-model.cmd`
@@ -474,7 +476,6 @@ Current tuned local-model caps on this 32GB RTX 5090 setup:
 - `qwen3.5:35b-a3b` -> `128000`
 - `qwen3-coder:30b` -> `98304`
 - `glm-4.7-flash:latest` -> `98304`
-- `deepseek-coder-v2:16b` -> `57344`
 
 This temporarily switches the default model to the chosen Ollama test model,
 runs one exact-response prompt, and then restores your original default model.
@@ -739,6 +740,14 @@ The `agent` smoke test now exercises all configured collaboration roles that mat
 
 When one of those fails, the verifier now reports the specific category, such as `provider-quota`, `provider-auth`, `gateway`, `model-missing`, or `tooling`, so it is easier to tell “bad provider state” from “bad agent wiring”.
 
+For the specific spawned-local-coder problem, use:
+
+```powershell
+D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test
+```
+
+That diagnostic does not call `research`. It reproduces the exact `main -> coder-local` spawned local-model path and reports whether the child made a real structured tool call or just printed fake `<function=...>` tool markup as plain text.
+
 Valid check names are:
 
 - `health`
@@ -879,11 +888,16 @@ That helper:
 
 - creates a pre-update backup snapshot first
 - stashes the managed local `docker-compose.yml` override if needed
+- stashes any toolkit-managed upstream source patch files if they are currently applied
 - fetches origin branches and tags
 - selects the newest stable release tag by default
 - checks out that release tag in detached HEAD mode
 - runs bootstrap again
 - runs verification again through bootstrap
+
+During bootstrap, the toolkit reapplies any configured upstream source patches,
+so the OpenClaw repo can stay close to the official release checkout instead of
+carrying permanent hand edits.
 
 It intentionally aborts if the repo contains other unexpected local changes, so
 it does not silently stash or overwrite unrelated work.
