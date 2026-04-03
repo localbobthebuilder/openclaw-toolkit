@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ConfigPath,
-    [switch]$SkipPrerequisites
+    [Alias("SkipPrerequisites")]
+    [switch]$SkipFullPrerequisiteAudit
 )
 
 $ErrorActionPreference = "Stop"
@@ -1683,8 +1684,11 @@ $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir $configBaseDir
 $managedUpstreamPatches = @(Get-ManagedUpstreamPatches -Config $config -BaseDir $configBaseDir)
 
-if (-not $SkipPrerequisites) {
-    Write-Step "Preparing Windows prerequisites"
+Write-Step "Preparing Windows prerequisites"
+if ($SkipFullPrerequisiteAudit) {
+    & (Join-Path (Split-Path -Parent $PSCommandPath) "ensure-windows-prereqs.ps1") -ConfigPath $ConfigPath -ServicesOnly
+}
+else {
     & (Join-Path (Split-Path -Parent $PSCommandPath) "ensure-windows-prereqs.ps1") -ConfigPath $ConfigPath
 }
 

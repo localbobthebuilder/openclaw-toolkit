@@ -25,6 +25,7 @@ Most important commands:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd prereqs`
 - First-time setup or new machine:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd bootstrap`
+- On a machine that is already set up, bootstrap should be quick: it checks Docker/Ollama/Tailscale readiness first and only starts them if they are not already ready.
 - Create a recovery snapshot:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd backup`
 - Restore from the latest backup:

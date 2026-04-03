@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ConfigPath,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [switch]$ServicesOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -330,6 +331,87 @@ $isAdmin = Test-IsAdministrator
 $hasWinget = Test-CommandExists "winget"
 $requiresTailscale = [bool]($config.tailscale -and $config.tailscale.enableServe)
 $requiresOllama = [bool]($config.ollama -and $config.ollama.enabled)
+
+if ($ServicesOnly) {
+    Write-Step "Checking bootstrap runtime services"
+
+    if (Test-CommandExists "docker") {
+        if (Start-DockerDesktopIfNeeded) {
+            Add-Check -Name "Docker engine" -State "PASS" -Detail "Docker engine is ready."
+        }
+        else {
+            $detail = "Docker Desktop is installed but the Docker engine is not ready. Bootstrap cannot continue until Docker Desktop finishes starting."
+            Add-Check -Name "Docker engine" -State "FAIL" -Detail $detail
+            $BlockingIssues.Add($detail)
+        }
+    }
+    else {
+        $detail = "Docker Desktop is not installed. Run the full prerequisite pass so bootstrap can install it."
+        Add-Check -Name "Docker Desktop" -State "FAIL" -Detail $detail
+        $BlockingIssues.Add($detail)
+    }
+
+    if ($requiresOllama) {
+        if (Test-CommandExists "ollama") {
+            if (Start-OllamaIfNeeded) {
+                Add-Check -Name "Ollama API" -State "PASS" -Detail "Ollama is reachable on http://127.0.0.1:11434."
+            }
+            else {
+                $detail = "Ollama is installed but its local API is not ready on http://127.0.0.1:11434. Bootstrap cannot continue until Ollama finishes starting."
+                Add-Check -Name "Ollama API" -State "FAIL" -Detail $detail
+                $BlockingIssues.Add($detail)
+            }
+        }
+        else {
+            $detail = "Ollama is not installed. Run the full prerequisite pass so bootstrap can install it."
+            Add-Check -Name "Ollama" -State "FAIL" -Detail $detail
+            $BlockingIssues.Add($detail)
+        }
+    }
+
+    if ($requiresTailscale) {
+        if (Test-CommandExists "tailscale") {
+            $tailscaleStatus = Get-TailscaleStatus
+            if ($tailscaleStatus -and $tailscaleStatus.BackendState -eq "Running" -and $tailscaleStatus.Self) {
+                Add-Check -Name "Tailscale auth" -State "PASS" -Detail "Signed in as $($tailscaleStatus.CurrentTailnet.Name) on $($tailscaleStatus.Self.DNSName.TrimEnd('.'))."
+            }
+            else {
+                $detail = "Tailscale is installed but not signed in or not running. Start Tailscale before continuing."
+                Add-Check -Name "Tailscale auth" -State "FAIL" -Detail $detail
+                $BlockingIssues.Add($detail)
+            }
+        }
+        else {
+            $detail = "Tailscale is not installed. Run the full prerequisite pass so bootstrap can install it."
+            Add-Check -Name "Tailscale" -State "FAIL" -Detail $detail
+            $BlockingIssues.Add($detail)
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Bootstrap runtime service summary" -ForegroundColor Cyan
+    foreach ($check in $Checks) {
+        $color = switch ($check.State) {
+            "PASS" { "Green" }
+            "INFO" { "DarkGray" }
+            default { "Yellow" }
+        }
+        Write-Host ("[{0}] {1}: {2}" -f $check.State, $check.Name, $check.Detail) -ForegroundColor $color
+    }
+
+    if ($BlockingIssues.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Bootstrap is stopping because required runtime services are not ready:" -ForegroundColor Yellow
+        foreach ($issue in $BlockingIssues | Select-Object -Unique) {
+            Write-Host "- $issue" -ForegroundColor Yellow
+        }
+        throw "Bootstrap runtime services are not ready."
+    }
+
+    Write-Host ""
+    Write-Host "Bootstrap runtime services are ready." -ForegroundColor Green
+    return
+}
 
 Write-Step "Checking Windows prerequisites"
 Write-InfoLine "Auto-install missing prerequisites: $autoInstall"

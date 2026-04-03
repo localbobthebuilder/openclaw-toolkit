@@ -19,6 +19,12 @@ OpenClaw work. That prerequisite phase checks:
 If something is missing, it tries to install what can be automated and then
 reports all remaining blockers together instead of failing on the first one.
 
+On a machine that is already set up, this phase should be fast:
+
+- if Docker Desktop is already ready, bootstrap does not try to restart it
+- if Ollama is already serving on `http://127.0.0.1:11434`, bootstrap leaves it alone
+- if Tailscale is already signed in and running, bootstrap just records that it is ready
+
 You can run that phase by itself with:
 
 ```powershell
