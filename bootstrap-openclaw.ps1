@@ -744,6 +744,16 @@ function Set-OpenClawConfigJson {
     )
 }
 
+function Remove-OpenClawConfigValue {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $null = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", "openclaw-openclaw-gateway-1",
+        "node", "dist/index.js",
+        "config", "unset", $Path
+    ) -AllowFailure
+}
+
 function Set-OpenClawConfigValue {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -808,98 +818,69 @@ function Get-ManagedModelRefs {
     )
 
     $refs = @()
+    $availableLocalRefs = @($ExtraRefs | ForEach-Object { [string]$_ })
 
-    if ($Config.multiAgent -and $Config.multiAgent.enabled) {
-        if ($ResolvedStrongModelRef) {
-            $refs = Add-UniqueString -List $refs -Value $ResolvedStrongModelRef
+    function Add-RefIfUsable {
+        param(
+            [string[]]$List,
+            [string]$ModelRef
+        )
+
+        if ([string]::IsNullOrWhiteSpace($ModelRef)) {
+            return @($List)
         }
-        elseif ($Config.multiAgent.strongAgent -and $Config.multiAgent.strongAgent.modelRef) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.strongAgent.modelRef)
+
+        $modelRefText = [string]$ModelRef
+        if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $modelRefText) -and ($modelRefText -notin $availableLocalRefs)) {
+            return @($List)
         }
-        foreach ($candidateRef in @($Config.multiAgent.strongAgent.candidateModelRefs)) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-        }
-        if ($ResolvedLocalChatModelRef) {
-            $refs = Add-UniqueString -List $refs -Value $ResolvedLocalChatModelRef
-        }
-        elseif ($Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled -and $Config.multiAgent.localChatAgent.modelRef) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localChatAgent.modelRef)
-        }
-        foreach ($candidateRef in @($Config.multiAgent.localChatAgent.candidateModelRefs)) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-        }
-        if ($Config.multiAgent.hostedTelegramAgent -and $Config.multiAgent.hostedTelegramAgent.enabled) {
-            if ($ResolvedHostedTelegramModelRef) {
-                $refs = Add-UniqueString -List $refs -Value $ResolvedHostedTelegramModelRef
-            }
-            elseif ($Config.multiAgent.hostedTelegramAgent.modelRef) {
-                $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.hostedTelegramAgent.modelRef)
-            }
-            foreach ($candidateRef in @($Config.multiAgent.hostedTelegramAgent.candidateModelRefs)) {
-                $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-            }
-        }
-        if ($Config.multiAgent.researchAgent -and $Config.multiAgent.researchAgent.enabled) {
-            if ($ResolvedResearchModelRef) {
-                $refs = Add-UniqueString -List $refs -Value $ResolvedResearchModelRef
-            }
-            elseif ($Config.multiAgent.researchAgent.modelRef) {
-                $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.researchAgent.modelRef)
-            }
-            foreach ($candidateRef in @($Config.multiAgent.researchAgent.candidateModelRefs)) {
-                $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-            }
-        }
-        if ($ResolvedLocalReviewModelRef) {
-            $refs = Add-UniqueString -List $refs -Value $ResolvedLocalReviewModelRef
-        }
-        elseif ($Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled -and $Config.multiAgent.localReviewAgent.modelRef) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localReviewAgent.modelRef)
-        }
-        foreach ($candidateRef in @($Config.multiAgent.localReviewAgent.candidateModelRefs)) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-        }
-        if ($ResolvedLocalCoderModelRef) {
-            $refs = Add-UniqueString -List $refs -Value $ResolvedLocalCoderModelRef
-        }
-        elseif ($Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled -and $Config.multiAgent.localCoderAgent.modelRef) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.localCoderAgent.modelRef)
-        }
-        foreach ($candidateRef in @($Config.multiAgent.localCoderAgent.candidateModelRefs)) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-        }
-        if ($ResolvedRemoteReviewModelRef) {
-            $refs = Add-UniqueString -List $refs -Value $ResolvedRemoteReviewModelRef
-        }
-        elseif ($Config.multiAgent.remoteReviewAgent -and $Config.multiAgent.remoteReviewAgent.enabled -and $Config.multiAgent.remoteReviewAgent.modelRef) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.remoteReviewAgent.modelRef)
-        }
-        foreach ($candidateRef in @($Config.multiAgent.remoteReviewAgent.candidateModelRefs)) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-        }
-        if ($ResolvedRemoteCoderModelRef) {
-            $refs = Add-UniqueString -List $refs -Value $ResolvedRemoteCoderModelRef
-        }
-        elseif ($Config.multiAgent.remoteCoderAgent -and $Config.multiAgent.remoteCoderAgent.enabled -and $Config.multiAgent.remoteCoderAgent.modelRef) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$Config.multiAgent.remoteCoderAgent.modelRef)
-        }
-        foreach ($candidateRef in @($Config.multiAgent.remoteCoderAgent.candidateModelRefs)) {
-            $refs = Add-UniqueString -List $refs -Value ([string]$candidateRef)
-        }
+
+        return @(Add-UniqueString -List $List -Value $modelRefText)
     }
 
-    if ($Config.ollama -and $Config.ollama.enabled) {
-        foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
-            foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
-                if ($model.id) {
-                    $refs = Add-UniqueString -List $refs -Value (Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey ([string]$endpoint.key))
-                }
+    if ($Config.multiAgent -and $Config.multiAgent.enabled) {
+        foreach ($ref in @(
+                $ResolvedStrongModelRef,
+                $ResolvedResearchModelRef,
+                $ResolvedLocalChatModelRef,
+                $ResolvedHostedTelegramModelRef,
+                $ResolvedLocalReviewModelRef,
+                $ResolvedLocalCoderModelRef,
+                $ResolvedRemoteReviewModelRef,
+                $ResolvedRemoteCoderModelRef
+            )) {
+            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$ref)
+        }
+
+        $agentConfigs = @(
+            $Config.multiAgent.strongAgent,
+            $Config.multiAgent.researchAgent,
+            $Config.multiAgent.localChatAgent,
+            $Config.multiAgent.hostedTelegramAgent,
+            $Config.multiAgent.localReviewAgent,
+            $Config.multiAgent.localCoderAgent,
+            $Config.multiAgent.remoteReviewAgent,
+            $Config.multiAgent.remoteCoderAgent
+        )
+
+        foreach ($agentConfig in @($agentConfigs)) {
+            if ($null -eq $agentConfig) {
+                continue
+            }
+            if ($agentConfig.PSObject.Properties.Name -contains "enabled" -and -not [bool]$agentConfig.enabled) {
+                continue
+            }
+            if ($agentConfig.modelRef) {
+                $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$agentConfig.modelRef)
+            }
+            foreach ($candidateRef in @($agentConfig.candidateModelRefs)) {
+                $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$candidateRef)
             }
         }
     }
 
     foreach ($ref in @($ExtraRefs)) {
-        $refs = Add-UniqueString -List $refs -Value ([string]$ref)
+        $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$ref)
     }
 
     return @($refs)
@@ -1021,6 +1002,37 @@ function Invoke-OllamaCli {
     return [pscustomobject]@{
         ExitCode = $exitCode
         Output   = $text
+    }
+}
+
+function Invoke-OllamaCliStreaming {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $command = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "The 'ollama' CLI is required."
+    }
+
+    $oldHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
+        & $command.Source @Arguments
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $oldHost) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:OLLAMA_HOST = $oldHost
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        throw "Command failed ($exitCode): ollama $($Arguments -join ' ')"
     }
 }
 
@@ -1161,8 +1173,10 @@ function Ensure-OllamaState {
                 }
 
                 Write-Step "Pulling missing Ollama model $($request.modelId) on endpoint $($endpoint.key)"
-                $pull = Invoke-OllamaCli -Endpoint $endpoint -Arguments @("pull", [string]$request.modelId) -AllowFailure
-                if ($pull.ExitCode -ne 0) {
+                try {
+                    Invoke-OllamaCliStreaming -Endpoint $endpoint -Arguments @("pull", [string]$request.modelId)
+                }
+                catch {
                     Write-WarnLine "Failed to pull Ollama model '$($request.modelId)' on endpoint '$($endpoint.key)'. Bootstrap will use another available local model if possible."
                 }
             }
@@ -1193,9 +1207,11 @@ function Ensure-OllamaState {
                 continue
             }
             $configuredIds = Add-UniqueString -List $configuredIds -Value ([string]$configuredModel.id)
-            $effectiveConfiguredModel = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId ([string]$configuredModel.id) -EndpointKey ([string]$endpoint.key)
-            if ($null -ne $effectiveConfiguredModel) {
-                $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $effectiveConfiguredModel)
+            if ([string]$configuredModel.id -in $availableIds) {
+                $effectiveConfiguredModel = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId ([string]$configuredModel.id) -EndpointKey ([string]$endpoint.key)
+                if ($null -ne $effectiveConfiguredModel) {
+                    $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $effectiveConfiguredModel)
+                }
             }
         }
 
@@ -1842,6 +1858,7 @@ if (@($managedModelRefs).Count -gt 0) {
     foreach ($modelRef in @($managedModelRefs)) {
         $modelsAllowlist[$modelRef] = [ordered]@{}
     }
+    Remove-OpenClawConfigValue -Path "agents.defaults.models"
     Set-OpenClawConfigJson -Path "agents.defaults.models" -Value $modelsAllowlist
     Write-Host "Configured managed model allowlist: $(@($managedModelRefs) -join ', ')" -ForegroundColor Green
 }

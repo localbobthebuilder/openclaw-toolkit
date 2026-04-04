@@ -262,6 +262,26 @@ function Get-ToolkitEndpointModelOverrideEntry {
     return $null
 }
 
+function Get-AgentOllamaEndpointKey {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $AgentConfig
+    )
+
+    if ($null -ne $AgentConfig -and
+        $AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
+        return [string]$AgentConfig.endpointKey
+    }
+
+    $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
+    if ($null -ne $defaultEndpoint) {
+        return [string]$defaultEndpoint.key
+    }
+
+    return "local"
+}
+
 function Merge-ToolkitConfigObjects {
     param(
         $BaseObject,

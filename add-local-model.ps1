@@ -29,6 +29,29 @@ if (-not $ConfigPath) {
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
+function Normalize-InputKinds {
+    param([string[]]$Values)
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @($Values)) {
+        foreach ($token in @([string]$value -split '[,\s;]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+            $kind = $token.Trim().ToLowerInvariant()
+            if ($kind -notin @("text", "image")) {
+                throw "Unsupported input kind '$token'. Allowed values: text, image"
+            }
+            if ($kind -notin @($normalized)) {
+                $normalized.Add($kind)
+            }
+        }
+    }
+
+    if ($normalized.Count -eq 0) {
+        $normalized.Add("text")
+    }
+
+    return @($normalized)
+}
+
 function Write-Step {
     param([string]$Message)
     Write-Host ""
@@ -115,6 +138,37 @@ function Invoke-OllamaCli {
     return [pscustomobject]@{
         ExitCode = $exitCode
         Output   = $text
+    }
+}
+
+function Invoke-OllamaCliStreaming {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $command = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "The 'ollama' CLI is required."
+    }
+
+    $oldHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
+        & $command.Source @Arguments
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $oldHost) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:OLLAMA_HOST = $oldHost
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        throw "Command failed ($exitCode): ollama $($Arguments -join ' ')"
     }
 }
 
@@ -478,6 +532,7 @@ if (-not (Get-Command "pwsh" -ErrorAction SilentlyContinue)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$InputKinds = @(Normalize-InputKinds -Values $InputKinds)
 $endpoint = Get-ToolkitOllamaEndpoint -Config $config -EndpointKey $EndpointKey
 if ($null -eq $endpoint) {
     throw "Unknown Ollama endpoint key: $EndpointKey"
@@ -492,7 +547,7 @@ $plan = Resolve-ModelPlan -Config $config -Endpoint $endpoint -ModelId $Model -D
 
 if ($plan.ModelId -notin $installed) {
     Write-Step "Pulling Ollama model $($plan.ModelId) on endpoint $($endpoint.key)"
-    Invoke-OllamaCli -Endpoint $endpoint -Arguments @("pull", $plan.ModelId) | Out-Null
+    Invoke-OllamaCliStreaming -Endpoint $endpoint -Arguments @("pull", $plan.ModelId)
 }
 else {
     Write-Host "Ollama model $($plan.ModelId) is already installed on endpoint $($endpoint.key)." -ForegroundColor Green

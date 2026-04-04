@@ -1100,29 +1100,47 @@ if (Test-CheckRequested -Names @("multi-agent")) {
 
         if ($config.multiAgent.strongAgent -and $config.multiAgent.strongAgent.subagents) {
             $mainAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.strongAgent.id } | Select-Object -First 1
-            $expectedAllowAgents = @($config.multiAgent.strongAgent.subagents.allowAgents | ForEach-Object { [string]$_ })
+            $delegationEnabled = $true
+            if ($config.multiAgent.strongAgent.subagents.PSObject.Properties.Name -contains "enabled") {
+                $delegationEnabled = [bool]$config.multiAgent.strongAgent.subagents.enabled
+            }
             $actualAllowAgents = @()
             if ($mainAgent -and $mainAgent.subagents -and $mainAgent.subagents.allowAgents) {
                 $actualAllowAgents = @($mainAgent.subagents.allowAgents | ForEach-Object { [string]$_ })
             }
-            foreach ($agentId in $expectedAllowAgents) {
-                if ($agentId -in $actualAllowAgents) {
-                    $multiAgentVerification += "PASS: main subagent allowlist includes '$agentId'"
+
+            if ($delegationEnabled) {
+                $expectedAllowAgents = @($config.multiAgent.strongAgent.subagents.allowAgents | ForEach-Object { [string]$_ })
+                foreach ($agentId in $expectedAllowAgents) {
+                    if ($agentId -in $actualAllowAgents) {
+                        $multiAgentVerification += "PASS: main subagent allowlist includes '$agentId'"
+                    }
+                    else {
+                        $multiAgentVerification += "FAIL: main subagent allowlist is missing '$agentId'"
+                    }
+                }
+            }
+            else {
+                if (@($actualAllowAgents).Count -eq 0) {
+                    $multiAgentVerification += "PASS: main subagent delegation is disabled"
                 }
                 else {
-                    $multiAgentVerification += "FAIL: main subagent allowlist is missing '$agentId'"
+                    $multiAgentVerification += "FAIL: main subagent delegation is disabled in config but live allowlist is not empty"
                 }
             }
 
             $expectedRequireAgentId = $false
-            if ($config.multiAgent.strongAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
+            if ($delegationEnabled -and $config.multiAgent.strongAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
                 $expectedRequireAgentId = [bool]$config.multiAgent.strongAgent.subagents.requireAgentId
             }
             $actualRequireAgentId = $false
             if ($mainAgent -and $mainAgent.subagents -and $mainAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
                 $actualRequireAgentId = [bool]$mainAgent.subagents.requireAgentId
             }
-            if ($actualRequireAgentId -eq $expectedRequireAgentId) {
+            if (-not $delegationEnabled -and -not ($mainAgent -and $mainAgent.subagents)) {
+                $multiAgentVerification += "PASS: main has no per-agent subagent policy while delegation is disabled"
+            }
+            elseif ($actualRequireAgentId -eq $expectedRequireAgentId) {
                 $multiAgentVerification += "PASS: main subagent requireAgentId is $actualRequireAgentId"
             }
             else {

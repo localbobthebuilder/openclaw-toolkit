@@ -544,6 +544,7 @@ gateway state.
 The current managed defaults are aimed at long-running chats with local models:
 
 - compaction mode: `safeguard`
+- compaction reserve floor: `4000`
 - pruning mode: `cache-ttl`
 - pruning TTL: `1h`
 - old oversized tool output is soft-trimmed first, then hard-cleared if needed
@@ -585,6 +586,18 @@ Agent config note:
 
 It also enables `tools.agentToAgent` so your stronger agent can delegate to the
 other configured agents.
+
+If you want a specific agent to stay on its own model and avoid delegation,
+set this in that agent block:
+
+```json
+"subagents": {
+  "enabled": false
+}
+```
+
+When `enabled` is `false`, the toolkit does not register that agent's
+per-agent subagent allowlist in live OpenClaw config.
 
 Shared workspace note:
 

@@ -99,6 +99,16 @@ function Set-OpenClawConfigJson {
     )
 }
 
+function Remove-OpenClawConfigJson {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $null = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", $ContainerName,
+        "node", "dist/index.js",
+        "config", "unset", $Path
+    ) -AllowFailure
+}
+
 function Get-OpenClawConfigJsonValue {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -355,6 +365,10 @@ function Get-AgentSubagentPolicy {
         return $null
     }
 
+    if ($subagents.PSObject.Properties.Name -contains "enabled" -and -not [bool]$subagents.enabled) {
+        return $null
+    }
+
     $entry = [ordered]@{}
     if ($subagents.PSObject.Properties.Name -contains "requireAgentId") {
         $entry.requireAgentId = [bool]$subagents.requireAgentId
@@ -415,6 +429,20 @@ function Merge-AgentEntry {
 
     foreach ($prop in $Desired.Keys) {
         $merged[$prop] = $Desired[$prop]
+    }
+
+    # Managed agent fields should be removable when the desired entry omits them.
+    # This lets config toggles like subagents.enabled=false clear stale live state.
+    $managedOptionalProps = @(
+        "model",
+        "tools",
+        "sandbox",
+        "subagents"
+    )
+    foreach ($prop in $managedOptionalProps) {
+        if (($Existing.PSObject.Properties.Name -contains $prop) -and -not ($Desired.Keys -contains $prop)) {
+            $merged.Remove($prop) | Out-Null
+        }
     }
 
     return $merged
@@ -1114,6 +1142,30 @@ if ($telegramRouteTargetAgentId) {
 }
 
 Set-OpenClawConfigJson -Path "agents.list" -Value @($mergedAgents) -AsArray
+
+$managedOptionalAgentProps = @(
+    "model",
+    "tools",
+    "sandbox",
+    "subagents"
+)
+
+for ($index = 0; $index -lt @($desiredAgents).Count; $index++) {
+    $desiredAgent = $desiredAgents[$index]
+    $existingAgent = $currentAgents | Where-Object { $_.id -eq $desiredAgent.id } | Select-Object -First 1
+    if ($null -eq $existingAgent) {
+        continue
+    }
+
+    foreach ($prop in $managedOptionalAgentProps) {
+        $desiredHasProp = $desiredAgent.Keys -contains $prop
+        $existingHasProp = $existingAgent.PSObject.Properties.Name -contains $prop
+        if ($existingHasProp -and -not $desiredHasProp) {
+            Remove-OpenClawConfigJson -Path ("agents.list.{0}.{1}" -f $index, $prop)
+        }
+    }
+}
+
 if (@($currentBindings).Count -gt 0) {
     Set-OpenClawConfigJson -Path "bindings" -Value @($currentBindings) -AsArray
 }

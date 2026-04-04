@@ -13,7 +13,8 @@ Config note:
 - The same config also owns managed compaction and context-pruning settings
   for OpenClaw sessions.
 - The same config also owns the managed global tool-policy baseline.
-- Current managed defaults: `safeguard` compaction + `cache-ttl` pruning.
+- Current managed defaults: `safeguard` compaction with
+  `reserveTokensFloor=4000` + `cache-ttl` pruning.
 - Current managed tool baseline: `minimal` profile + explicit allow/deny lists,
   with extra web tools only on the `research` agent.
 - Toolkit-managed upstream source patches are reapplied during `bootstrap` and
@@ -81,6 +82,8 @@ Multi-agent note:
   instead of Ollama
 - agent model behavior comes from each agent's own `modelSource`, and reusable
   `AGENTS.md` policy selection comes from each agent's `rolePolicyKey`
+- per-agent delegation can be disabled with:
+  `"subagents": { "enabled": false }`
 - Active Windows workspace: `C:\Users\Deadline\.openclaw\workspace`
 - Ollama model files live under `C:\Users\Deadline\.ollama\models`
 - Docker Desktop VHDX compaction is separate and uses
