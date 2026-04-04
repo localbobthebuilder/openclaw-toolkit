@@ -5,11 +5,13 @@ import { repeat } from 'lit/directives/repeat.js';
 @customElement('toolkit-dashboard')
 export class ToolkitDashboard extends LitElement {
   @state() private config: any = null;
+  @state() private savedConfig: any = null;
   @state() private statusOutput: string = '';
   @state() private logs: string[] = [];
   @state() private isRunning: boolean = false;
   @state() private activeTab: string = 'status';
   @state() private configSection: string = 'general';
+  @state() private editingAgentKey: string | null = null;
   private ws: WebSocket | null = null;
 
   static styles = css`
@@ -177,6 +179,24 @@ export class ToolkitDashboard extends LitElement {
       border-color: #00bcd4;
       font-weight: 600;
     }
+    .unsaved-banner {
+      background: #ff9800;
+      color: #000;
+      padding: 10px 20px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: bold;
+    }
+    .toggle-switch {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .toggle-switch input { width: auto; }
   `;
 
   async firstUpdated() {
@@ -189,6 +209,7 @@ export class ToolkitDashboard extends LitElement {
     try {
       const res = await fetch('http://127.0.0.1:18791/api/config');
       this.config = await res.json();
+      this.savedConfig = JSON.parse(JSON.stringify(this.config));
     } catch (err) {
       console.error('Failed to fetch config', err);
     }
@@ -202,6 +223,11 @@ export class ToolkitDashboard extends LitElement {
     } catch (err) {
       console.error('Failed to fetch status', err);
     }
+  }
+
+  get hasUnsavedChanges() {
+    if (!this.config || !this.savedConfig) return false;
+    return JSON.stringify(this.config) !== JSON.stringify(this.savedConfig);
   }
 
   connectWS() {
@@ -238,11 +264,24 @@ export class ToolkitDashboard extends LitElement {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(this.config)
       });
-      if (res.ok) alert('Configuration saved successfully.');
-      else throw new Error('Failed to save');
+      if (res.ok) {
+        this.savedConfig = JSON.parse(JSON.stringify(this.config));
+        alert('Configuration saved successfully.');
+      } else throw new Error('Failed to save');
     } catch (err) {
       alert('Error saving configuration.');
     }
+  }
+
+  discardChanges() {
+    if (confirm('Discard all unsaved changes?')) {
+      this.config = JSON.parse(JSON.stringify(this.savedConfig));
+    }
+  }
+
+  async applyAndRestart() {
+    await this.saveConfig();
+    this.runCommand('agents');
   }
 
   render() {
@@ -253,21 +292,24 @@ export class ToolkitDashboard extends LitElement {
             <h1>OpenClaw <span class="badge">Toolkit</span></h1>
           </div>
           
-          <div class="nav-item ${this.activeTab === 'status' ? 'active' : ''}" @click=${() => this.activeTab = 'status'}>
-            Status
-          </div>
-          <div class="nav-item ${this.activeTab === 'config' ? 'active' : ''}" @click=${() => this.activeTab = 'config'}>
-            Configuration
-          </div>
-          <div class="nav-item ${this.activeTab === 'ops' ? 'active' : ''}" @click=${() => this.activeTab = 'ops'}>
-            Operations
-          </div>
+          <div class="nav-item ${this.activeTab === 'status' ? 'active' : ''}" @click=${() => this.activeTab = 'status'}>Status</div>
+          <div class="nav-item ${this.activeTab === 'config' ? 'active' : ''}" @click=${() => this.activeTab = 'config'}>Configuration</div>
+          <div class="nav-item ${this.activeTab === 'ops' ? 'active' : ''}" @click=${() => this.activeTab = 'ops'}>Operations</div>
           <div class="nav-item ${this.activeTab === 'logs' ? 'active' : ''}" @click=${() => this.activeTab = 'logs'}>
             Terminal Logs ${this.isRunning ? html`<span style="color: #00bcd4;">●</span>` : ''}
           </div>
         </aside>
 
         <main>
+          ${this.hasUnsavedChanges ? html`
+            <div class="unsaved-banner">
+              <span>You have unsaved changes!</span>
+              <div>
+                <button class="btn btn-secondary" style="background: rgba(0,0,0,0.2); color: #000;" @click=${this.discardChanges}>Discard</button>
+                <button class="btn btn-primary" style="background: #000; color: #ff9800;" @click=${this.saveConfig}>Save</button>
+              </div>
+            </div>
+          ` : ''}
           ${this.renderContent()}
         </main>
       </div>
@@ -300,7 +342,6 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <header>
         <h2>Process Output</h2>
-        ${this.isRunning ? html`<button class="btn btn-danger" disabled>Stop Process</button>` : ''}
       </header>
       <div class="log-container">
         ${this.logs.map(line => html`<div class="log-entry">${line}</div>`)}
@@ -315,9 +356,7 @@ export class ToolkitDashboard extends LitElement {
       { id: 'update', name: 'Update', desc: 'Update OpenClaw repo and rebuild' },
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
       { id: 'start', name: 'Start', desc: 'Launch Docker and OpenClaw' },
-      { id: 'stop', name: 'Stop', desc: 'Stop all services' },
-      { id: 'backup', name: 'Backup', desc: 'Create portable recovery snapshot' },
-      { id: 'compact-storage', name: 'Compact Storage', desc: 'Shrink Docker data disk' }
+      { id: 'stop', name: 'Stop', desc: 'Stop all services' }
     ];
 
     return html`
@@ -346,7 +385,10 @@ export class ToolkitDashboard extends LitElement {
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
         </div>
-        <button class="btn btn-primary" @click=${this.saveConfig}>Save Config</button>
+        <div style="display: flex; gap: 10px;">
+           <button class="btn btn-ghost" @click=${this.saveConfig}>Save Only</button>
+           <button class="btn btn-primary" @click=${this.applyAndRestart}>Save & Apply (Restart Agents)</button>
+        </div>
       </header>
 
       ${this.renderConfigSection()}
@@ -381,10 +423,6 @@ export class ToolkitDashboard extends LitElement {
             </select>
           </div>
         </div>
-        <div class="form-group">
-          <label>Repository Path</label>
-          <input type="text" .value=${this.config.repoPath} @input=${(e: any) => this.config.repoPath = e.target.value}>
-        </div>
       </div>
     `;
   }
@@ -400,7 +438,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${ep.key}</span>
-              <span class="item-sub">${ep.hostBaseUrl} | Provider: ${ep.providerId}</span>
+              <span class="item-sub">${ep.hostBaseUrl}</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editEndpoint(idx)}>Edit</button>
@@ -416,14 +454,14 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <div class="card">
         <div class="card-header">
-          <h3>Ollama Managed Models</h3>
+          <h3>Managed Models</h3>
           <button class="btn btn-ghost" @click=${() => this.addModel()}>+ Add Model</button>
         </div>
         ${repeat(this.config.ollama.models, (m: any) => m.id, (m: any, idx) => html`
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${m.name || m.id}</span>
-              <span class="item-sub">ID: ${m.id} | Context: ${m.contextWindow || 'default'}</span>
+              <span class="item-sub">${m.id} | ${m.contextWindow || 'auto'} ctx</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editModel(idx)}>Edit</button>
@@ -436,30 +474,133 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderAgentsConfig() {
-    const agents = Object.keys(this.config.multiAgent)
+    if (this.editingAgentKey) {
+        return this.renderAgentEditor(this.editingAgentKey);
+    }
+
+    const builtInAgents = Object.keys(this.config.multiAgent)
       .filter(k => k.endsWith('Agent'))
       .map(k => ({ key: k, ...this.config.multiAgent[k] }));
 
     return html`
       <div class="card">
-        <div class="card-header"><h3>Active Agents</h3></div>
-        <div class="form-group">
-          <label>Enable Multi-Agent</label>
-          <select @change=${(e: any) => this.config.multiAgent.enabled = e.target.value === 'true'}>
-            <option value="true" ?selected=${this.config.multiAgent.enabled}>Yes</option>
-            <option value="false" ?selected=${!this.config.multiAgent.enabled}>No</option>
-          </select>
+        <div class="card-header">
+            <h3>Agents Configuration</h3>
+            <button class="btn btn-ghost" @click=${() => this.addExtraAgent()}>+ Add Custom Agent</button>
         </div>
-        ${agents.map(agent => html`
-          <div class="item-row">
+        
+        <div class="form-group" style="margin-bottom: 25px;">
+            <label class="toggle-switch">
+                <input type="checkbox" ?checked=${this.config.multiAgent.enabled} @change=${(e: any) => this.config.multiAgent.enabled = e.target.checked}>
+                Enable Multi-Agent Orchestration
+            </label>
+        </div>
+
+        <h4 style="color: #666; margin-bottom: 10px;">Built-in Roles</h4>
+        ${builtInAgents.map(agent => html`
+          <div class="item-row" style="${!agent.enabled && agent.key !== 'strongAgent' ? 'opacity: 0.5;' : ''}">
             <div class="item-info">
-              <span class="item-title">${agent.name} (${agent.id})</span>
-              <span class="item-sub">Model: ${agent.modelRef} | Source: ${agent.modelSource}</span>
+              <span class="item-title">
+                ${agent.name} 
+                ${agent.key === 'strongAgent' ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
+                ${!agent.enabled && agent.key !== 'strongAgent' ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
+              </span>
+              <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef}</span>
             </div>
-            <button class="btn btn-secondary" @click=${() => this.editAgent(agent.key)}>Configure</button>
+            <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
           </div>
         `)}
+
+        ${this.config.multiAgent.extraAgents && this.config.multiAgent.extraAgents.length > 0 ? html`
+            <h4 style="color: #666; margin-top: 25px; margin-bottom: 10px;">Custom Agents</h4>
+            ${this.config.multiAgent.extraAgents.map((agent: any, idx: number) => html`
+                <div class="item-row">
+                    <div class="item-info">
+                        <span class="item-title">${agent.name}</span>
+                        <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef}</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" @click=${() => this.editingAgentKey = `extra:${idx}`}>Configure</button>
+                        <button class="btn btn-danger" @click=${() => this.removeExtraAgent(idx)}>Remove</button>
+                    </div>
+                </div>
+            `)}
+        ` : ''}
       </div>
+    `;
+  }
+
+  renderAgentEditor(key: string) {
+    let agent: any;
+    let isExtra = false;
+    let extraIdx = -1;
+
+    if (key.startsWith('extra:')) {
+        isExtra = true;
+        extraIdx = parseInt(key.split(':')[1]);
+        agent = this.config.multiAgent.extraAgents[extraIdx];
+    } else {
+        agent = this.config.multiAgent[key];
+    }
+
+    return html`
+        <div class="card">
+            <div class="card-header">
+                <h3>Edit Agent: ${agent.name}</h3>
+                <button class="btn btn-ghost" @click=${() => this.editingAgentKey = null}>Back to List</button>
+            </div>
+            
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Display Name</label>
+                    <input type="text" .value=${agent.name} @input=${(e: any) => { agent.name = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                    <label>Agent ID</label>
+                    <input type="text" .value=${agent.id} ?disabled=${!isExtra} @input=${(e: any) => { agent.id = e.target.value; this.requestUpdate(); }}>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Model Source</label>
+                    <select @change=${(e: any) => { agent.modelSource = e.target.value; this.requestUpdate(); }}>
+                        <option value="local" ?selected=${agent.modelSource === 'local'}>Local (Ollama)</option>
+                        <option value="hosted" ?selected=${agent.modelSource === 'hosted'}>Hosted (Gemini/OpenAI/Anthropic)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Model Reference</label>
+                    <input type="text" .value=${agent.modelRef} @input=${(e: any) => { agent.modelRef = e.target.value; this.requestUpdate(); }}>
+                </div>
+            </div>
+
+            ${agent.modelSource === 'local' ? html`
+                <div class="form-group">
+                    <label>Endpoint Key</label>
+                    <input type="text" .value=${agent.endpointKey} @input=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
+                </div>
+            ` : ''}
+
+            <div class="form-group">
+                <label>Role Policy Key</label>
+                <input type="text" .value=${agent.rolePolicyKey} @input=${(e: any) => { agent.rolePolicyKey = e.target.value; this.requestUpdate(); }}>
+            </div>
+
+            ${key !== 'strongAgent' ? html`
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${agent.enabled} @change=${(e: any) => { agent.enabled = e.target.checked; this.requestUpdate(); }}>
+                        Enable this Agent
+                    </label>
+                </div>
+            ` : ''}
+
+            <div class="form-group">
+                <label>Candidate Models (One per line)</label>
+                <textarea rows="4" @input=${(e: any) => { agent.candidateModelRefs = e.target.value.split('\n').filter((l: string) => l.trim()); this.requestUpdate(); }}>${(agent.candidateModelRefs || []).join('\n')}</textarea>
+            </div>
+        </div>
     `;
   }
 
@@ -467,13 +608,12 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <div class="grid-2">
         <div class="card">
-          <div class="card-header"><h3>Voice Notes</h3></div>
+          <div class="card-header"><h3>Voice</h3></div>
           <div class="form-group">
-            <label>Enabled</label>
-            <select @change=${(e: any) => this.config.voiceNotes.enabled = e.target.value === 'true'}>
-              <option value="true" ?selected=${this.config.voiceNotes.enabled}>Yes</option>
-              <option value="false" ?selected=${!this.config.voiceNotes.enabled}>No</option>
-            </select>
+            <label class="toggle-switch">
+                <input type="checkbox" ?checked=${this.config.voiceNotes.enabled} @change=${(e: any) => { this.config.voiceNotes.enabled = e.target.checked; this.requestUpdate(); }}>
+                Enable Voice Transcription
+            </label>
           </div>
           <div class="form-group">
             <label>Whisper Model</label>
@@ -484,80 +624,83 @@ export class ToolkitDashboard extends LitElement {
         <div class="card">
           <div class="card-header"><h3>Telegram</h3></div>
           <div class="form-group">
-            <label>Enabled</label>
-            <select @change=${(e: any) => this.config.telegram.enabled = e.target.value === 'true'}>
-              <option value="true" ?selected=${this.config.telegram.enabled}>Yes</option>
-              <option value="false" ?selected=${!this.config.telegram.enabled}>No</option>
-            </select>
+             <label class="toggle-switch">
+                <input type="checkbox" ?checked=${this.config.telegram.enabled} @change=${(e: any) => { this.config.telegram.enabled = e.target.checked; this.requestUpdate(); }}>
+                Enable Telegram Bot
+            </label>
           </div>
           <div class="form-group">
-            <label>Allow From (ID)</label>
-            <input type="text" .value=${this.config.telegram.allowFrom.join(',')} @input=${(e: any) => this.config.telegram.allowFrom = e.target.value.split(',')}>
+            <label>Allowed User IDs (comma separated)</label>
+            <input type="text" .value=${(this.config.telegram.allowFrom || []).join(',')} @input=${(e: any) => this.config.telegram.allowFrom = e.target.value.split(',').map((s: string) => s.trim())}>
           </div>
         </div>
       </div>
     `;
   }
 
-  // Helper actions
+  // Helpers
+  addExtraAgent() {
+      if (!this.config.multiAgent.extraAgents) this.config.multiAgent.extraAgents = [];
+      const newAgent = {
+          enabled: true,
+          id: 'new-agent-' + Date.now(),
+          name: 'New Custom Agent',
+          rolePolicyKey: 'codingDelegate',
+          modelSource: 'local',
+          modelRef: 'ollama/qwen2.5-coder:3b'
+      };
+      this.config.multiAgent.extraAgents.push(newAgent);
+      this.editingAgentKey = `extra:${this.config.multiAgent.extraAgents.length - 1}`;
+  }
+
+  removeExtraAgent(idx: number) {
+      if (confirm('Remove this custom agent?')) {
+          this.config.multiAgent.extraAgents.splice(idx, 1);
+          this.requestUpdate();
+      }
+  }
+
   addEndpoint() {
-    const key = prompt('Endpoint Key (e.g. cloud-pc):');
-    if (!key) return;
-    this.config.ollama.endpoints.push({
-      key,
-      providerId: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      hostBaseUrl: 'http://localhost:11434',
-      apiKey: 'ollama-local',
-      autoPullMissingModels: true
-    });
-    this.requestUpdate();
+    const key = prompt('Endpoint Key:');
+    if (key) {
+        this.config.ollama.endpoints.push({ key, providerId: 'ollama', hostBaseUrl: 'http://127.0.0.1:11434', baseUrl: 'http://host.docker.internal:11434' });
+        this.requestUpdate();
+    }
   }
 
   removeEndpoint(idx: number) {
-    if (confirm('Are you sure?')) {
-      this.config.ollama.endpoints.splice(idx, 1);
-      this.requestUpdate();
+    if (confirm('Remove endpoint?')) {
+        this.config.ollama.endpoints.splice(idx, 1);
+        this.requestUpdate();
     }
   }
 
   editEndpoint(idx: number) {
-    const ep = this.config.ollama.endpoints[idx];
-    const url = prompt('Base URL:', ep.baseUrl);
-    if (url) ep.baseUrl = ep.hostBaseUrl = url;
-    this.requestUpdate();
+      const ep = this.config.ollama.endpoints[idx];
+      const url = prompt('Host Base URL:', ep.hostBaseUrl);
+      if (url) ep.hostBaseUrl = url;
+      this.requestUpdate();
   }
 
   addModel() {
-    const id = prompt('Model ID (e.g. deepseek-v3:latest):');
-    if (!id) return;
-    this.config.ollama.models.push({
-      id,
-      name: id,
-      input: ['text'],
-      minimumContextWindow: 2048
-    });
-    this.requestUpdate();
+      const id = prompt('Model ID:');
+      if (id) {
+          this.config.ollama.models.push({ id, name: id, input: ['text'], minimumContextWindow: 24576 });
+          this.requestUpdate();
+      }
   }
 
   removeModel(idx: number) {
-    if (confirm('Are you sure?')) {
-      this.config.ollama.models.splice(idx, 1);
-      this.requestUpdate();
-    }
+      if (confirm('Remove model?')) {
+          this.config.ollama.models.splice(idx, 1);
+          this.requestUpdate();
+      }
   }
 
   editModel(idx: number) {
-    const m = this.config.ollama.models[idx];
-    const ctx = prompt('Context Window:', m.contextWindow || 32768);
-    if (ctx) m.contextWindow = parseInt(ctx);
-    this.requestUpdate();
-  }
-
-  editAgent(key: string) {
-    const agent = this.config.multiAgent[key];
-    const ref = prompt('Model Reference (e.g. ollama/model-id):', agent.modelRef);
-    if (ref) agent.modelRef = ref;
-    this.requestUpdate();
+      const m = this.config.ollama.models[idx];
+      const name = prompt('Name:', m.name);
+      if (name) m.name = name;
+      this.requestUpdate();
   }
 }
