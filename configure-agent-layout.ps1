@@ -152,6 +152,24 @@ function Add-UniqueString {
     return @($List)
 }
 
+function Get-AgentEntryId {
+    param($AgentEntry)
+
+    if ($null -eq $AgentEntry) {
+        return $null
+    }
+
+    if ($AgentEntry -is [System.Collections.IDictionary] -and $AgentEntry.Contains("id")) {
+        return [string]$AgentEntry["id"]
+    }
+
+    if ($AgentEntry.PSObject.Properties.Name -contains "id" -and $AgentEntry.id) {
+        return [string]$AgentEntry.id
+    }
+
+    return $null
+}
+
 function Get-HostConfigDir {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -311,6 +329,51 @@ function Ensure-AgentBootstrapOverlayFile {
 
     $overlayDir = Get-AgentBootstrapOverlayDir -Config $Config -AgentId $AgentId -OverlayDirName $OverlayDirName
     return (Ensure-ManagedTextFile -Path (Join-Path $overlayDir $FileName) -ContentLines $ContentLines)
+}
+
+function Get-AgentOverlayDirName {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "managedHooks" -and
+        $Config.managedHooks -and
+        $Config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
+        $Config.managedHooks.agentBootstrapOverlays -and
+        $Config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
+        $Config.managedHooks.agentBootstrapOverlays.overlayDirName) {
+        return [string]$Config.managedHooks.agentBootstrapOverlays.overlayDirName
+    }
+
+    return "bootstrap"
+}
+
+function Get-ManagedExtraAgentMarkerPath {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$AgentId,
+        [string]$OverlayDirName = "bootstrap"
+    )
+
+    return (Join-Path (Get-AgentBootstrapOverlayDir -Config $Config -AgentId $AgentId -OverlayDirName $OverlayDirName) "toolkit-extra-agent.marker")
+}
+
+function Get-PreviouslyManagedExtraAgentIds {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$OverlayDirName = "bootstrap"
+    )
+
+    $agentsRoot = Join-Path (Get-HostConfigDir -Config $Config) "agents"
+    if (-not (Test-Path -LiteralPath $agentsRoot)) {
+        return @()
+    }
+
+    return @(
+        Get-ChildItem -LiteralPath $agentsRoot -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object {
+                Test-Path -LiteralPath (Join-Path $_.FullName (Join-Path $OverlayDirName "toolkit-extra-agent.marker"))
+            } |
+            ForEach-Object { [string]$_.Name }
+    )
 }
 
 function New-AgentEntry {
@@ -614,7 +677,194 @@ function Get-ManagedAgentConfigRecord {
         }
     }
 
+    $extraAgent = Get-ExtraAgentConfigById -MultiConfig $MultiConfig -AgentId $AgentId
+    if ($null -ne $extraAgent) {
+        return [pscustomobject]@{
+            AgentConfig      = $extraAgent
+            DefaultPolicyKey = $AgentId
+        }
+    }
+
     return $null
+}
+
+function Get-ExtraAgentConfigById {
+    param(
+        [Parameter(Mandatory = $true)]$MultiConfig,
+        [Parameter(Mandatory = $true)][string]$AgentId
+    )
+
+    foreach ($extraAgent in @($MultiConfig.extraAgents)) {
+        if ($null -eq $extraAgent) {
+            continue
+        }
+
+        if ($extraAgent.PSObject.Properties.Name -contains "id" -and [string]$extraAgent.id -eq $AgentId) {
+            return $extraAgent
+        }
+    }
+
+    return $null
+}
+
+function Get-EnabledExtraAgents {
+    param(
+        [Parameter(Mandatory = $true)]$MultiConfig
+    )
+
+    return @(
+        foreach ($extraAgent in @($MultiConfig.extraAgents)) {
+            if ($null -eq $extraAgent) {
+                continue
+            }
+
+            if (-not ($extraAgent.PSObject.Properties.Name -contains "id") -or [string]::IsNullOrWhiteSpace([string]$extraAgent.id)) {
+                continue
+            }
+
+            $isEnabled = $true
+            if ($extraAgent.PSObject.Properties.Name -contains "enabled" -and $null -ne $extraAgent.enabled) {
+                $isEnabled = [bool]$extraAgent.enabled
+            }
+
+            if ($isEnabled) {
+                $extraAgent
+            }
+        }
+    )
+}
+
+function Get-ResearchToolsOverride {
+    param(
+        [Parameter(Mandatory = $true)]$Config
+    )
+
+    if (-not $Config.toolPolicy -or -not (($Config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") -or ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") -or ($Config.toolPolicy.PSObject.Properties.Name -contains "researchDeny"))) {
+        return $null
+    }
+
+    $researchTools = [ordered]@{}
+    if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") {
+        $researchTools.alsoAllow = @($Config.toolPolicy.researchAlsoAllow)
+    }
+    if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") {
+        $researchTools.alsoAllow = @($Config.toolPolicy.researchAllow)
+    }
+    if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchDeny") {
+        $researchTools.deny = @($Config.toolPolicy.researchDeny)
+    }
+
+    return $researchTools
+}
+
+function Get-ToolProfileOverride {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "tools" -and $null -ne $AgentConfig.tools) {
+        return $AgentConfig.tools
+    }
+
+    $toolProfile = $null
+    if ($AgentConfig.PSObject.Properties.Name -contains "toolProfile" -and $AgentConfig.toolProfile) {
+        $toolProfile = ([string]$AgentConfig.toolProfile).ToLowerInvariant()
+    }
+    elseif ($AgentConfig.PSObject.Properties.Name -contains "rolePolicyKey" -and $AgentConfig.rolePolicyKey) {
+        $toolProfile = ([string]$AgentConfig.rolePolicyKey).ToLowerInvariant()
+    }
+
+    switch ($toolProfile) {
+        "research" {
+            return (Get-ResearchToolsOverride -Config $Config)
+        }
+        "review" {
+            return [ordered]@{
+                alsoAllow = @(
+                    "read",
+                    "sessions_list",
+                    "sessions_history",
+                    "sessions_send",
+                    "sessions_spawn",
+                    "session_status"
+                )
+                deny      = @(
+                    "exec",
+                    "write",
+                    "edit",
+                    "browser",
+                    "canvas",
+                    "nodes",
+                    "cron"
+                )
+            }
+        }
+        "codingdelegate" {
+            return [ordered]@{
+                alsoAllow = @(
+                    "read",
+                    "write",
+                    "edit",
+                    "exec",
+                    "sessions_list",
+                    "sessions_history",
+                    "sessions_send",
+                    "sessions_spawn",
+                    "session_status"
+                )
+                deny      = @(
+                    "browser",
+                    "canvas",
+                    "nodes",
+                    "cron"
+                )
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-AgentSandboxOverride {
+    param(
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "sandbox" -and $null -ne $AgentConfig.sandbox) {
+        return $AgentConfig.sandbox
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $AgentConfig.sandboxMode) {
+        return [ordered]@{
+            mode = [string]$AgentConfig.sandboxMode
+        }
+    }
+
+    return $null
+}
+
+function Add-DesiredAgentFromConfig {
+    param(
+        [object[]]$DesiredAgents = @(),
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$MultiConfig,
+        [Parameter(Mandatory = $true)]$AgentConfig,
+        [string]$ModelOverrideRef,
+        [bool]$IsDefault = $false
+    )
+
+    $agentId = [string]$AgentConfig.id
+    $agentName = if ($AgentConfig.PSObject.Properties.Name -contains "name" -and $AgentConfig.name) { [string]$AgentConfig.name } else { $agentId }
+    $resolvedModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $ModelOverrideRef -AgentConfig $AgentConfig -Config $Config -Purpose $agentId
+    $resolvedFallbackRefs = Resolve-AgentFallbackModelRefs -Config $Config -AgentConfig $AgentConfig -PrimaryModelRef $resolvedModelRef -Purpose $agentId
+    $workspacePath = Get-AgentWorkspacePath -MultiConfig $MultiConfig -AgentConfig $AgentConfig
+    $toolsOverride = Get-ToolProfileOverride -Config $Config -AgentConfig $AgentConfig
+    $sandboxOverride = Get-AgentSandboxOverride -AgentConfig $AgentConfig
+    $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
+
+    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy
+    return @(@($DesiredAgents) + $entry)
 }
 
 function Merge-AgentEntry {
@@ -1074,199 +1324,85 @@ if ($existingBindingsRaw) {
     $currentBindings = @($existingBindingsRaw)
 }
 
+$overlayDirName = Get-AgentOverlayDirName -Config $config
+
 $desiredAgents = @()
 $strongId = [string]$multi.strongAgent.id
-$strongName = if ($multi.strongAgent.name) { [string]$multi.strongAgent.name } else { "Strong Coder" }
-$resolvedStrongModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $StrongModelRef -AgentConfig $multi.strongAgent -Config $config -Purpose $strongId
-$resolvedStrongFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.strongAgent -PrimaryModelRef $resolvedStrongModelRef -Purpose $strongId
-$strongWorkspace = Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.strongAgent
-$strongSandbox = $null
-$strongSubagents = Get-AgentSubagentPolicy -AgentConfig $multi.strongAgent
-if ($multi.strongAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.strongAgent.sandboxMode) {
-    $strongSandbox = [ordered]@{
-        mode = [string]$multi.strongAgent.sandboxMode
-    }
-}
-$desiredAgents += (New-AgentEntry -Id $strongId -Name $strongName -Workspace $strongWorkspace -ModelRef $resolvedStrongModelRef -FallbackRefs $resolvedStrongFallbackRefs -IsDefault ([bool]$multi.strongAgent.default) -Sandbox $strongSandbox -Subagents $strongSubagents)
+$desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.strongAgent -ModelOverrideRef $StrongModelRef -IsDefault ([bool]$multi.strongAgent.default)
 
 if ($multi.researchAgent -and $multi.researchAgent.enabled) {
-    $researchTools = $null
-    if ($config.toolPolicy -and (($config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") -or ($config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") -or ($config.toolPolicy.PSObject.Properties.Name -contains "researchDeny"))) {
-        $researchTools = [ordered]@{}
-        if ($config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") {
-            $researchTools.alsoAllow = @($config.toolPolicy.researchAlsoAllow)
-        }
-        if ($config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") {
-            $researchTools.alsoAllow = @($config.toolPolicy.researchAllow)
-        }
-        if ($config.toolPolicy.PSObject.Properties.Name -contains "researchDeny") {
-            $researchTools.deny = @($config.toolPolicy.researchDeny)
-        }
-    }
-
-    $resolvedResearchModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $ResearchModelRef -AgentConfig $multi.researchAgent -Config $config -Purpose ([string]$multi.researchAgent.id)
-    $resolvedResearchFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.researchAgent -PrimaryModelRef $resolvedResearchModelRef -Purpose ([string]$multi.researchAgent.id)
-
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.researchAgent.id) -Name ([string]$multi.researchAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.researchAgent) -ModelRef $resolvedResearchModelRef -FallbackRefs $resolvedResearchFallbackRefs -Tools $researchTools -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.researchAgent))
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.researchAgent -ModelOverrideRef $ResearchModelRef
 }
 
 $chatAgentId = $null
 if ($multi.localChatAgent.enabled) {
     $chatAgentId = [string]$multi.localChatAgent.id
-    $resolvedChatModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalChatModelRef -AgentConfig $multi.localChatAgent -Config $config -Purpose ([string]$multi.localChatAgent.id)
-    $resolvedChatFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.localChatAgent -PrimaryModelRef $resolvedChatModelRef -Purpose ([string]$multi.localChatAgent.id)
-    $chatSandbox = $null
-    if ($multi.localChatAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localChatAgent.sandboxMode) {
-        $chatSandbox = [ordered]@{
-            mode = [string]$multi.localChatAgent.sandboxMode
-        }
-    }
-    $desiredAgents += (New-AgentEntry -Id $chatAgentId -Name ([string]$multi.localChatAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localChatAgent) -ModelRef $resolvedChatModelRef -FallbackRefs $resolvedChatFallbackRefs -Sandbox $chatSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localChatAgent))
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localChatAgent -ModelOverrideRef $LocalChatModelRef
 }
 
 if ($multi.localReviewAgent.enabled) {
-    $reviewTools = [ordered]@{
-        alsoAllow = @(
-            "read",
-            "sessions_list",
-            "sessions_history",
-            "sessions_send",
-            "sessions_spawn",
-            "session_status"
-        )
-        deny  = @(
-            "exec",
-            "write",
-            "edit",
-            "browser",
-            "canvas",
-            "nodes",
-            "cron"
-        )
-    }
-
-    $resolvedReviewModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalReviewModelRef -AgentConfig $multi.localReviewAgent -Config $config -Purpose ([string]$multi.localReviewAgent.id)
-    $resolvedReviewFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.localReviewAgent -PrimaryModelRef $resolvedReviewModelRef -Purpose ([string]$multi.localReviewAgent.id)
-    $reviewSandbox = $null
-    if ($multi.localReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localReviewAgent.sandboxMode) {
-        $reviewSandbox = [ordered]@{
-            mode = [string]$multi.localReviewAgent.sandboxMode
-        }
-    }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localReviewAgent.id) -Name ([string]$multi.localReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localReviewAgent) -ModelRef $resolvedReviewModelRef -FallbackRefs $resolvedReviewFallbackRefs -Tools $reviewTools -Sandbox $reviewSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localReviewAgent))
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localReviewAgent -ModelOverrideRef $LocalReviewModelRef
 }
 
 if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
-    $resolvedHostedChatModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $HostedTelegramModelRef -AgentConfig $multi.hostedTelegramAgent -Config $config -Purpose ([string]$multi.hostedTelegramAgent.id)
-    $resolvedHostedChatFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.hostedTelegramAgent -PrimaryModelRef $resolvedHostedChatModelRef -Purpose ([string]$multi.hostedTelegramAgent.id)
-    $hostedTelegramSandbox = $null
-    if ($multi.hostedTelegramAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.hostedTelegramAgent.sandboxMode) {
-        $hostedTelegramSandbox = [ordered]@{
-            mode = [string]$multi.hostedTelegramAgent.sandboxMode
-        }
-    }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.hostedTelegramAgent.id) -Name ([string]$multi.hostedTelegramAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent) -ModelRef $resolvedHostedChatModelRef -FallbackRefs $resolvedHostedChatFallbackRefs -Sandbox $hostedTelegramSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.hostedTelegramAgent))
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent -ModelOverrideRef $HostedTelegramModelRef
 }
 
 if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
-    $coderTools = [ordered]@{
-        alsoAllow = @(
-            "read",
-            "write",
-            "edit",
-            "exec",
-            "sessions_list",
-            "sessions_history",
-            "sessions_send",
-            "sessions_spawn",
-            "session_status"
-        )
-        deny  = @(
-            "browser",
-            "canvas",
-            "nodes",
-            "cron"
-        )
-    }
-
-    $resolvedCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $LocalCoderModelRef -AgentConfig $multi.localCoderAgent -Config $config -Purpose ([string]$multi.localCoderAgent.id)
-    $resolvedCoderFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.localCoderAgent -PrimaryModelRef $resolvedCoderModelRef -Purpose ([string]$multi.localCoderAgent.id)
-    $coderSandbox = $null
-    if ($multi.localCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.localCoderAgent.sandboxMode) {
-        $coderSandbox = [ordered]@{
-            mode = [string]$multi.localCoderAgent.sandboxMode
-        }
-    }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.localCoderAgent.id) -Name ([string]$multi.localCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.localCoderAgent) -ModelRef $resolvedCoderModelRef -FallbackRefs $resolvedCoderFallbackRefs -Tools $coderTools -Sandbox $coderSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.localCoderAgent))
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localCoderAgent -ModelOverrideRef $LocalCoderModelRef
 }
 
 if ($multi.remoteReviewAgent -and $multi.remoteReviewAgent.enabled) {
-    $remoteReviewTools = [ordered]@{
-        alsoAllow = @(
-            "read",
-            "sessions_list",
-            "sessions_history",
-            "sessions_send",
-            "sessions_spawn",
-            "session_status"
-        )
-        deny  = @(
-            "exec",
-            "write",
-            "edit",
-            "browser",
-            "canvas",
-            "nodes",
-            "cron"
-        )
-    }
-
-    $resolvedRemoteReviewModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $RemoteReviewModelRef -AgentConfig $multi.remoteReviewAgent -Config $config -Purpose ([string]$multi.remoteReviewAgent.id)
-    $resolvedRemoteReviewFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.remoteReviewAgent -PrimaryModelRef $resolvedRemoteReviewModelRef -Purpose ([string]$multi.remoteReviewAgent.id)
-    $remoteReviewSandbox = $null
-    if ($multi.remoteReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.remoteReviewAgent.sandboxMode) {
-        $remoteReviewSandbox = [ordered]@{
-            mode = [string]$multi.remoteReviewAgent.sandboxMode
-        }
-    }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.remoteReviewAgent.id) -Name ([string]$multi.remoteReviewAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.remoteReviewAgent) -ModelRef $resolvedRemoteReviewModelRef -FallbackRefs $resolvedRemoteReviewFallbackRefs -Tools $remoteReviewTools -Sandbox $remoteReviewSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.remoteReviewAgent))
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.remoteReviewAgent -ModelOverrideRef $RemoteReviewModelRef
 }
 
 if ($multi.remoteCoderAgent -and $multi.remoteCoderAgent.enabled) {
-    $remoteCoderTools = [ordered]@{
-        alsoAllow = @(
-            "read",
-            "write",
-            "edit",
-            "exec",
-            "sessions_list",
-            "sessions_history",
-            "sessions_send",
-            "sessions_spawn",
-            "session_status"
-        )
-        deny  = @(
-            "browser",
-            "canvas",
-            "nodes",
-            "cron"
-        )
-    }
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.remoteCoderAgent -ModelOverrideRef $RemoteCoderModelRef
+}
 
-    $resolvedRemoteCoderModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $RemoteCoderModelRef -AgentConfig $multi.remoteCoderAgent -Config $config -Purpose ([string]$multi.remoteCoderAgent.id)
-    $resolvedRemoteCoderFallbackRefs = Resolve-AgentFallbackModelRefs -Config $config -AgentConfig $multi.remoteCoderAgent -PrimaryModelRef $resolvedRemoteCoderModelRef -Purpose ([string]$multi.remoteCoderAgent.id)
-    $remoteCoderSandbox = $null
-    if ($multi.remoteCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $multi.remoteCoderAgent.sandboxMode) {
-        $remoteCoderSandbox = [ordered]@{
-            mode = [string]$multi.remoteCoderAgent.sandboxMode
+foreach ($extraAgent in @(Get-EnabledExtraAgents -MultiConfig $multi)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $extraAgent
+}
+
+$currentManagedExtraAgentIds = @(
+    foreach ($extraAgent in @(Get-EnabledExtraAgents -MultiConfig $multi)) {
+        [string]$extraAgent.id
+    }
+)
+$previousManagedExtraAgentIds = @(Get-PreviouslyManagedExtraAgentIds -Config $config -OverlayDirName $overlayDirName)
+$staleManagedExtraAgentIds = @(
+    foreach ($agentId in @($previousManagedExtraAgentIds)) {
+        if ($agentId -notin @($currentManagedExtraAgentIds)) {
+            [string]$agentId
         }
     }
-    $desiredAgents += (New-AgentEntry -Id ([string]$multi.remoteCoderAgent.id) -Name ([string]$multi.remoteCoderAgent.name) -Workspace (Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $multi.remoteCoderAgent) -ModelRef $resolvedRemoteCoderModelRef -FallbackRefs $resolvedRemoteCoderFallbackRefs -Tools $remoteCoderTools -Sandbox $remoteCoderSandbox -Subagents (Get-AgentSubagentPolicy -AgentConfig $multi.remoteCoderAgent))
+)
+
+$duplicateAgentIds = @(
+    @(
+        foreach ($desiredAgent in @($desiredAgents)) {
+            if ($desiredAgent -is [System.Collections.IDictionary] -and $desiredAgent.Contains("id")) {
+                [string]$desiredAgent["id"]
+                continue
+            }
+
+            if ($null -ne $desiredAgent -and $desiredAgent.id) {
+                [string]$desiredAgent.id
+            }
+        }
+    ) |
+        Group-Object |
+        Where-Object { $_.Count -gt 1 } |
+        Select-Object -ExpandProperty Name
+)
+if (@($duplicateAgentIds).Count -gt 0) {
+    throw "Managed multi-agent config contains duplicate agent ids: $($duplicateAgentIds -join ', ')"
 }
 
 $mergedAgents = @()
 foreach ($desired in $desiredAgents) {
-    $existing = $currentAgents | Where-Object { $_.id -eq $desired.id } | Select-Object -First 1
+    $desiredAgentId = Get-AgentEntryId -AgentEntry $desired
+    $existing = $currentAgents | Where-Object { (Get-AgentEntryId -AgentEntry $_) -eq $desiredAgentId } | Select-Object -First 1
     if ($null -ne $existing) {
         $mergedAgents += (Merge-AgentEntry -Existing $existing -Desired $desired)
     }
@@ -1276,7 +1412,12 @@ foreach ($desired in $desiredAgents) {
 }
 
 foreach ($existing in $currentAgents) {
-    if (-not (@($mergedAgents) | Where-Object { $_.id -eq $existing.id })) {
+    $existingAgentId = Get-AgentEntryId -AgentEntry $existing
+    if ($existingAgentId -in @($staleManagedExtraAgentIds)) {
+        continue
+    }
+
+    if (-not (@($mergedAgents) | Where-Object { (Get-AgentEntryId -AgentEntry $_) -eq $existingAgentId })) {
         $mergedAgents += $existing
     }
 }
@@ -1354,7 +1495,8 @@ $managedOptionalAgentProps = @(
 
 for ($index = 0; $index -lt @($desiredAgents).Count; $index++) {
     $desiredAgent = $desiredAgents[$index]
-    $existingAgent = $currentAgents | Where-Object { $_.id -eq $desiredAgent.id } | Select-Object -First 1
+    $desiredAgentId = Get-AgentEntryId -AgentEntry $desiredAgent
+    $existingAgent = $currentAgents | Where-Object { (Get-AgentEntryId -AgentEntry $_) -eq $desiredAgentId } | Select-Object -First 1
     if ($null -eq $existingAgent) {
         continue
     }
@@ -1385,18 +1527,35 @@ if ($multi.enableAgentToAgent) {
 }
 
 $managedAgentsFiles = @()
+foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
+    $staleMarkerPath = Get-ManagedExtraAgentMarkerPath -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName
+    Remove-ManagedTextFileIfPresent -Path $staleMarkerPath
+}
+
+foreach ($managedExtraAgentId in @($currentManagedExtraAgentIds)) {
+    $markerPath = Ensure-ManagedTextFile -Path (Get-ManagedExtraAgentMarkerPath -Config $config -AgentId ([string]$managedExtraAgentId) -OverlayDirName $overlayDirName) -ContentLines @("managed-extra-agent")
+    if ($markerPath) { $managedAgentsFiles += $markerPath }
+}
+
 if ($multi.manageWorkspaceAgentsMd) {
-    $overlayDirName = "bootstrap"
-    if ($config.PSObject.Properties.Name -contains "managedHooks" -and
-        $config.managedHooks -and
-        $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
-        $config.managedHooks.agentBootstrapOverlays -and
-        $config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
-        $config.managedHooks.agentBootstrapOverlays.overlayDirName) {
-        $overlayDirName = [string]$config.managedHooks.agentBootstrapOverlays.overlayDirName
+    $sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $multi
+    foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
+        $staleOverlayPath = Join-Path (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName) "AGENTS.md"
+        Remove-ManagedTextFileIfPresent -Path $staleOverlayPath
+
+        $staleExistingAgent = $currentAgents | Where-Object { $_.id -eq $staleExtraAgentId } | Select-Object -First 1
+        if ($null -eq $staleExistingAgent) {
+            $staleExistingAgent = $currentAgents | Where-Object { (Get-AgentEntryId -AgentEntry $_) -eq $staleExtraAgentId } | Select-Object -First 1
+        }
+        if ($null -ne $staleExistingAgent -and $staleExistingAgent.workspace) {
+            $staleWorkspacePath = [string]$staleExistingAgent.workspace
+            if ([string]::IsNullOrWhiteSpace($sharedWorkspacePath) -or $staleWorkspacePath -ne $sharedWorkspacePath) {
+                $staleWorkspaceAgentsPath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath $staleWorkspacePath) "AGENTS.md"
+                Remove-ManagedTextFileIfPresent -Path $staleWorkspaceAgentsPath
+            }
+        }
     }
 
-    $sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $multi
     if ($sharedWorkspacePath) {
         $sharedPolicyKey = "sharedWorkspace"
         if ($multi.sharedWorkspace -and

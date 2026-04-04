@@ -133,11 +133,19 @@ against the official OpenClaw docs/source in `D:\openclaw\openclaw`.
   `sharedWorkspaceAccess: true`. That does not change hard permissions by
   itself; it just tells the agent where the shared project tree lives and how to
   use it.
-- The toolkit is not fully generic yet:
-  it manages a fixed set of role slots such as `main`, `research`,
+- The toolkit still has built-in role slots such as `main`, `research`,
   `chat-local`, `review-local`, and the coder/reviewer delegates.
-  For totally new extra agents outside those slots, use native OpenClaw agent
-  creation or extend the toolkit schema further.
+- But it is no longer limited to only those slots:
+  `multiAgent.extraAgents[]` can now add arbitrary managed agents through the
+  bootstrap config.
+- Extra agents use the same model resolution, workspace-mode, subagent, and
+  managed `AGENTS.md` machinery as the built-ins.
+- Extra agents can either:
+  reuse a built-in role policy/tool profile such as `research`, `review`, or
+  `codingDelegate`, or
+  define their own `tools` and `rolePolicyKey`.
+- Removing an extra agent from `multiAgent.extraAgents` now removes that managed
+  agent from `agents.list` and cleans up the toolkit-managed prompt marker/files.
 
 ## Recommended house view
 

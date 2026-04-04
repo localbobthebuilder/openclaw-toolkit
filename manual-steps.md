@@ -669,9 +669,47 @@ Shared workspace note:
 - `sharedWorkspaceAccess: true` adds config-managed instructions telling that
   private agent where the shared project workspace lives and to use exact
   absolute paths there when joining collaborative work.
-- The managed toolkit layout still covers a fixed set of role slots. If you want
-  a brand-new extra agent outside those slots, create it natively in OpenClaw
-  and then decide separately whether to extend toolkit management for it.
+- The managed toolkit layout still includes the built-in role slots, but it now
+  also supports arbitrary managed extras through `multiAgent.extraAgents`.
+
+Example extra agent:
+
+```json
+"extraAgents": [
+  {
+    "enabled": true,
+    "id": "notes-helper",
+    "name": "Notes Helper",
+    "rolePolicyKey": "research",
+    "modelSource": "hosted",
+    "workspaceMode": "private",
+    "sharedWorkspaceAccess": true,
+    "workspace": "/home/node/.openclaw/workspace-notes-helper",
+    "modelRef": "google/gemini-3.1-flash-lite-preview",
+    "candidateModelRefs": [
+      "google/gemini-3.1-flash-lite-preview"
+    ],
+    "subagents": {
+      "requireAgentId": true,
+      "allowAgents": []
+    }
+  }
+]
+```
+
+Notes for `extraAgents`:
+
+- each extra agent needs a unique `id`
+- each extra agent can choose `workspaceMode: "shared"` or
+  `workspaceMode: "private"`
+- private extra agents can still collaborate through
+  `sharedWorkspaceAccess: true`
+- `rolePolicyKey` controls which managed `AGENTS.md` policy block is written
+- `toolProfile` can be used to reuse the built-in tool presets such as
+  `research`, `review`, or `codingDelegate`
+- or you can provide an explicit `tools` object directly on the extra agent
+- removing an entry from `extraAgents` now removes that managed extra agent from
+  `agents.list` and cleans up its managed marker / managed workspace prompt file
 
 Example mixed layout:
 
