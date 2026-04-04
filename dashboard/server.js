@@ -14,12 +14,18 @@ const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
 app.use(cors());
 app.use(express.json());
 
+// Middleware to strip /toolkit from all incoming requests before they hit handlers
+app.use((req, res, next) => {
+    if (req.url.startsWith('/toolkit')) {
+        req.url = req.url.replace('/toolkit', '');
+        if (req.url === '') req.url = '/';
+    }
+    next();
+});
+
 // Serve static frontend files from the ui/dist directory
 const uiDistPath = path.join(toolkitDir, 'dashboard', 'ui', 'dist');
-app.use('/toolkit', (req, res, next) => {
-    req.url = req.url.replace('/toolkit', '');
-    next();
-}, express.static(uiDistPath));
+app.use(express.static(uiDistPath));
 
 app.get('/api/config', (req, res) => {
   try {
