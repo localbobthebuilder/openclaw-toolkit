@@ -12,6 +12,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private activeTab: string = 'status';
   @state() private configSection: string = 'general';
   @state() private editingAgentKey: string | null = null;
+  @state() private editingEndpointKey: string | null = null;
   private ws: WebSocket | null = null;
 
   static styles = css`
@@ -197,6 +198,14 @@ export class ToolkitDashboard extends LitElement {
       cursor: pointer;
     }
     .toggle-switch input { width: auto; }
+    
+    .model-override-card {
+        background: #2a2a2a;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 10px;
+        font-size: 0.85rem;
+    }
   `;
 
   async firstUpdated() {
@@ -208,8 +217,9 @@ export class ToolkitDashboard extends LitElement {
   async fetchConfig() {
     try {
       const res = await fetch('http://127.0.0.1:18791/api/config');
-      this.config = await res.json();
-      this.savedConfig = JSON.parse(JSON.stringify(this.config));
+      const data = await res.json();
+      this.config = data;
+      this.savedConfig = JSON.parse(JSON.stringify(data));
     } catch (err) {
       console.error('Failed to fetch config', err);
     }
@@ -244,6 +254,7 @@ export class ToolkitDashboard extends LitElement {
       } else if (msg.type === 'exit') {
         this.isRunning = false;
         this.logs = [...this.logs, `\n[FINISH] Process exited with code ${msg.code}`];
+        this.fetchConfig(); // Reload config as it might have been updated by scripts
         this.fetchStatus();
       }
     };
@@ -381,7 +392,7 @@ export class ToolkitDashboard extends LitElement {
         <div style="display: flex; gap: 10px;">
           <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
           <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
-          <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models</div>
+          <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
         </div>
@@ -428,20 +439,25 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderEndpointsConfig() {
+    if (this.editingEndpointKey) {
+        return this.renderEndpointEditor(this.editingEndpointKey);
+    }
+
     return html`
       <div class="card">
         <div class="card-header">
-          <h3>Ollama Endpoints</h3>
+          <h3>Endpoints (Compute Resources)</h3>
           <button class="btn btn-ghost" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
         </div>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines running Ollama. Each machine has specific allowed models and hardware-tuned context windows.</p>
         ${repeat(this.config.ollama.endpoints, (ep: any) => ep.key, (ep: any, idx) => html`
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${ep.key}</span>
-              <span class="item-sub">${ep.hostBaseUrl}</span>
+              <span class="item-sub">${ep.hostBaseUrl} | ${ep.modelOverrides?.length || 0} tuned models</span>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary" @click=${() => this.editEndpoint(idx)}>Edit</button>
+              <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure & Tune Models</button>
               <button class="btn btn-danger" @click=${() => this.removeEndpoint(idx)}>Remove</button>
             </div>
           </div>
@@ -450,18 +466,80 @@ export class ToolkitDashboard extends LitElement {
     `;
   }
 
+  renderEndpointEditor(key: string) {
+      const ep = this.config.ollama.endpoints.find((e: any) => e.key === key);
+      if (!ep) return html`Endpoint not found`;
+
+      return html`
+        <div class="card">
+            <div class="card-header">
+                <h3>Endpoint: ${ep.key}</h3>
+                <button class="btn btn-ghost" @click=${() => this.editingEndpointKey = null}>Back to Endpoints</button>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Base URL (Inside Docker)</label>
+                    <input type="text" .value=${ep.baseUrl} @input=${(e: any) => { ep.baseUrl = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                    <label>Host Base URL (Direct Access)</label>
+                    <input type="text" .value=${ep.hostBaseUrl} @input=${(e: any) => { ep.hostBaseUrl = e.target.value; this.requestUpdate(); }}>
+                </div>
+            </div>
+
+            <h4 style="color: #666; margin-top: 20px;">Hardware-Tuned Models (Overrides)</h4>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These models are fine-tuned for this machine's VRAM. Use "Tune New Model" to pull and auto-calibrate a model.</p>
+            
+            ${(ep.modelOverrides || []).map((mo: any, idx: number) => html`
+                <div class="item-row">
+                    <div class="item-info">
+                        <span class="item-title">${mo.id}</span>
+                        <span class="item-sub">Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
+                        <button class="btn btn-danger" @click=${() => { ep.modelOverrides.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                    </div>
+                </div>
+            `)}
+
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" @click=${() => this.tuneNewModel(ep.key)}>+ Tune New Model on this Endpoint</button>
+            </div>
+        </div>
+      `;
+  }
+
+  tuneNewModel(endpointKey: string) {
+      const modelId = prompt('Enter model ID to tune (e.g. qwen2.5-coder:32b):');
+      if (!modelId) return;
+      
+      const maxCtx = prompt('Maximum context window to test (e.g. 131072):', '131072');
+      if (!maxCtx) return;
+
+      this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', endpointKey, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
+  }
+
+  tuneExistingModel(endpointKey: string, modelId: string) {
+      const maxCtx = prompt('Maximum context window to test:', '131072');
+      if (!maxCtx) return;
+      this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', endpointKey, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
+  }
+
   renderModelsConfig() {
     return html`
       <div class="card">
         <div class="card-header">
-          <h3>Managed Models</h3>
-          <button class="btn btn-ghost" @click=${() => this.addModel()}>+ Add Model</button>
+          <h3>Master Model Catalog</h3>
+          <button class="btn btn-ghost" @click=${() => this.addModel()}>+ Add to Catalog</button>
         </div>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">The catalog lists all models known to OpenClaw. Endpoints use these definitions as a base.</p>
         ${repeat(this.config.ollama.models, (m: any) => m.id, (m: any, idx) => html`
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${m.name || m.id}</span>
-              <span class="item-sub">${m.id} | ${m.contextWindow || 'auto'} ctx</span>
+              <span class="item-sub">${m.id} | Min Ctx: ${m.minimumContextWindow || 24576}</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editModel(idx)}>Edit</button>
@@ -663,7 +741,8 @@ export class ToolkitDashboard extends LitElement {
   addEndpoint() {
     const key = prompt('Endpoint Key:');
     if (key) {
-        this.config.ollama.endpoints.push({ key, providerId: 'ollama', hostBaseUrl: 'http://127.0.0.1:11434', baseUrl: 'http://host.docker.internal:11434' });
+        if (!this.config.ollama.endpoints) this.config.ollama.endpoints = [];
+        this.config.ollama.endpoints.push({ key, providerId: 'ollama', hostBaseUrl: 'http://127.0.0.1:11434', baseUrl: 'http://host.docker.internal:11434', modelOverrides: [] });
         this.requestUpdate();
     }
   }
@@ -673,13 +752,6 @@ export class ToolkitDashboard extends LitElement {
         this.config.ollama.endpoints.splice(idx, 1);
         this.requestUpdate();
     }
-  }
-
-  editEndpoint(idx: number) {
-      const ep = this.config.ollama.endpoints[idx];
-      const url = prompt('Host Base URL:', ep.hostBaseUrl);
-      if (url) ep.hostBaseUrl = url;
-      this.requestUpdate();
   }
 
   addModel() {
