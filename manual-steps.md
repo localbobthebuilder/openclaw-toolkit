@@ -98,6 +98,19 @@ Main operator wrapper:
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd stop`
   Stop the gateway and remove disposable sandbox worker containers.
 
+Wrapper help note:
+
+- `run-openclaw.cmd` is the curated top-level operator help entrypoint.
+- The individual `run-*.cmd` wrappers now also expose direct parameter help for
+  their backing PowerShell scripts.
+- Supported help triggers on wrappers: `help`, `-Help`, `--help`, and `/?`
+- Examples:
+  `D:\openclaw\openclaw-toolkit\run-verify.cmd /?`
+  `D:\openclaw\openclaw-toolkit\run-add-local-model.cmd help`
+  `D:\openclaw\openclaw-toolkit\run-status.cmd --help`
+- The top-level wrapper also forwards these help aliases to subcommands, so
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify /?` works too.
+
 Named Ollama endpoints can also declare endpoint-level desired models. That is
 useful when you have multiple Ollama PCs and want bootstrap to keep a small
 starter model present on each machine even before any agent is assigned to it.
