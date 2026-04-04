@@ -101,7 +101,7 @@ export class ToolkitDashboard extends LitElement {
       border-radius: 4px;
       font-size: 0.9rem;
     }
-    input:focus, select:focus { border-color: #00bcd4; outline: none; }
+    input:focus, select:focus, textarea:focus { border-color: #00bcd4; outline: none; }
     
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     
@@ -232,6 +232,60 @@ export class ToolkitDashboard extends LitElement {
       gap: 6px;
     }
     .tag-remove { cursor: pointer; color: #f44336; font-weight: bold; }
+
+    /* Pretty Status Styles */
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(450px, 1fr)); gap: 25px; }
+    .status-card {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 12px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.2s, border-color 0.2s;
+    }
+    .status-card:hover { transform: translateY(-2px); border-color: #00bcd4; }
+    .status-card-header {
+        background: #252525;
+        padding: 12px 18px;
+        border-bottom: 1px solid #333;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .status-card-header h4 {
+        margin: 0;
+        color: #fff;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .status-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .status-online { background: #4caf50; box-shadow: 0 0 8px rgba(76, 175, 80, 0.5); }
+    .status-offline { background: #f44336; box-shadow: 0 0 8px rgba(244, 67, 54, 0.5); }
+    
+    .status-content {
+        font-family: 'Cascadia Code', 'Consolas', monospace;
+        font-size: 0.72rem;
+        color: #bbb;
+        white-space: pre;
+        overflow-x: auto;
+        line-height: 1.6;
+        padding: 15px;
+        background: #0f0f0f;
+        flex-grow: 1;
+    }
+    .status-content::-webkit-scrollbar { height: 6px; }
+    .status-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
   `;
 
   async firstUpdated() {
@@ -292,6 +346,15 @@ export class ToolkitDashboard extends LitElement {
     this.logs = [`[START] Running: ${command} ${args.join(' ')}...\n`];
     this.activeTab = 'logs';
     this.ws.send(JSON.stringify({ type: 'run-command', command, args }));
+  }
+
+  rebootService(service: string) {
+    if (!this.ws || this.isRunning) return;
+    if (!confirm(`Are you sure you want to reboot ${service}?`)) return;
+    this.isRunning = true;
+    this.logs = [`[REBOOT] Restarting ${service}...\n`];
+    this.activeTab = 'logs';
+    this.ws.send(JSON.stringify({ type: 'reboot-service', service }));
   }
 
   async saveConfig() {
@@ -364,15 +427,83 @@ export class ToolkitDashboard extends LitElement {
     }
   }
 
+  parseStatusOutput(output: string) {
+      if (!output) return [];
+      const sections: { title: string, content: string, status: 'online'|'offline' }[] = [];
+      const parts = output.split(/\[(.*?)\]/g);
+      
+      for (let i = 1; i < parts.length; i += 2) {
+          const title = parts[i];
+          let content = parts[i+1]?.trim() || '';
+          let status: 'online'|'offline' = 'online';
+          
+          // Attempt JSON beautification for nicer gateway status
+          try {
+              const json = JSON.parse(content);
+              if (json && typeof json === 'object') {
+                  if (json.ok === false || json.status === 'error') status = 'offline';
+                  content = Object.entries(json)
+                      .map(([k, v]) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${v}`)
+                      .join('\n');
+              }
+          } catch (e) {
+              // Fallback to text-based status detection
+              if (content.toLowerCase().includes('not ready') || 
+                  content.toLowerCase().includes('failed') || 
+                  content.toLowerCase().includes('error')) {
+                  status = 'offline';
+              }
+          }
+          
+          sections.push({ title, content, status });
+      }
+      return sections;
+  }
+
   renderStatus() {
+    const sections = this.parseStatusOutput(this.statusOutput);
+    const rebootMap: Record<string, string> = {
+        'Docker': 'docker',
+        'Gateway': 'gateway',
+        'Tailscale Serve': 'tailscale',
+        'Ollama': 'ollama'
+    };
+
     return html`
       <header>
-        <h2>System Health</h2>
-        <button class="btn btn-secondary" @click=${this.fetchStatus}>Refresh</button>
+        <h2>System Health Dashboard</h2>
+        <button class="btn btn-secondary" @click=${this.fetchStatus}>Refresh Monitoring</button>
       </header>
-      <div class="card">
-        <pre>${this.statusOutput || 'Gathers system status...'}</pre>
-      </div>
+      
+      ${sections.length > 0 ? html`
+          <div class="status-grid">
+              ${sections.map(s => html`
+                  <div class="status-card">
+                      <div class="status-card-header">
+                          <h4>${s.title}</h4>
+                          <div style="display: flex; align-items: center; gap: 12px;">
+                              ${rebootMap[s.title] ? html`
+                                  <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;" 
+                                          ?disabled=${this.isRunning}
+                                          @click=${() => this.rebootService(rebootMap[s.title])}>
+                                      Restart
+                                  </button>
+                              ` : ''}
+                              <span class="status-indicator ${s.status === 'online' ? 'status-online' : 'status-offline'}"></span>
+                          </div>
+                      </div>
+                      <div class="status-content">${s.content}</div>
+                  </div>
+              `)}
+          </div>
+      ` : html`
+          <div class="card">
+            <p style="color: #888; margin-bottom: 15px;">Gathering live data from Docker and local gateway...</p>
+            <div class="log-container" style="height: auto; max-height: 400px; background: #0f0f0f;">
+                ${this.statusOutput || 'Waiting for status report...'}
+            </div>
+          </div>
+      `}
     `;
   }
 
@@ -420,6 +551,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
           <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
           <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
+          <div class="tab ${this.configSection === 'roles' ? 'active' : ''}" @click=${() => this.configSection = 'roles'}>Role Policies</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
         </div>
@@ -438,6 +570,7 @@ export class ToolkitDashboard extends LitElement {
       case 'general': return this.renderGeneralConfig();
       case 'endpoints': return this.renderEndpointsConfig();
       case 'models': return this.renderModelsConfig();
+      case 'roles': return this.renderRolesConfig();
       case 'agents': return this.renderAgentsConfig();
       case 'features': return this.renderFeaturesConfig();
       default: return html``;
@@ -460,6 +593,12 @@ export class ToolkitDashboard extends LitElement {
               <option value="localhost" ?selected=${this.config.gatewayBind === 'localhost'}>Localhost</option>
             </select>
           </div>
+        </div>
+        <div class="form-group">
+            <label class="toggle-switch">
+                <input type="checkbox" ?checked=${this.config.ollama.enabled} @change=${(e: any) => { this.config.ollama.enabled = e.target.checked; this.requestUpdate(); }}>
+                Enable Ollama Local Models Support
+            </label>
         </div>
       </div>
     `;
@@ -609,6 +748,44 @@ export class ToolkitDashboard extends LitElement {
     `;
   }
 
+  renderRolesConfig() {
+      const roles = this.config.multiAgent.rolePolicies || {};
+      return html`
+        <div class="card">
+            <div class="card-header">
+                <h3>Role Policies</h3>
+                <button class="btn btn-ghost" @click=${() => this.addRole()}>+ Add Role</button>
+            </div>
+            <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Role policies are sets of instructions injected into agents at runtime.</p>
+            ${Object.keys(roles).map(roleKey => html`
+                <div class="form-group" style="margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="font-weight: bold; color: #00bcd4;">${roleKey}</span>
+                        <button class="btn btn-danger btn-small" style="padding: 4px 10px;" @click=${() => this.removeRole(roleKey)}>Delete Role</button>
+                    </div>
+                    <textarea rows="8" @input=${(e: any) => { this.config.multiAgent.rolePolicies[roleKey] = e.target.value.split('\n'); this.requestUpdate(); }}>${roles[roleKey].join('\n')}</textarea>
+                </div>
+            `)}
+        </div>
+      `;
+  }
+
+  addRole() {
+      const key = prompt('New Role Key (e.g. specializedCoder):');
+      if (key) {
+          if (!this.config.multiAgent.rolePolicies) this.config.multiAgent.rolePolicies = {};
+          this.config.multiAgent.rolePolicies[key] = ["# AGENTS.md - New Role", "", "## Role", "- Instruction 1"];
+          this.requestUpdate();
+      }
+  }
+
+  removeRole(key: string) {
+      if (confirm(`Delete role policy "${key}"?`)) {
+          delete this.config.multiAgent.rolePolicies[key];
+          this.requestUpdate();
+      }
+  }
+
   renderAgentsConfig() {
     if (this.editingAgentKey) {
         return this.renderAgentEditor(this.editingAgentKey);
@@ -683,7 +860,6 @@ export class ToolkitDashboard extends LitElement {
     const endpoints = (this.config.ollama.endpoints || []).map((e: any) => e.key);
     const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
     
-    // Get tuned models for the currently selected endpoint
     const selectedEndpoint = this.config.ollama.endpoints.find((e: any) => e.key === agent.endpointKey);
     const availableTunedModels = selectedEndpoint ? (selectedEndpoint.modelOverrides || []).map((mo: any) => mo.id) : [];
 
@@ -724,7 +900,7 @@ export class ToolkitDashboard extends LitElement {
             ${agent.modelSource === 'local' ? html`
                 <div class="grid-2">
                     <div class="form-group">
-                        <label>Endpoint Key</label>
+                        <label>Endpoint</label>
                         <select @change=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
                             <option value="">Select Endpoint</option>
                             ${endpoints.map((ep: string) => html`<option value=${ep} ?selected=${agent.endpointKey === ep}>${ep}</option>`)}
@@ -738,7 +914,7 @@ export class ToolkitDashboard extends LitElement {
                                 <option value=${m} ?selected=${agent.modelRef === 'ollama/' + m}>${m}</option>
                             `)}
                         </select>
-                        ${availableTunedModels.length === 0 ? html`<p style="color: #f44336; font-size: 0.7rem; margin-top: 4px;">No hardware-tuned models found for this endpoint. Go to Endpoints to tune one.</p>` : ''}
+                        ${availableTunedModels.length === 0 && agent.endpointKey ? html`<p style="color: #f44336; font-size: 0.7rem; margin-top: 4px;">No hardware-tuned models found for this endpoint. Go to Endpoints to tune one.</p>` : ''}
                     </div>
                 </div>
             ` : html`

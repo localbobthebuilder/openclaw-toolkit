@@ -62,6 +62,7 @@ $composePs = Invoke-External -FilePath "docker" -Arguments @(
     "compose", "-f", (Join-Path $RepoPath "docker-compose.yml"), "ps"
 ) -AllowFailure
 $serve = Invoke-External -FilePath "tailscale" -Arguments @("serve", "status") -AllowFailure
+$ollama = Invoke-External -FilePath "ollama" -Arguments @("list") -AllowFailure
 
 Write-Host "[Docker]" -ForegroundColor Cyan
 if ($dockerInfo.ExitCode -eq 0) {
@@ -102,4 +103,18 @@ if ($serve.Output) {
 }
 else {
     Write-Host "No Tailscale Serve status available."
+}
+
+Write-Host ""
+Write-Host "[Ollama]" -ForegroundColor Cyan
+if ($ollama.ExitCode -eq 0) {
+    if ($ollama.Output) {
+        Write-Host $ollama.Output
+    }
+    else {
+        Write-Host "Ollama: ready (no models loaded)" -ForegroundColor Green
+    }
+}
+else {
+    Write-Host "Ollama: not responding" -ForegroundColor Yellow
 }

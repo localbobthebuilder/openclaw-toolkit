@@ -80,27 +80,39 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     const data = JSON.parse(message);
     if (data.type === 'run-command') {
-      const { command, args = [] } = data;
-      console.log(`Running command: ${command} ${args.join(' ')}`);
+      // ... existing code ...
+    } else if (data.type === 'reboot-service') {
+      const { service } = data;
+      console.log(`Rebooting service: ${service}`);
+      
+      let scriptFile = '';
+      if (service === 'docker') {
+        scriptFile = 'restart-docker.ps1';
+      } else if (service === 'gateway') {
+        // Gateway uses the main toolkit wrapper for stop/start
+        const command = `& "${path.join(toolkitDir, 'run-openclaw.cmd')}" stop; & "${path.join(toolkitDir, 'run-openclaw.cmd')}" start`;
+        const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command]);
+        child.stdout.on('data', (data) => ws.send(JSON.stringify({ type: 'stdout', data: data.toString() })));
+        child.stderr.on('data', (data) => ws.send(JSON.stringify({ type: 'stderr', data: data.toString() })));
+        child.on('close', (code) => ws.send(JSON.stringify({ type: 'exit', code })));
+        return;
+      } else if (service === 'tailscale') {
+        scriptFile = 'restart-tailscale.ps1';
+      } else if (service === 'ollama') {
+        scriptFile = 'restart-ollama.ps1';
+      }
 
-      // Using powershell.exe directly for commands
-      const child = spawn('powershell.exe', [
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-Command', `& "${path.join(toolkitDir, 'run-openclaw.cmd')}" ${command} ${args.join(' ')}`
-      ]);
+      if (scriptFile) {
+        const child = spawn('powershell.exe', [
+          '-NoProfile',
+          '-ExecutionPolicy', 'Bypass',
+          '-File', path.join(toolkitDir, scriptFile)
+        ]);
 
-      child.stdout.on('data', (data) => {
-        ws.send(JSON.stringify({ type: 'stdout', data: data.toString() }));
-      });
-
-      child.stderr.on('data', (data) => {
-        ws.send(JSON.stringify({ type: 'stderr', data: data.toString() }));
-      });
-
-      child.on('close', (code) => {
-        ws.send(JSON.stringify({ type: 'exit', code }));
-      });
+        child.stdout.on('data', (data) => ws.send(JSON.stringify({ type: 'stdout', data: data.toString() })));
+        child.stderr.on('data', (data) => ws.send(JSON.stringify({ type: 'stderr', data: data.toString() })));
+        child.on('close', (code) => ws.send(JSON.stringify({ type: 'exit', code })));
+      }
     }
   });
 });
