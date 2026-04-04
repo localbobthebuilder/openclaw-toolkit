@@ -16,7 +16,10 @@ app.use(express.json());
 
 // Serve static frontend files from the ui/dist directory
 const uiDistPath = path.join(toolkitDir, 'dashboard', 'ui', 'dist');
-app.use(express.static(uiDistPath));
+app.use('/toolkit', (req, res, next) => {
+    req.url = req.url.replace('/toolkit', '');
+    next();
+}, express.static(uiDistPath));
 
 app.get('/api/config', (req, res) => {
   try {
