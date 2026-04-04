@@ -242,7 +242,7 @@ echo   run-openclaw.cmd model-fit
 echo     Probe an Ollama model on a named endpoint, starting at 4k context and increasing until the VRAM headroom rule is hit.
 echo.
 echo   run-openclaw.cmd add-local-model
-echo     Preflight raw size and disk space, pull a local Ollama model on a named endpoint, auto-tune context, and optionally assign it to an agent.
+echo     Preflight raw size and disk space, pull a local Ollama model on a named endpoint, auto-tune context, optionally set -FallbackModel, and optionally assign it to an agent.
 echo.
 echo   run-openclaw.cmd remove-local-model
 echo     Remove a managed local Ollama model from bootstrap config and retarget any managed local-agent references.
@@ -269,6 +269,7 @@ echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -EndpointKey local -AssignTo coder-local
+echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd stop -StopDockerDesktop
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard-repair

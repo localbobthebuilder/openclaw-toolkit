@@ -114,6 +114,8 @@ Useful extras:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072`
 - Add a new local model end to end:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc`
+- Add a new local model with a configured fallback model ID:
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b`
 - Named Ollama endpoints can also pre-provision models during `bootstrap` with endpoint `desiredModelIds`, for example keeping `qwen2.5:7b` installed on `review-pc`.
 - Remove a local model:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b`

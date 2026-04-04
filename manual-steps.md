@@ -85,8 +85,8 @@ Main operator wrapper:
   Smoke-test `main -> coder-remote -> review-local` on the shared workspace and verify that the review task uses exact full file paths.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
-- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-AssignTo <agent-id>]`
-  Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, and optionally assign it to an agent before reapplying bootstrap.
+- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
+  Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, optionally write `fallbackModelId`, and optionally assign it to an agent before reapplying bootstrap.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model <ollama-model> [-ReplaceWith <other-ollama-model>]`
   Remove a local Ollama model from managed config and host Ollama storage. If the model is managed, retarget any managed local-agent references before reapplying bootstrap.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd compact-storage`
@@ -443,6 +443,15 @@ local model end to end, use:
 ```powershell
 D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc
 ```
+
+If you want that managed model entry to carry a fallback model, pass it explicitly:
+
+```powershell
+D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
+```
+
+`-FallbackModel` takes an Ollama model ID and writes it to the managed
+`fallbackModelId` field for that local model entry.
 
 That one command will:
 
