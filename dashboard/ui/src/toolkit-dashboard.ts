@@ -13,6 +13,8 @@ export class ToolkitDashboard extends LitElement {
   @state() private configSection: string = 'general';
   @state() private editingAgentKey: string | null = null;
   @state() private editingEndpointKey: string | null = null;
+  @state() private showModelSelector: boolean = false;
+  @state() private selectorTarget: string | null = null; // 'tune' or 'candidate'
   private ws: WebSocket | null = null;
 
   static styles = css`
@@ -99,7 +101,7 @@ export class ToolkitDashboard extends LitElement {
       border-radius: 4px;
       font-size: 0.9rem;
     }
-    input:focus { border-color: #00bcd4; outline: none; }
+    input:focus, select:focus { border-color: #00bcd4; outline: none; }
     
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     
@@ -113,6 +115,7 @@ export class ToolkitDashboard extends LitElement {
       transition: opacity 0.2s;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
     }
     .btn-primary { background: #00bcd4; color: #000; }
@@ -121,17 +124,6 @@ export class ToolkitDashboard extends LitElement {
     .btn-ghost { background: transparent; color: #888; border: 1px solid #444; }
     .btn:hover { opacity: 0.8; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    pre {
-      background: #050505;
-      padding: 15px;
-      border-radius: 6px;
-      font-family: 'Cascadia Code', 'Consolas', monospace;
-      font-size: 0.85rem;
-      line-height: 1.4;
-      border: 1px solid #222;
-      overflow-x: auto;
-    }
 
     .log-container {
       background: #000;
@@ -169,11 +161,7 @@ export class ToolkitDashboard extends LitElement {
       color: #888;
       transition: all 0.2s;
     }
-    .tab:hover {
-      background: #252525;
-      color: #fff;
-      border-color: #444;
-    }
+    .tab:hover { background: #252525; color: #fff; border-color: #444; }
     .tab.active {
       background: #00bcd4;
       color: #000;
@@ -198,14 +186,52 @@ export class ToolkitDashboard extends LitElement {
       cursor: pointer;
     }
     .toggle-switch input { width: auto; }
-    
-    .model-override-card {
-        background: #2a2a2a;
-        padding: 10px;
-        border-radius: 4px;
-        margin-top: 10px;
-        font-size: 0.85rem;
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
     }
+    .modal {
+      background: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      width: 500px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .selectable-item {
+      padding: 10px;
+      background: #252525;
+      border: 1px solid #333;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .selectable-item:hover { border-color: #00bcd4; }
+
+    .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .tag {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tag-remove { cursor: pointer; color: #f44336; font-weight: bold; }
   `;
 
   async firstUpdated() {
@@ -254,7 +280,7 @@ export class ToolkitDashboard extends LitElement {
       } else if (msg.type === 'exit') {
         this.isRunning = false;
         this.logs = [...this.logs, `\n[FINISH] Process exited with code ${msg.code}`];
-        this.fetchConfig(); // Reload config as it might have been updated by scripts
+        this.fetchConfig(); 
         this.fetchStatus();
       }
     };
@@ -324,6 +350,7 @@ export class ToolkitDashboard extends LitElement {
           ${this.renderContent()}
         </main>
       </div>
+      ${this.showModelSelector ? this.renderModelSelector() : ''}
     `;
   }
 
@@ -449,7 +476,7 @@ export class ToolkitDashboard extends LitElement {
           <h3>Endpoints (Compute Resources)</h3>
           <button class="btn btn-ghost" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines running Ollama. Each machine has specific allowed models and hardware-tuned context windows.</p>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines running Ollama. Each machine has specific hardware-tuned models.</p>
         ${repeat(this.config.ollama.endpoints, (ep: any) => ep.key, (ep: any, idx) => html`
           <div class="item-row">
             <div class="item-info">
@@ -489,7 +516,7 @@ export class ToolkitDashboard extends LitElement {
             </div>
 
             <h4 style="color: #666; margin-top: 20px;">Hardware-Tuned Models (Overrides)</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These models are fine-tuned for this machine's VRAM. Use "Tune New Model" to pull and auto-calibrate a model.</p>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These models are fine-tuned for this machine's VRAM.</p>
             
             ${(ep.modelOverrides || []).map((mo: any, idx: number) => html`
                 <div class="item-row">
@@ -504,27 +531,58 @@ export class ToolkitDashboard extends LitElement {
                 </div>
             `)}
 
-            <div style="margin-top: 20px; display: flex; gap: 10px;">
-                <button class="btn btn-primary" @click=${() => this.tuneNewModel(ep.key)}>+ Tune New Model on this Endpoint</button>
+            <div style="margin-top: 20px;">
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Tune New Model from Catalog</button>
             </div>
         </div>
       `;
   }
 
-  tuneNewModel(endpointKey: string) {
-      const modelId = prompt('Enter model ID to tune (e.g. qwen2.5-coder:32b):');
-      if (!modelId) return;
-      
-      const maxCtx = prompt('Maximum context window to test (e.g. 131072):', '131072');
-      if (!maxCtx) return;
+  renderModelSelector() {
+      const models = this.config.ollama.models;
+      return html`
+        <div class="modal-overlay">
+            <div class="modal">
+                <div class="card-header" style="padding: 20px;">
+                    <h3>Select Model from Catalog</h3>
+                    <button class="btn btn-ghost" @click=${() => this.showModelSelector = false}>Close</button>
+                </div>
+                <div class="modal-body">
+                    ${models.map((m: any) => html`
+                        <div class="selectable-item" @click=${() => this.handleModelSelected(m.id)}>
+                            <div class="item-title">${m.name || m.id}</div>
+                            <div class="item-sub">ID: ${m.id}</div>
+                        </div>
+                    `)}
+                </div>
+            </div>
+        </div>
+      `;
+  }
 
-      this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', endpointKey, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
+  handleModelSelected(modelId: string) {
+      this.showModelSelector = false;
+      if (this.selectorTarget === 'tune') {
+          const maxCtx = prompt('Maximum context window to test:', '131072');
+          if (maxCtx) {
+              this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', this.editingEndpointKey!, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
+          }
+      } else if (this.selectorTarget === 'candidate') {
+          const agent = this.getEditingAgent();
+          const ref = `ollama/${modelId}`;
+          if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
+          if (!agent.candidateModelRefs.includes(ref)) {
+              agent.candidateModelRefs.push(ref);
+          }
+          this.requestUpdate();
+      }
   }
 
   tuneExistingModel(endpointKey: string, modelId: string) {
       const maxCtx = prompt('Maximum context window to test:', '131072');
-      if (!maxCtx) return;
-      this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', endpointKey, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
+      if (maxCtx) {
+          this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', endpointKey, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
+      }
   }
 
   renderModelsConfig() {
@@ -608,18 +666,26 @@ export class ToolkitDashboard extends LitElement {
     `;
   }
 
-  renderAgentEditor(key: string) {
-    let agent: any;
-    let isExtra = false;
-    let extraIdx = -1;
+  getEditingAgent() {
+      if (!this.editingAgentKey) return null;
+      if (this.editingAgentKey.startsWith('extra:')) {
+          const idx = parseInt(this.editingAgentKey.split(':')[1]);
+          return this.config.multiAgent.extraAgents[idx];
+      }
+      return this.config.multiAgent[this.editingAgentKey];
+  }
 
-    if (key.startsWith('extra:')) {
-        isExtra = true;
-        extraIdx = parseInt(key.split(':')[1]);
-        agent = this.config.multiAgent.extraAgents[extraIdx];
-    } else {
-        agent = this.config.multiAgent[key];
-    }
+  renderAgentEditor(key: string) {
+    const agent = this.getEditingAgent();
+    if (!agent) return html`Agent not found`;
+    const isExtra = key.startsWith('extra:');
+
+    const endpoints = (this.config.ollama.endpoints || []).map((e: any) => e.key);
+    const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
+    
+    // Get tuned models for the currently selected endpoint
+    const selectedEndpoint = this.config.ollama.endpoints.find((e: any) => e.key === agent.endpointKey);
+    const availableTunedModels = selectedEndpoint ? (selectedEndpoint.modelOverrides || []).map((mo: any) => mo.id) : [];
 
     return html`
         <div class="card">
@@ -644,25 +710,78 @@ export class ToolkitDashboard extends LitElement {
                     <label>Model Source</label>
                     <select @change=${(e: any) => { agent.modelSource = e.target.value; this.requestUpdate(); }}>
                         <option value="local" ?selected=${agent.modelSource === 'local'}>Local (Ollama)</option>
-                        <option value="hosted" ?selected=${agent.modelSource === 'hosted'}>Hosted (Gemini/OpenAI/Anthropic)</option>
+                        <option value="hosted" ?selected=${agent.modelSource === 'hosted'}>Hosted (Provider API)</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Model Reference</label>
-                    <input type="text" .value=${agent.modelRef} @input=${(e: any) => { agent.modelRef = e.target.value; this.requestUpdate(); }}>
+                    <label>Role Policy</label>
+                    <select @change=${(e: any) => { agent.rolePolicyKey = e.target.value; this.requestUpdate(); }}>
+                        ${roles.map(r => html`<option value=${r} ?selected=${agent.rolePolicyKey === r}>${r}</option>`)}
+                    </select>
                 </div>
             </div>
 
             ${agent.modelSource === 'local' ? html`
-                <div class="form-group">
-                    <label>Endpoint Key</label>
-                    <input type="text" .value=${agent.endpointKey} @input=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Endpoint Key</label>
+                        <select @change=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
+                            <option value="">Select Endpoint</option>
+                            ${endpoints.map((ep: string) => html`<option value=${ep} ?selected=${agent.endpointKey === ep}>${ep}</option>`)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Primary Model</label>
+                        <select @change=${(e: any) => { agent.modelRef = 'ollama/' + e.target.value; this.requestUpdate(); }}>
+                            <option value="">Select a Tuned Model</option>
+                            ${availableTunedModels.map((m: string) => html`
+                                <option value=${m} ?selected=${agent.modelRef === 'ollama/' + m}>${m}</option>
+                            `)}
+                        </select>
+                        ${availableTunedModels.length === 0 ? html`<p style="color: #f44336; font-size: 0.7rem; margin-top: 4px;">No hardware-tuned models found for this endpoint. Go to Endpoints to tune one.</p>` : ''}
+                    </div>
                 </div>
-            ` : ''}
+            ` : html`
+                <div class="form-group">
+                    <label>Model Reference (Hosted)</label>
+                    <input type="text" .value=${agent.modelRef} @input=${(e: any) => { agent.modelRef = e.target.value; this.requestUpdate(); }}>
+                </div>
+            `}
 
             <div class="form-group">
-                <label>Role Policy Key</label>
-                <input type="text" .value=${agent.rolePolicyKey} @input=${(e: any) => { agent.rolePolicyKey = e.target.value; this.requestUpdate(); }}>
+                <label>Candidate Models</label>
+                <div class="tag-list">
+                    ${(agent.candidateModelRefs || []).map((ref: string, idx: number) => html`
+                        <div class="tag">
+                            ${ref}
+                            <span class="tag-remove" @click=${() => { agent.candidateModelRefs.splice(idx, 1); this.requestUpdate(); }}>×</span>
+                        </div>
+                    `)}
+                </div>
+                <div style="margin-top: 10px;">
+                    ${agent.modelSource === 'local' ? html`
+                        <select @change=${(e: any) => { 
+                            const val = 'ollama/' + e.target.value;
+                            if (e.target.value && !agent.candidateModelRefs.includes(val)) {
+                                agent.candidateModelRefs.push(val);
+                                this.requestUpdate();
+                            }
+                            e.target.value = '';
+                        }}>
+                            <option value="">+ Add Tuned Model</option>
+                            ${availableTunedModels.map((m: string) => html`<option value=${m}>${m}</option>`)}
+                        </select>
+                    ` : html`
+                        <button class="btn btn-ghost btn-small" @click=${() => {
+                            const val = prompt('Enter hosted model ref (e.g. anthropic/claude-3-5-sonnet):');
+                            if (val) {
+                                if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
+                                agent.candidateModelRefs.push(val);
+                                this.requestUpdate();
+                            }
+                        }}>+ Add Hosted Model Ref</button>
+                    `}
+                </div>
             </div>
 
             ${key !== 'strongAgent' ? html`
@@ -673,11 +792,6 @@ export class ToolkitDashboard extends LitElement {
                     </label>
                 </div>
             ` : ''}
-
-            <div class="form-group">
-                <label>Candidate Models (One per line)</label>
-                <textarea rows="4" @input=${(e: any) => { agent.candidateModelRefs = e.target.value.split('\n').filter((l: string) => l.trim()); this.requestUpdate(); }}>${(agent.candidateModelRefs || []).join('\n')}</textarea>
-            </div>
         </div>
     `;
   }
@@ -725,7 +839,8 @@ export class ToolkitDashboard extends LitElement {
           name: 'New Custom Agent',
           rolePolicyKey: 'codingDelegate',
           modelSource: 'local',
-          modelRef: 'ollama/qwen2.5-coder:3b'
+          modelRef: 'ollama/qwen2.5-coder:3b',
+          candidateModelRefs: []
       };
       this.config.multiAgent.extraAgents.push(newAgent);
       this.editingAgentKey = `extra:${this.config.multiAgent.extraAgents.length - 1}`;
