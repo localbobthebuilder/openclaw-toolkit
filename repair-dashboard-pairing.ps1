@@ -41,6 +41,8 @@ function Invoke-External {
     $process.WaitForExit()
 
     $exitCode = $process.ExitCode
+    $stdout = $stdout -replace [char]0, ''
+    $stderr = $stderr -replace [char]0, ''
     $text = (($stdout, $stderr) | Where-Object { $_ -and $_.Trim().Length -gt 0 }) -join [Environment]::NewLine
 
     if (-not $AllowFailure -and $exitCode -ne 0) {
@@ -49,6 +51,8 @@ function Invoke-External {
 
     [pscustomobject]@{
         ExitCode = $exitCode
+        StdOut   = $stdout
+        StdErr   = $stderr
         Output   = $text
     }
 }
@@ -118,12 +122,13 @@ function Approve-Requests {
 
 function Invoke-RepairPass {
     $list = Get-DeviceList
-    if (-not $list.Output) {
+    $jsonText = if (-not [string]::IsNullOrWhiteSpace($list.StdOut)) { [string]$list.StdOut } else { [string]$list.Output }
+    if ([string]::IsNullOrWhiteSpace($jsonText)) {
         Write-Host "No device list output was returned." -ForegroundColor Yellow
         return [pscustomobject]@{ Pending = @(); Auto = @(); Other = @() }
     }
 
-    $devices = Parse-DeviceList -JsonText $list.Output -ExitCode $list.ExitCode
+    $devices = Parse-DeviceList -JsonText $jsonText -ExitCode $list.ExitCode
     $pending = @($devices.pending)
     if ($pending.Count -eq 0) {
         return [pscustomobject]@{ Pending = @(); Auto = @(); Other = @() }

@@ -185,7 +185,7 @@ echo   run-openclaw.cmd update
 echo     Update to the newest stable OpenClaw release tag, then re-apply secure setup and verify it. Use -Channel beta or -Ref main/tag/commit for an override.
 echo.
 echo   run-openclaw.cmd start
-echo     Start Docker/OpenClaw and open the authenticated localhost dashboard.
+echo     Start Docker/Ollama/OpenClaw and open the localhost dashboard with pairing auto-repair.
 echo.
 echo   run-openclaw.cmd status
 echo     Show Docker, gateway, and Tailscale status.

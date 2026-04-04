@@ -1,12 +1,21 @@
 [CmdletBinding()]
 param(
-    [string]$RepoPath = "D:\openclaw\openclaw",
-    [string]$HealthUrl = "http://127.0.0.1:18789/healthz",
+    [string]$ConfigPath,
+    [string]$RepoPath,
+    [string]$HealthUrl,
     [int]$DockerWaitSeconds = 240,
+    [int]$OllamaWaitSeconds = 60,
+    [int]$DashboardRepairPollSeconds = 8,
     [switch]$NoOpenDashboard
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ConfigPath) {
+    $ConfigPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "openclaw-bootstrap.config.json"
+}
+
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 
 function Invoke-External {
     param(
@@ -85,6 +94,50 @@ function Start-DockerDesktopIfNeeded {
     throw "Docker engine did not become ready within $DockerWaitSeconds seconds."
 }
 
+function Get-OllamaAppPath {
+    foreach ($path in @(
+            (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe")
+        )) {
+        if ($path -and (Test-Path $path)) {
+            return $path
+        }
+    }
+
+    return $null
+}
+
+function Test-OllamaReady {
+    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", "http://127.0.0.1:11434/api/tags") -AllowFailure
+    return $result.ExitCode -eq 0 -and $result.Output -match '"models"'
+}
+
+function Start-OllamaIfNeeded {
+    if (Test-OllamaReady) {
+        Write-Host "Ollama API is already ready." -ForegroundColor Green
+        return
+    }
+
+    $ollamaApp = Get-OllamaAppPath
+    if (-not $ollamaApp) {
+        throw "Ollama is enabled in bootstrap config, but the Windows app was not found under $env:LOCALAPPDATA\Programs\Ollama."
+    }
+
+    Write-Host "Starting Ollama..." -ForegroundColor Cyan
+    Start-Process -FilePath $ollamaApp | Out-Null
+
+    $deadline = (Get-Date).AddSeconds($OllamaWaitSeconds)
+    do {
+        Start-Sleep -Seconds 2
+        if (Test-OllamaReady) {
+            Write-Host "Ollama API is ready." -ForegroundColor Green
+            return
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Ollama did not become ready within $OllamaWaitSeconds seconds."
+}
+
 function Wait-ForGateway {
     param([Parameter(Mandatory = $true)][string]$Url)
 
@@ -100,7 +153,25 @@ function Wait-ForGateway {
     throw "OpenClaw gateway did not become healthy at $Url"
 }
 
+$ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+$config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+
+if (-not $RepoPath) {
+    $RepoPath = if ($config.repoPath) { [string]$config.repoPath } else { "D:\openclaw\openclaw" }
+}
+
+if (-not $HealthUrl) {
+    $gatewayPort = if ($config.gatewayPort) { [int]$config.gatewayPort } else { 18789 }
+    $HealthUrl = "http://127.0.0.1:$gatewayPort/healthz"
+}
+
+$requiresOllama = [bool]($config.ollama -and $config.ollama.enabled)
+
 Start-DockerDesktopIfNeeded
+if ($requiresOllama) {
+    Start-OllamaIfNeeded
+}
 
 Push-Location $RepoPath
 try {
@@ -134,15 +205,23 @@ else {
 }
 
 Write-Host ""
-Write-Host "Local dashboard: http://127.0.0.1:18789" -ForegroundColor Green
+$localDashboardUrl = ($HealthUrl -replace '/healthz$')
+Write-Host "Local dashboard: $localDashboardUrl" -ForegroundColor Green
 
 if (-not $NoOpenDashboard) {
-    $dashboardScript = Join-Path (Split-Path -Parent $PSCommandPath) "open-dashboard.ps1"
-    if (Test-Path $dashboardScript) {
-        Write-Host "Opening authenticated dashboard..." -ForegroundColor Cyan
-        & $dashboardScript -Target localhost -UiPath "/chat?session=main"
+    $repairScript = Join-Path (Split-Path -Parent $PSCommandPath) "repair-dashboard-pairing.ps1"
+    if (Test-Path $repairScript) {
+        Write-Host "Opening authenticated dashboard and repairing localhost pairing if needed..." -ForegroundColor Cyan
+        & $repairScript -OpenDashboard -PollSeconds $DashboardRepairPollSeconds
     }
     else {
-        Write-Host "Dashboard helper not found at $dashboardScript" -ForegroundColor Yellow
+        $dashboardScript = Join-Path (Split-Path -Parent $PSCommandPath) "open-dashboard.ps1"
+        if (Test-Path $dashboardScript) {
+            Write-Host "Dashboard repair helper not found; opening the dashboard without pairing repair." -ForegroundColor Yellow
+            & $dashboardScript -Target localhost -UiPath "/chat?session=main"
+        }
+        else {
+            Write-Host "Dashboard helpers were not found in $(Split-Path -Parent $PSCommandPath)" -ForegroundColor Yellow
+        }
     }
 }
