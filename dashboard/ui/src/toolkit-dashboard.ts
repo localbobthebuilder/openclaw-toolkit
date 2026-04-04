@@ -19,10 +19,9 @@ export class ToolkitDashboard extends LitElement {
 
   // Helper for API URL construction
   private getBaseUrl() {
-      // If we are served under /toolkit/, we need to ensure API calls go to the same origin
-      // The backend is at 18791. If accessed via proxy, we should hit that origin.
-      // For local development, it's 127.0.0.1:18791.
-      return window.location.port === '18791' ? 'http://127.0.0.1:18791' : '';
+      // Always return empty string to use relative paths.
+      // This ensures requests go to the host/port the UI was loaded from.
+      return '';
   }
 
   static styles = css`
@@ -86,13 +85,8 @@ export class ToolkitDashboard extends LitElement {
   `;
 
   async firstUpdated() {
-    window.onerror = (msg) => {
-        const errorDiv = document.createElement('div');
-        errorDiv.style.padding = '20px';
-        errorDiv.style.color = 'red';
-        errorDiv.innerHTML = `Fatal Error: ${msg}`;
-        document.body.appendChild(errorDiv);
-    };
+    window.onerror = (msg) => { this.logs = [...this.logs, `ERR: ${msg}`]; this.requestUpdate(); };
+    window.onunhandledrejection = (event) => { this.logs = [...this.logs, `REJ: ${event.reason}`]; this.requestUpdate(); };
     await this.fetchConfig();
     await this.fetchStatus();
     this.connectWS();
