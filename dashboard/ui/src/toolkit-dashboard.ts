@@ -17,278 +17,82 @@ export class ToolkitDashboard extends LitElement {
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate'
   private ws: WebSocket | null = null;
 
+  // Helper for API URL construction
+  private getBaseUrl() {
+      // If we are served under /toolkit/, we need to ensure API calls go to the same origin
+      // The backend is at 18791. If accessed via proxy, we should hit that origin.
+      // For local development, it's 127.0.0.1:18791.
+      return window.location.port === '18791' ? 'http://127.0.0.1:18791' : '';
+  }
+
   static styles = css`
-    :host {
-      display: block;
-      width: 100%;
-      min-height: 100vh;
-      background-color: #0f0f0f;
-    }
-    .layout {
-      display: grid;
-      grid-template-columns: 240px 1fr;
-      min-height: 100vh;
-      width: 100vw;
-    }
-    aside {
-      background: #1a1a1a;
-      border-right: 1px solid #333;
-      padding: 20px 0;
-      display: flex;
-      flex-direction: column;
-    }
-    .nav-item {
-      padding: 12px 24px;
-      cursor: pointer;
-      color: #aaa;
-      transition: all 0.2s;
-      border-left: 3px solid transparent;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+    :host { display: block; width: 100%; min-height: 100vh; background-color: #0f0f0f; }
+    .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; width: 100vw; }
+    aside { background: #1a1a1a; border-right: 1px solid #333; padding: 20px 0; display: flex; flex-direction: column; }
+    .nav-item { padding: 12px 24px; cursor: pointer; color: #aaa; transition: all 0.2s; border-left: 3px solid transparent; display: flex; align-items: center; gap: 10px; }
     .nav-item:hover { background: #252525; color: #fff; }
-    .nav-item.active {
-      background: #2a2a2a;
-      color: #00bcd4;
-      border-left-color: #00bcd4;
-    }
-    main {
-      padding: 30px;
-      overflow-y: auto;
-      max-height: 100vh;
-    }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 30px;
-    }
+    .nav-item.active { background: #2a2a2a; color: #00bcd4; border-left-color: #00bcd4; }
+    main { padding: 30px; overflow-y: auto; max-height: 100vh; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
     h1 { margin: 0; font-size: 1.4rem; color: #fff; display: flex; align-items: center; gap: 10px; }
-    .badge {
-      background: #00bcd4;
-      color: #000;
-      font-size: 0.7rem;
-      padding: 2px 6px;
-      border-radius: 10px;
-      font-weight: bold;
-    }
-    .card {
-      background: #1e1e1e;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 15px;
-      border-bottom: 1px solid #333;
-      padding-bottom: 10px;
-    }
+    .badge { background: #00bcd4; color: #000; font-size: 0.7rem; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
+    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
     .card-header h3 { margin: 0; font-size: 1.1rem; color: #00bcd4; }
-    
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
-    input, select, textarea {
-      width: 100%;
-      background: #2a2a2a;
-      border: 1px solid #444;
-      color: #fff;
-      padding: 10px;
-      border-radius: 4px;
-      font-size: 0.9rem;
-    }
+    input, select, textarea { width: 100%; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
     input:focus, select:focus, textarea:focus { border-color: #00bcd4; outline: none; }
-    
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    
-    .btn {
-      padding: 10px 18px;
-      border-radius: 4px;
-      border: none;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 0.9rem;
-      transition: opacity 0.2s;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
+    .btn { padding: 10px 18px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: opacity 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
     .btn-primary { background: #00bcd4; color: #000; }
     .btn-secondary { background: #333; color: #fff; }
     .btn-danger { background: #f44336; color: #fff; }
     .btn-ghost { background: transparent; color: #888; border: 1px solid #444; }
     .btn:hover { opacity: 0.8; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    .log-container {
-      background: #000;
-      height: 500px;
-      overflow-y: auto;
-      padding: 15px;
-      border-radius: 6px;
-      font-family: monospace;
-      border: 1px solid #333;
-    }
+    .log-container { background: #000; height: 500px; overflow-y: auto; padding: 15px; border-radius: 6px; font-family: monospace; border: 1px solid #333; }
     .log-entry { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
-
-    .item-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px;
-      background: #252525;
-      border: 1px solid #333;
-      border-radius: 4px;
-      margin-bottom: 8px;
-    }
+    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #252525; border: 1px solid #333; border-radius: 4px; margin-bottom: 8px; }
     .item-info { display: flex; flex-direction: column; gap: 4px; }
     .item-title { font-weight: bold; color: #fff; }
     .item-sub { font-size: 0.75rem; color: #777; }
-    
     .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-    .tab {
-      padding: 10px 20px;
-      cursor: pointer;
-      border: 1px solid #333;
-      background: #1a1a1a;
-      border-radius: 4px;
-      font-size: 0.9rem;
-      color: #888;
-      transition: all 0.2s;
-    }
+    .tab { padding: 10px 20px; cursor: pointer; border: 1px solid #333; background: #1a1a1a; border-radius: 4px; font-size: 0.9rem; color: #888; transition: all 0.2s; }
     .tab:hover { background: #252525; color: #fff; border-color: #444; }
-    .tab.active {
-      background: #00bcd4;
-      color: #000;
-      border-color: #00bcd4;
-      font-weight: 600;
-    }
-    .unsaved-banner {
-      background: #ff9800;
-      color: #000;
-      padding: 10px 20px;
-      border-radius: 4px;
-      margin-bottom: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-weight: bold;
-    }
-    .toggle-switch {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-    }
+    .tab.active { background: #00bcd4; color: #000; border-color: #00bcd4; font-weight: 600; }
+    .unsaved-banner { background: #ff9800; color: #000; padding: 10px 20px; border-radius: 4px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+    .toggle-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
     .toggle-switch input { width: auto; }
-
-    /* Modal Styles */
-    .modal-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    .modal {
-      background: #1e1e1e;
-      border: 1px solid #333;
-      border-radius: 8px;
-      width: 500px;
-      max-height: 80vh;
-      display: flex;
-      flex-direction: column;
-    }
-    .modal-body {
-      padding: 20px;
-      overflow-y: auto;
-    }
-    .selectable-item {
-      padding: 10px;
-      background: #252525;
-      border: 1px solid #333;
-      border-radius: 4px;
-      margin-bottom: 8px;
-      cursor: pointer;
-    }
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .modal { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; width: 500px; max-height: 80vh; display: flex; flex-direction: column; }
+    .modal-body { padding: 20px; overflow-y: auto; }
+    .selectable-item { padding: 10px; background: #252525; border: 1px solid #333; border-radius: 4px; margin-bottom: 8px; cursor: pointer; }
     .selectable-item:hover { border-color: #00bcd4; }
-
     .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .tag {
-      background: #2a2a2a;
-      border: 1px solid #444;
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+    .tag { background: #2a2a2a; border: 1px solid #444; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
     .tag-remove { cursor: pointer; color: #f44336; font-weight: bold; }
-
-    /* Pretty Status Styles */
     .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(450px, 1fr)); gap: 25px; }
-    .status-card {
-        background: #1a1a1a;
-        border: 1px solid #333;
-        border-radius: 12px;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        transition: transform 0.2s, border-color 0.2s;
-    }
+    .status-card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s, border-color 0.2s; }
     .status-card:hover { transform: translateY(-2px); border-color: #00bcd4; }
-    .status-card-header {
-        background: #252525;
-        padding: 12px 18px;
-        border-bottom: 1px solid #333;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }
-    .status-card-header h4 {
-        margin: 0;
-        color: #fff;
-        font-size: 0.85rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .status-indicator {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        display: inline-block;
-    }
+    .status-card-header { background: #252525; padding: 12px 18px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between; }
+    .status-card-header h4 { margin: 0; color: #fff; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; }
+    .status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .status-online { background: #4caf50; box-shadow: 0 0 8px rgba(76, 175, 80, 0.5); }
     .status-offline { background: #f44336; box-shadow: 0 0 8px rgba(244, 67, 54, 0.5); }
-    
-    .status-content {
-        font-family: 'Cascadia Code', 'Consolas', monospace;
-        font-size: 0.72rem;
-        color: #bbb;
-        white-space: pre;
-        overflow-x: auto;
-        line-height: 1.6;
-        padding: 15px;
-        background: #0f0f0f;
-        flex-grow: 1;
-    }
+    .status-content { font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.72rem; color: #bbb; white-space: pre; overflow-x: auto; line-height: 1.6; padding: 15px; background: #0f0f0f; flex-grow: 1; }
     .status-content::-webkit-scrollbar { height: 6px; }
     .status-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
   `;
 
   async firstUpdated() {
+    window.onerror = (msg) => {
+        const errorDiv = document.createElement('div');
+        errorDiv.style.padding = '20px';
+        errorDiv.style.color = 'red';
+        errorDiv.innerHTML = `Fatal Error: ${msg}`;
+        document.body.appendChild(errorDiv);
+    };
     await this.fetchConfig();
     await this.fetchStatus();
     this.connectWS();
@@ -296,7 +100,7 @@ export class ToolkitDashboard extends LitElement {
 
   async fetchConfig() {
     try {
-      const res = await fetch('http://127.0.0.1:18791/api/config');
+      const res = await fetch(this.getBaseUrl() + '/api/config');
       const data = await res.json();
       this.config = data;
       this.savedConfig = JSON.parse(JSON.stringify(data));
@@ -307,7 +111,7 @@ export class ToolkitDashboard extends LitElement {
 
   async fetchStatus() {
     try {
-      const res = await fetch('http://127.0.0.1:18791/api/status');
+      const res = await fetch(this.getBaseUrl() + '/api/status');
       const data = await res.json();
       this.statusOutput = data.output;
     } catch (err) {
@@ -321,7 +125,9 @@ export class ToolkitDashboard extends LitElement {
   }
 
   connectWS() {
-    this.ws = new WebSocket('ws://127.0.0.1:18791');
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.port === '18791' ? '127.0.0.1:18791' : window.location.host;
+    this.ws = new WebSocket(`${protocol}//${host}`);
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === 'stdout' || msg.type === 'stderr') {
@@ -359,7 +165,7 @@ export class ToolkitDashboard extends LitElement {
 
   async saveConfig() {
     try {
-      const res = await fetch('http://127.0.0.1:18791/api/config', {
+      const res = await fetch(this.getBaseUrl() + '/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(this.config)
@@ -437,7 +243,6 @@ export class ToolkitDashboard extends LitElement {
           let content = parts[i+1]?.trim() || '';
           let status: 'online'|'offline' = 'online';
           
-          // Attempt JSON beautification for nicer gateway status
           try {
               const json = JSON.parse(content);
               if (json && typeof json === 'object') {
@@ -447,7 +252,6 @@ export class ToolkitDashboard extends LitElement {
                       .join('\n');
               }
           } catch (e) {
-              // Fallback to text-based status detection
               if (content.toLowerCase().includes('not ready') || 
                   content.toLowerCase().includes('failed') || 
                   content.toLowerCase().includes('error')) {
