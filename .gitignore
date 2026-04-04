@@ -6,3 +6,10 @@ bootstrap-report.txt
 *.log
 Thumbs.db
 .DS_Store
+
+# Dashboard
+dashboard/node_modules/
+dashboard/ui/node_modules/
+dashboard/ui/dist/
+package-lock.json
+**/package-lock.json
