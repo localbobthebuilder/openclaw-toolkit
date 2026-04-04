@@ -34,6 +34,11 @@ function Write-WarnLine {
     Write-Host "WARNING: $Message" -ForegroundColor Yellow
 }
 
+function Write-InfoLine {
+    param([string]$Message)
+    Write-Host "INFO: $Message" -ForegroundColor DarkGray
+}
+
 function Test-CommandExists {
     param([string]$Name)
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
@@ -890,18 +895,56 @@ function Get-OllamaTags {
     param([Parameter(Mandatory = $true)]$Endpoint)
 
     $tagsUrl = (Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint).TrimEnd("/") + "/api/tags"
-    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $tagsUrl) -AllowFailure
-    if ($result.ExitCode -ne 0 -or -not $result.Output -or $result.Output -notmatch '"models"') {
+    $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", "--connect-timeout", "5", "--max-time", "20", $tagsUrl) -AllowFailure -Quiet
+    if ($result.ExitCode -eq 0 -and $result.Output -and $result.Output -match '"models"') {
+        try {
+            $parsed = $result.Output | ConvertFrom-Json -Depth 20
+            return @($parsed.models)
+        }
+        catch {
+        }
+    }
+
+    $listResult = Invoke-OllamaCli -Endpoint $Endpoint -Arguments @("list") -AllowFailure
+    if ($listResult.ExitCode -ne 0 -or -not $listResult.Output) {
         return @()
     }
 
-    try {
-        $parsed = $result.Output | ConvertFrom-Json -Depth 20
-        return @($parsed.models)
+    Write-InfoLine "Falling back to 'ollama list' for endpoint '$($Endpoint.key)' because /api/tags was slow or unavailable."
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($line in @($listResult.Output -split "(`r`n|`n|`r)")) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed -match '^NAME\s+') {
+            continue
+        }
+
+        $modelId = ($trimmed -replace '\s{2,}.*$', '').Trim()
+        if ([string]::IsNullOrWhiteSpace($modelId)) {
+            continue
+        }
+
+        $entries.Add([pscustomobject]@{
+                model   = $modelId
+                name    = $modelId
+                details = [pscustomobject]@{
+                    family   = ""
+                    families = @()
+                }
+            })
     }
-    catch {
-        return @()
+
+    return @($entries)
+}
+
+function Refresh-OllamaTags {
+    param([Parameter(Mandatory = $true)]$Endpoint)
+
+    Write-InfoLine "Refreshing Ollama model catalog for endpoint '$($Endpoint.key)'..."
+    $tags = @(Get-OllamaTags -Endpoint $Endpoint)
+    if ($tags.Count -eq 0) {
+        Write-InfoLine "No Ollama models were reported for endpoint '$($Endpoint.key)' during this refresh."
     }
+    return @($tags)
 }
 
 function Convert-OllamaTagToProviderModel {
@@ -1163,7 +1206,7 @@ function Ensure-OllamaState {
             }
         }
 
-        $tags = @(Get-OllamaTags -Endpoint $endpoint)
+        $tags = @(Refresh-OllamaTags -Endpoint $endpoint)
         $availableIds = @($tags | ForEach-Object { [string]$_.model })
 
         if ($endpoint.autoPullMissingModels) {
@@ -1175,13 +1218,14 @@ function Ensure-OllamaState {
                 Write-Step "Pulling missing Ollama model $($request.modelId) on endpoint $($endpoint.key)"
                 try {
                     Invoke-OllamaCliStreaming -Endpoint $endpoint -Arguments @("pull", [string]$request.modelId)
+                    Write-InfoLine "Pull finished for model '$($request.modelId)' on endpoint '$($endpoint.key)'."
                 }
                 catch {
                     Write-WarnLine "Failed to pull Ollama model '$($request.modelId)' on endpoint '$($endpoint.key)'. Bootstrap will use another available local model if possible."
                 }
             }
 
-            $tags = @(Get-OllamaTags -Endpoint $endpoint)
+            $tags = @(Refresh-OllamaTags -Endpoint $endpoint)
             $availableIds = @($tags | ForEach-Object { [string]$_.model })
         }
 
