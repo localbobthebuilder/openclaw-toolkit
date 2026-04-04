@@ -38,6 +38,7 @@ if /I "%ACTION%"=="status" goto :status
 if /I "%ACTION%"=="dashboard" goto :dashboard
 if /I "%ACTION%"=="phone-dashboard" goto :phone_dashboard
 if /I "%ACTION%"=="toolkit-dashboard" goto :toolkit_dashboard
+if /I "%ACTION%"=="toolkit-dashboard-stop" goto :toolkit_dashboard_stop
 if /I "%ACTION%"=="dashboard-repair" goto :dashboard_repair
 if /I "%ACTION%"=="openai-auth" goto :openai_auth
 if /I "%ACTION%"=="gemini-auth" goto :gemini_auth
@@ -102,6 +103,10 @@ goto :eof
 
 :toolkit_dashboard
 call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" %FORWARD_ARGS%
+goto :eof
+
+:toolkit_dashboard_stop
+call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" stop
 goto :eof
 
 :dashboard_repair
@@ -220,6 +225,9 @@ echo     Print and copy the tokenized Tailscale dashboard URL for phone access.
 echo.
 echo   run-openclaw.cmd toolkit-dashboard
 echo     Start the live toolkit configuration dashboard.
+echo.
+echo   run-openclaw.cmd toolkit-dashboard-stop
+echo     Stop the live toolkit configuration dashboard.
 echo.
 echo   run-openclaw.cmd dashboard-repair
 echo     Approve pending dashboard pairing requests, then reopen the dashboard.

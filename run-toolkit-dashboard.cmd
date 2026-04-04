@@ -4,6 +4,17 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "DASHBOARD_DIR=%SCRIPT_DIR%dashboard"
 set "UI_DIR=%DASHBOARD_DIR%\ui"
+set "ACTION=%~1"
+
+if /I "%ACTION%"=="stop" (
+    echo Stopping OpenClaw Toolkit Dashboard...
+    for /f "tokens=5" %%a in ('netstat -aon ^| findstr :18791 ^| findstr LISTENING') do (
+        echo Killing process %%a...
+        taskkill /f /pid %%a > nul 2>&1
+    )
+    echo Dashboard stopped.
+    goto :eof
+)
 
 echo Starting OpenClaw Toolkit Dashboard...
 
