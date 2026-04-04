@@ -70,8 +70,8 @@ app.use((req, res, next) => {
   }
 });
 
-const server = app.listen(port, '127.0.0.1', () => {
-  console.log(`Toolkit Dashboard Backend running at http://127.0.0.1:${port}`);
+const server = app.listen(port, '0.0.0.0', () => {
+  console.log(`Toolkit Dashboard Backend running at http://0.0.0.0:${port}`);
 });
 
 const wss = new WebSocketServer({ server });
