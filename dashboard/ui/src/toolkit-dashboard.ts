@@ -19,9 +19,8 @@ export class ToolkitDashboard extends LitElement {
 
   // Helper for API URL construction
   private getBaseUrl() {
-      // Always return empty string to use relative paths.
-      // This ensures requests go to the host/port the UI was loaded from.
-      return '';
+      // If we are served under /toolkit/, API calls must be prefixed.
+      return window.location.pathname.startsWith('/toolkit') ? '/toolkit' : '';
   }
 
   static styles = css`
