@@ -69,6 +69,30 @@ function Test-ContainerRunning {
     return $result.ExitCode -eq 0 -and $result.Output.Trim().ToLowerInvariant() -eq "true"
 }
 
+function Stop-OllamaModelFromRef {
+    param([string]$ModelRef)
+
+    if ([string]::IsNullOrWhiteSpace($ModelRef) -or $ModelRef -notlike "ollama/*") {
+        return
+    }
+
+    $ollamaCommand = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $ollamaCommand) {
+        Write-ProgressLine "Skipping unload because ollama CLI is not available on the host" Yellow
+        return
+    }
+
+    $modelId = $ModelRef.Substring("ollama/".Length)
+    Write-ProgressLine "Stopping Ollama model $modelId to free GPU memory" Gray
+    $stopResult = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("stop", $modelId) -AllowFailure
+    if ($stopResult.ExitCode -eq 0) {
+        Write-ProgressLine "Ollama model $modelId stopped" Green
+    }
+    else {
+        Write-ProgressLine "Ollama stop for $modelId returned exit code $($stopResult.ExitCode)" Yellow
+    }
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker is required for the chat workspace write smoke test."
 }
@@ -85,6 +109,7 @@ $probeId = "verify-chat-write-" + [guid]::NewGuid().ToString("N").Substring(0, 8
 $sessionId = "smoke-$probeId"
 $probeFileName = "$probeId.txt"
 $probePath = Join-Path $WorkspaceHostPath $probeFileName
+$runtimeModelRef = ""
 
 Write-ProgressLine "Using agent $AgentId in session $sessionId" Cyan
 Write-ProgressLine "Workspace host path: $WorkspaceHostPath" Cyan
@@ -93,58 +118,68 @@ if (Test-Path $probePath) {
     Remove-Item -LiteralPath $probePath -Recurse -Force
 }
 
-Write-ProgressLine "Resetting agent session state" Gray
-$null = Invoke-External -FilePath "docker" -Arguments @(
-    "exec", $ContainerName,
-    "node", "dist/index.js",
-    "agent",
-    "--agent", $AgentId,
-    "--session-id", $sessionId,
-    "--message", "/reset",
-    "--timeout", "60",
-    "--json"
-) -AllowFailure
+try {
+    Write-ProgressLine "Resetting agent session state" Gray
+    $null = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", $ContainerName,
+        "node", "dist/index.js",
+        "agent",
+        "--agent", $AgentId,
+        "--session-id", $sessionId,
+        "--message", "/reset",
+        "--timeout", "60",
+        "--json"
+    ) -AllowFailure
 
-$instruction = "Use the write tool to create a file named $probeFileName in your current workspace with exactly this content: smoke-ok. Then reply with only the absolute path to that file and nothing else."
-Write-ProgressLine "Prompting agent to create a file in its workspace" Gray
-$result = Invoke-External -FilePath "docker" -Arguments @(
-    "exec", $ContainerName,
-    "node", "dist/index.js",
-    "agent",
-    "--agent", $AgentId,
-    "--session-id", $sessionId,
-    "--message", $instruction,
-    "--timeout", [string]$TimeoutSeconds,
-    "--json"
-)
+    $instruction = "Use the write tool to create a file named $probeFileName in your current workspace with exactly this content: smoke-ok. Then reply with only the absolute path to that file and nothing else."
+    Write-ProgressLine "Prompting agent to create a file in its workspace" Gray
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", $ContainerName,
+        "node", "dist/index.js",
+        "agent",
+        "--agent", $AgentId,
+        "--session-id", $sessionId,
+        "--message", $instruction,
+        "--timeout", [string]$TimeoutSeconds,
+        "--json"
+    )
 
-Write-ProgressLine "Parsing OpenClaw JSON result" Gray
-$json = $result.Output | ConvertFrom-Json -Depth 50
-$payloadText = [string]$json.result.payloads[0].text
-$sandboxed = [bool]$json.result.meta.systemPromptReport.sandbox.sandboxed
-$provider = [string]$json.result.meta.agentMeta.provider
-$model = [string]$json.result.meta.agentMeta.model
+    Write-ProgressLine "Parsing OpenClaw JSON result" Gray
+    $json = $result.Output | ConvertFrom-Json -Depth 50
+    $payloadText = [string]$json.result.payloads[0].text
+    $sandboxed = [bool]$json.result.meta.systemPromptReport.sandbox.sandboxed
+    $provider = [string]$json.result.meta.agentMeta.provider
+    $model = [string]$json.result.meta.agentMeta.model
+    $runtimeModelRef = if ([string]::IsNullOrWhiteSpace($provider) -or [string]::IsNullOrWhiteSpace($model)) { "" } else { "$provider/$model" }
 
-if ($sandboxed) {
-    throw "Expected $AgentId to run unsandboxed for writable Telegram workspace access."
+    if ($sandboxed) {
+        throw "Expected $AgentId to run unsandboxed for writable Telegram workspace access."
+    }
+
+    if (-not (Test-Path $probePath)) {
+        throw "Expected file was not created at $probePath. Agent reply was: $payloadText"
+    }
+
+    $fileContents = (Get-Content -Raw $probePath).Trim()
+    if ($fileContents -ne "smoke-ok") {
+        throw "Expected file contents 'smoke-ok' at $probePath but found '$fileContents'. Agent reply was: $payloadText"
+    }
+
+    Remove-Item -LiteralPath $probePath -Force
+
+    @(
+        "Chat workspace write smoke test passed."
+        "Agent: $AgentId"
+        "Runtime provider/model: $runtimeModelRef"
+        "Sandboxed: $sandboxed"
+        "Created and removed: $probePath"
+        "Reply: $payloadText"
+    ) | Write-Output
 }
+finally {
+    if (Test-Path $probePath) {
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+    }
 
-if (-not (Test-Path $probePath)) {
-    throw "Expected file was not created at $probePath. Agent reply was: $payloadText"
+    Stop-OllamaModelFromRef -ModelRef $runtimeModelRef
 }
-
-$fileContents = (Get-Content -Raw $probePath).Trim()
-if ($fileContents -ne "smoke-ok") {
-    throw "Expected file contents 'smoke-ok' at $probePath but found '$fileContents'. Agent reply was: $payloadText"
-}
-
-Remove-Item -LiteralPath $probePath -Force
-
-@(
-    "Chat workspace write smoke test passed."
-    "Agent: $AgentId"
-    "Runtime provider/model: $provider/$model"
-    "Sandboxed: $sandboxed"
-    "Created and removed: $probePath"
-    "Reply: $payloadText"
-) | Write-Output
