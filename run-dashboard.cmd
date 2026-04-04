@@ -1,11 +1,8 @@
 @echo off
 setlocal
+
 set "SCRIPT_DIR=%~dp0"
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%open-dashboard.ps1" "%~nx0" %*
+exit /b %ERRORLEVEL%
 
-where pwsh >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-  pwsh -ExecutionPolicy Bypass -File "%SCRIPT_DIR%open-dashboard.ps1" %*
-  goto :eof
-)
 
-powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%open-dashboard.ps1" %*

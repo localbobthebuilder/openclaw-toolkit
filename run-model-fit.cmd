@@ -2,13 +2,7 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-set "PS1=%SCRIPT_DIR%probe-ollama-gpu-fit.ps1"
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%probe-ollama-gpu-fit.ps1" "%~nx0" %*
+exit /b %ERRORLEVEL%
 
-where pwsh >nul 2>nul
-if %ERRORLEVEL%==0 (
-  pwsh -ExecutionPolicy Bypass -File "%PS1%" %*
-) else (
-  powershell -ExecutionPolicy Bypass -File "%PS1%" %*
-)
 
-endlocal

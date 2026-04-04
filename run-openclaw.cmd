@@ -4,8 +4,14 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "ACTION=%~1"
 if "%ACTION%"=="" set "ACTION=help"
+if /I "%ACTION%"=="-help" set "ACTION=help"
+if /I "%ACTION%"=="--help" set "ACTION=help"
+if /I "%ACTION%"=="-h" set "ACTION=help"
+if /I "%ACTION%"=="-?" set "ACTION=help"
+if "%ACTION%"=="/?" set "ACTION=help"
 if not "%ACTION%"=="" shift
 
+set "FIRST_FORWARD_ARG=%~1"
 set "FORWARD_ARGS="
 :collect_args
 if "%~1"=="" goto :dispatch
@@ -14,6 +20,12 @@ shift
 goto :collect_args
 
 :dispatch
+
+if /I "%FIRST_FORWARD_ARG%"=="-help" set "FORWARD_ARGS=help"
+if /I "%FIRST_FORWARD_ARG%"=="--help" set "FORWARD_ARGS=help"
+if /I "%FIRST_FORWARD_ARG%"=="-h" set "FORWARD_ARGS=help"
+if /I "%FIRST_FORWARD_ARG%"=="-?" set "FORWARD_ARGS=help"
+if "%FIRST_FORWARD_ARG%"=="/?" set "FORWARD_ARGS=help"
 
 if /I "%ACTION%"=="help" goto :help
 if /I "%ACTION%"=="prereqs" goto :prereqs

@@ -2,11 +2,7 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%test-voice-notes.ps1" "%~nx0" %*
+exit /b %ERRORLEVEL%
 
-where pwsh >nul 2>nul
-if %ERRORLEVEL%==0 (
-  pwsh -ExecutionPolicy Bypass -File "%SCRIPT_DIR%test-voice-notes.ps1" %*
-  exit /b %ERRORLEVEL%
-)
 
-powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%test-voice-notes.ps1" %*

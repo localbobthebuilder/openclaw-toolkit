@@ -1,4 +1,8 @@
 @echo off
 setlocal
-pwsh -ExecutionPolicy Bypass -File "%~dp0test-local-delegated-coder.ps1" %*
-endlocal
+
+set "SCRIPT_DIR=%~dp0"
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%test-local-delegated-coder.ps1" "%~nx0" %*
+exit /b %ERRORLEVEL%
+
+
