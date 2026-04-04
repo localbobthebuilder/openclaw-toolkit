@@ -30,9 +30,17 @@ app.get('/api/config', (req, res) => {
 app.post('/api/config', (req, res) => {
   try {
     const newConfig = req.body;
+    
+    // Create backup before writing
+    if (fs.existsSync(configPath)) {
+      fs.copyFileSync(configPath, configPath + '.bak');
+    }
+    
     fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf8');
+    console.log('Configuration updated and backup created.');
     res.json({ success: true });
   } catch (err) {
+    console.error('Failed to write config:', err);
     res.status(500).json({ error: 'Failed to write config file', details: err.message });
   }
 });
