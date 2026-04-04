@@ -15,16 +15,15 @@ export class ToolkitDashboard extends LitElement {
   static styles = css`
     :host {
       display: block;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #e0e0e0;
-      background-color: #0f0f0f;
+      width: 100%;
       min-height: 100vh;
-      padding: 0;
+      background-color: #0f0f0f;
     }
     .layout {
       display: grid;
       grid-template-columns: 240px 1fr;
       min-height: 100vh;
+      width: 100vw;
     }
     aside {
       background: #1a1a1a;
@@ -155,6 +154,29 @@ export class ToolkitDashboard extends LitElement {
     .item-info { display: flex; flex-direction: column; gap: 4px; }
     .item-title { font-weight: bold; color: #fff; }
     .item-sub { font-size: 0.75rem; color: #777; }
+    
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      border: 1px solid #333;
+      background: #1a1a1a;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      color: #888;
+      transition: all 0.2s;
+    }
+    .tab:hover {
+      background: #252525;
+      color: #fff;
+      border-color: #444;
+    }
+    .tab.active {
+      background: #00bcd4;
+      color: #000;
+      border-color: #00bcd4;
+      font-weight: 600;
+    }
   `;
 
   async firstUpdated() {
