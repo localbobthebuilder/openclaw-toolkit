@@ -51,6 +51,7 @@ if /I "%ACTION%"=="local-model-test" goto :local_model_test
 if /I "%ACTION%"=="agent-smoke" goto :agent_smoke
 if /I "%ACTION%"=="remote-review-smoke" goto :remote_review_smoke
 if /I "%ACTION%"=="local-delegate-test" goto :local_delegate_test
+if /I "%ACTION%"=="temp-agent-probe" goto :temp_agent_probe
 if /I "%ACTION%"=="model-fit" goto :model_fit
 if /I "%ACTION%"=="add-local-model" goto :add_local_model
 if /I "%ACTION%"=="remove-local-model" goto :remove_local_model
@@ -154,6 +155,10 @@ goto :eof
 call "%SCRIPT_DIR%run-local-delegated-coder-test.cmd" %FORWARD_ARGS%
 goto :eof
 
+:temp_agent_probe
+call "%SCRIPT_DIR%run-temp-agent-probe.cmd" %FORWARD_ARGS%
+goto :eof
+
 :model_fit
 call "%SCRIPT_DIR%run-model-fit.cmd" %FORWARD_ARGS%
 goto :eof
@@ -250,6 +255,9 @@ echo.
 echo   run-openclaw.cmd local-delegate-test
 echo     Diagnose the exact main -^> coder-local spawned local-model path and detect raw fake tool-call output.
 echo.
+echo   run-openclaw.cmd temp-agent-probe
+echo     Create a temporary agent through the live gateway API, materialize one session, and report which files appeared under C:\Users\Deadline\.openclaw.
+echo.
 echo   run-openclaw.cmd model-fit
 echo     Probe an Ollama model on a named endpoint, starting at 4k context and increasing until the VRAM headroom rule is hit.
 echo.
@@ -280,6 +288,7 @@ echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-code
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test
+echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd temp-agent-probe
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -EndpointKey local -AssignTo coder-local
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
 echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData

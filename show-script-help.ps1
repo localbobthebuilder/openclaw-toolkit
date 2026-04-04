@@ -9,7 +9,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $resolvedScriptPath = (Resolve-Path -LiteralPath $ScriptPath).Path
-$command = Get-Command $resolvedScriptPath -ErrorAction Stop
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($resolvedScriptPath, [ref]$tokens, [ref]$parseErrors)
+
+if (@($parseErrors).Count -gt 0) {
+    $firstError = $parseErrors[0]
+    throw "Unable to parse script help from '${resolvedScriptPath}': $($firstError.Message)"
+}
 
 $commonParameterNames = @(
     "Verbose",
@@ -27,9 +34,9 @@ $commonParameterNames = @(
 )
 
 function Test-IsMandatoryParameter {
-    param($ParameterMetadata)
+    param($ParameterAst)
 
-    foreach ($attribute in @($ParameterMetadata.Attributes)) {
+    foreach ($attribute in @($ParameterAst.Attributes)) {
         if ($attribute -is [System.Management.Automation.ParameterAttribute] -and $attribute.Mandatory) {
             return $true
         }
@@ -39,9 +46,9 @@ function Test-IsMandatoryParameter {
 }
 
 function Get-ParameterTypeName {
-    param($ParameterMetadata)
+    param($ParameterAst)
 
-    $typeName = $ParameterMetadata.ParameterType.Name
+    $typeName = $ParameterAst.StaticType.Name
     if ([string]::IsNullOrWhiteSpace($typeName)) {
         return "object"
     }
@@ -49,26 +56,51 @@ function Get-ParameterTypeName {
     return $typeName
 }
 
-$syntaxLines = @(
-    foreach ($parameterSet in @($command.ParameterSets)) {
-        $syntax = $parameterSet.ToString()
-        if ([string]::IsNullOrWhiteSpace($syntax)) {
-            continue
-        }
+$paramBlock = $ast.ParamBlock
+$scriptParameters = if ($paramBlock) { @($paramBlock.Parameters) } else { @() }
 
-        "$WrapperName $syntax"
+$syntaxParts = @()
+foreach ($parameter in $scriptParameters) {
+    $parameterName = $parameter.Name.VariablePath.UserPath
+    if ($parameterName -in $commonParameterNames) {
+        continue
+    }
+
+    $typeName = Get-ParameterTypeName -ParameterAst $parameter
+    $isMandatory = Test-IsMandatoryParameter -ParameterAst $parameter
+    $isSwitch = $typeName -eq "SwitchParameter"
+    if ($isSwitch) {
+        $fragment = "-$parameterName"
+    }
+    else {
+        $fragment = "-$parameterName <$typeName>"
+    }
+
+    if (-not $isMandatory) {
+        $fragment = "[$fragment]"
+    }
+
+    $syntaxParts += $fragment
+}
+
+$syntaxLines = @(
+    if (@($syntaxParts).Count -gt 0) {
+        "$WrapperName $($syntaxParts -join ' ')"
+    }
+    else {
+        "$WrapperName"
     }
 )
 
 $parameterLines = @(
-    foreach ($parameterName in @($command.Parameters.Keys | Sort-Object)) {
+    foreach ($parameter in @($scriptParameters | Sort-Object { $_.Name.VariablePath.UserPath })) {
+        $parameterName = $parameter.Name.VariablePath.UserPath
         if ($parameterName -in $commonParameterNames) {
             continue
         }
 
-        $parameter = $command.Parameters[$parameterName]
-        $requiredLabel = if (Test-IsMandatoryParameter -ParameterMetadata $parameter) { "required" } else { "optional" }
-        $typeName = Get-ParameterTypeName -ParameterMetadata $parameter
+        $requiredLabel = if (Test-IsMandatoryParameter -ParameterAst $parameter) { "required" } else { "optional" }
+        $typeName = Get-ParameterTypeName -ParameterAst $parameter
         "-$parameterName ($typeName, $requiredLabel)"
     }
 )

@@ -60,6 +60,8 @@ Most important commands:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke`
 - Apply the configured starter multi-agent layout:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agents`
+- Inspect where a newly created API agent stores its state:
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd temp-agent-probe`
 - Compact Docker Desktop storage:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd compact-storage`
 - Clean shutdown:
@@ -110,6 +112,8 @@ Useful extras:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke`
 - Local delegated coder diagnostic:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test`
+- Temporary API-created agent storage probe:
+  `D:\openclaw\openclaw-toolkit\run-openclaw.cmd temp-agent-probe`
 - Ollama GPU fit probe:
   `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072`
 - Add a new local model end to end:
@@ -142,6 +146,8 @@ Files worth knowing:
 
 - Full manual:
   `D:\openclaw\openclaw-toolkit\manual-steps.md`
+- Source-backed multi-agent notes:
+  `D:\openclaw\openclaw-toolkit\multi-agent-openclaw-notes.md`
 - Latest verification report:
   `D:\openclaw\openclaw-toolkit\bootstrap-report.txt`
 - Backup archives:

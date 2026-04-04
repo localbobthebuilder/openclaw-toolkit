@@ -83,6 +83,8 @@ Main operator wrapper:
   Smoke-test the shared-workspace agent roles, especially the Telegram-routed agent's real file and git workflows.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke`
   Smoke-test `main -> coder-remote -> review-local` on the shared workspace and verify that the review task uses exact full file paths.
+- `D:\openclaw\openclaw-toolkit\run-openclaw.cmd temp-agent-probe`
+  Create a temporary agent through the live gateway API, create one session for it, and report which files appeared under `C:\Users\Deadline\.openclaw`. By default it cleans the probe back up and restarts the gateway so live state matches disk.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
 - `D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
@@ -185,6 +187,8 @@ Direct scripts:
   Run the focused `main -> coder-remote -> review-local` orchestration smoke test directly.
 - `D:\openclaw\openclaw-toolkit\run-local-delegated-coder-test.cmd`
   Diagnose the exact `main -> coder-local` spawned local-model path and detect raw fake tool-call output.
+- `D:\openclaw\openclaw-toolkit\run-temp-agent-probe.cmd`
+  Create a temporary agent through the live gateway API and inspect which `.openclaw` files are created for it.
 - `D:\openclaw\openclaw-toolkit\run-add-local-model.cmd`
   Pull, tune, and register a local Ollama model directly.
 - `D:\openclaw\openclaw-toolkit\run-remove-local-model.cmd`
@@ -204,6 +208,7 @@ The core mental model is:
 - update to the newest stable release and re-apply hardening: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd update`
 - normal daily startup: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd start`
 - apply the configured starter multi-agent layout: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd agents`
+- inspect where a newly created API agent stores its data: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd temp-agent-probe`
 - run OpenAI Codex OAuth for OpenClaw when needed: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd openai-auth`
 - complete Gemini auth for OpenClaw when you want the research path: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd gemini-auth`
 - run Anthropic auth for OpenClaw when needed: `D:\openclaw\openclaw-toolkit\run-openclaw.cmd claude-auth`
@@ -257,6 +262,24 @@ Firefox note:
   on the next launch.
 - For reliable PC dashboard access, keep site data for the dashboard browser
   profile and avoid private browsing for OpenClaw.
+
+Temporary agent storage probe:
+
+- Run `D:\openclaw\openclaw-toolkit\run-temp-agent-probe.cmd` when you want a
+  concrete answer to "what files did OpenClaw create for this agent?"
+- The helper uses the live gateway API to add an agent, optionally creates one
+  session so the session store materializes on disk, and prints the paths it
+  changed under `C:\Users\Deadline\.openclaw`.
+- By default it removes the temporary agent again and restarts the gateway at
+  the end so the in-memory agent list matches the cleaned config file.
+- Use `-KeepAgent` only when you intentionally want to leave the probe agent in
+  place for manual inspection.
+
+Multi-agent note:
+
+- The source-backed summary for the Gemini conversation about multi-agent
+  workflows lives in:
+  `D:\openclaw\openclaw-toolkit\multi-agent-openclaw-notes.md`
 
 The script automates the parts we already validated on this machine:
 
