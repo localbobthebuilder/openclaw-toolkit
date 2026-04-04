@@ -278,6 +278,18 @@ function Ensure-ManagedTextFile {
     return $Path
 }
 
+function Remove-ManagedTextFileIfPresent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    Remove-Item -LiteralPath $Path -Force
+}
+
 function Get-AgentBootstrapOverlayDir {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -397,6 +409,49 @@ function Get-SharedWorkspacePath {
     return $null
 }
 
+function Get-DefaultPrivateWorkspacePath {
+    param(
+        [string]$AgentId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($AgentId) -or $AgentId -eq "main") {
+        return "/home/node/.openclaw/workspace"
+    }
+
+    return "/home/node/.openclaw/workspace-$AgentId"
+}
+
+function Get-AgentWorkspaceMode {
+    param(
+        [Parameter(Mandatory = $true)]$MultiConfig,
+        $AgentConfig
+    )
+
+    if ($null -ne $AgentConfig -and
+        $AgentConfig.PSObject.Properties.Name -contains "workspaceMode" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.workspaceMode)) {
+        $mode = ([string]$AgentConfig.workspaceMode).ToLowerInvariant()
+        if ($mode -in @("shared", "private")) {
+            return $mode
+        }
+    }
+
+    if (Get-SharedWorkspacePath -MultiConfig $MultiConfig) {
+        return "shared"
+    }
+
+    return "private"
+}
+
+function Test-AgentUsesSharedWorkspace {
+    param(
+        [Parameter(Mandatory = $true)]$MultiConfig,
+        $AgentConfig
+    )
+
+    return ((Get-AgentWorkspaceMode -MultiConfig $MultiConfig -AgentConfig $AgentConfig) -eq "shared")
+}
+
 function Get-AgentWorkspacePath {
     param(
         [Parameter(Mandatory = $true)]$MultiConfig,
@@ -404,12 +459,159 @@ function Get-AgentWorkspacePath {
     )
 
     $sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $MultiConfig
-    if ($sharedWorkspacePath) {
+    if ($sharedWorkspacePath -and (Test-AgentUsesSharedWorkspace -MultiConfig $MultiConfig -AgentConfig $AgentConfig)) {
         return $sharedWorkspacePath
     }
 
     if ($null -ne $AgentConfig -and $AgentConfig.PSObject.Properties.Name -contains "workspace" -and $AgentConfig.workspace) {
         return [string]$AgentConfig.workspace
+    }
+
+    if ($null -ne $AgentConfig -and $AgentConfig.PSObject.Properties.Name -contains "id" -and $AgentConfig.id) {
+        return (Get-DefaultPrivateWorkspacePath -AgentId ([string]$AgentConfig.id))
+    }
+
+    return (Get-DefaultPrivateWorkspacePath -AgentId $null)
+}
+
+function Test-AgentCanAccessSharedWorkspace {
+    param(
+        [Parameter(Mandatory = $true)]$MultiConfig,
+        $AgentConfig
+    )
+
+    if (-not (Get-SharedWorkspacePath -MultiConfig $MultiConfig)) {
+        return $false
+    }
+
+    if (Test-AgentUsesSharedWorkspace -MultiConfig $MultiConfig -AgentConfig $AgentConfig) {
+        return $false
+    }
+
+    if ($null -ne $AgentConfig -and
+        $AgentConfig.PSObject.Properties.Name -contains "sharedWorkspaceAccess" -and
+        $null -ne $AgentConfig.sharedWorkspaceAccess) {
+        return [bool]$AgentConfig.sharedWorkspaceAccess
+    }
+
+    return $false
+}
+
+function Expand-PolicyTemplateLines {
+    param(
+        [string[]]$Lines,
+        [string]$WorkspacePath,
+        [string]$SharedWorkspacePath
+    )
+
+    return @(
+        foreach ($line in @($Lines)) {
+            $expanded = [string]$line
+            $expanded = $expanded.Replace("{{WORKSPACE_PATH}}", [string]$WorkspacePath)
+            $expanded = $expanded.Replace("{{SHARED_WORKSPACE_PATH}}", [string]$SharedWorkspacePath)
+            $expanded
+        }
+    )
+}
+
+function Get-SharedWorkspaceAccessLines {
+    param(
+        [string]$WorkspacePath,
+        [string]$SharedWorkspacePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SharedWorkspacePath)) {
+        return @()
+    }
+
+    $resolvedWorkspacePath = if ($WorkspacePath) { [string]$WorkspacePath } else { "/home/node/.openclaw/workspace" }
+
+    return @(
+        "",
+        "## Shared Project Access",
+        "- Your private home workspace is ``$resolvedWorkspacePath``.",
+        "- A shared collaboration workspace also exists at ``$SharedWorkspacePath``.",
+        "- Use your private workspace for agent-specific notes, drafts, and scratch files.",
+        "- Use the shared workspace for collaborative repos, code, durable project notes, and handoff artifacts.",
+        "- When you need to work in the shared project area, use exact absolute paths there and set exec ``workdir`` to ``$SharedWorkspacePath`` explicitly."
+    )
+}
+
+function Get-EffectiveRolePolicyLines {
+    param(
+        $RolePolicies,
+        [string]$PolicyKey,
+        [string]$WorkspacePath,
+        [string]$SharedWorkspacePath,
+        [switch]$IncludeSharedWorkspaceAccess
+    )
+
+    $lines = @(Get-RolePolicyLines -RolePolicies $RolePolicies -Key $PolicyKey)
+    $lines = @(Expand-PolicyTemplateLines -Lines $lines -WorkspacePath $WorkspacePath -SharedWorkspacePath $SharedWorkspacePath)
+
+    if ($IncludeSharedWorkspaceAccess) {
+        $lines += @(Get-SharedWorkspaceAccessLines -WorkspacePath $WorkspacePath -SharedWorkspacePath $SharedWorkspacePath)
+    }
+
+    return @($lines)
+}
+
+function Get-ManagedAgentConfigRecord {
+    param(
+        [Parameter(Mandatory = $true)]$MultiConfig,
+        [Parameter(Mandatory = $true)][string]$StrongAgentId,
+        [Parameter(Mandatory = $true)][string]$AgentId
+    )
+
+    switch ($AgentId) {
+        $StrongAgentId {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.strongAgent
+                DefaultPolicyKey  = "strongAgent"
+            }
+        }
+        { $MultiConfig.researchAgent -and $_ -eq [string]$MultiConfig.researchAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.researchAgent
+                DefaultPolicyKey  = "researchAgent"
+            }
+        }
+        { $MultiConfig.localChatAgent -and $_ -eq [string]$MultiConfig.localChatAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.localChatAgent
+                DefaultPolicyKey  = "localChatAgent"
+            }
+        }
+        { $MultiConfig.hostedTelegramAgent -and $_ -eq [string]$MultiConfig.hostedTelegramAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.hostedTelegramAgent
+                DefaultPolicyKey  = "hostedTelegramAgent"
+            }
+        }
+        { $MultiConfig.localReviewAgent -and $_ -eq [string]$MultiConfig.localReviewAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.localReviewAgent
+                DefaultPolicyKey  = "localReviewAgent"
+            }
+        }
+        { $MultiConfig.localCoderAgent -and $_ -eq [string]$MultiConfig.localCoderAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.localCoderAgent
+                DefaultPolicyKey  = "localCoderAgent"
+            }
+        }
+        { $MultiConfig.remoteReviewAgent -and $_ -eq [string]$MultiConfig.remoteReviewAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.remoteReviewAgent
+                DefaultPolicyKey  = "remoteReviewAgent"
+            }
+        }
+        { $MultiConfig.remoteCoderAgent -and $_ -eq [string]$MultiConfig.remoteCoderAgent.id } {
+            return [pscustomobject]@{
+                AgentConfig       = $MultiConfig.remoteCoderAgent
+                DefaultPolicyKey  = "remoteCoderAgent"
+            }
+        }
     }
 
     return $null
@@ -1203,67 +1405,35 @@ if ($multi.manageWorkspaceAgentsMd) {
             $sharedPolicyKey = [string]$multi.sharedWorkspace.rolePolicyKey
         }
 
-        $sharedAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $sharedWorkspacePath -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key $sharedPolicyKey)
+        $sharedAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $sharedWorkspacePath -ContentLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $sharedWorkspacePath -SharedWorkspacePath $sharedWorkspacePath)
         if ($sharedAgentsPath) { $managedAgentsFiles += $sharedAgentsPath }
+    }
 
-        foreach ($desiredAgent in @($desiredAgents)) {
-            $agentConfig = $null
-            switch ([string]$desiredAgent.id) {
-                $strongId { $agentConfig = $multi.strongAgent; break }
-                { $_ -eq [string]$multi.researchAgent.id } { $agentConfig = $multi.researchAgent; break }
-                { $multi.localChatAgent -and $_ -eq [string]$multi.localChatAgent.id } { $agentConfig = $multi.localChatAgent; break }
-                { $multi.hostedTelegramAgent -and $_ -eq [string]$multi.hostedTelegramAgent.id } { $agentConfig = $multi.hostedTelegramAgent; break }
-                { $multi.localReviewAgent -and $_ -eq [string]$multi.localReviewAgent.id } { $agentConfig = $multi.localReviewAgent; break }
-                { $multi.localCoderAgent -and $_ -eq [string]$multi.localCoderAgent.id } { $agentConfig = $multi.localCoderAgent; break }
-                { $multi.remoteReviewAgent -and $_ -eq [string]$multi.remoteReviewAgent.id } { $agentConfig = $multi.remoteReviewAgent; break }
-                { $multi.remoteCoderAgent -and $_ -eq [string]$multi.remoteCoderAgent.id } { $agentConfig = $multi.remoteCoderAgent; break }
-            }
+    foreach ($desiredAgent in @($desiredAgents)) {
+        $agentRecord = Get-ManagedAgentConfigRecord -MultiConfig $multi -StrongAgentId $strongId -AgentId ([string]$desiredAgent.id)
+        if ($null -eq $agentRecord -or $null -eq $agentRecord.AgentConfig) {
+            continue
+        }
 
-            if ($null -eq $agentConfig) {
-                continue
-            }
+        $agentConfig = $agentRecord.AgentConfig
+        $effectiveWorkspacePath = if ($desiredAgent.PSObject.Properties.Name -contains "workspace" -and $desiredAgent.workspace) {
+            [string]$desiredAgent.workspace
+        }
+        else {
+            Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $agentConfig
+        }
+        $policyKey = Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$agentRecord.DefaultPolicyKey)
+        $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -MultiConfig $multi -AgentConfig $agentConfig)
 
-            $overlayAgentsPath = Ensure-AgentBootstrapOverlayFile -Config $config -AgentId ([string]$desiredAgent.id) -FileName "AGENTS.md" -OverlayDirName $overlayDirName -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$desiredAgent.id)))
+        if ($sharedWorkspacePath -and (Test-AgentUsesSharedWorkspace -MultiConfig $multi -AgentConfig $agentConfig)) {
+            $overlayAgentsPath = Ensure-AgentBootstrapOverlayFile -Config $config -AgentId ([string]$desiredAgent.id) -FileName "AGENTS.md" -OverlayDirName $overlayDirName -ContentLines $agentPolicyLines
             if ($overlayAgentsPath) { $managedAgentsFiles += $overlayAgentsPath }
         }
-    }
-    else {
-        $mainAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $null -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.strongAgent -DefaultKey "strongAgent"))
-        if ($mainAgentsPath) { $managedAgentsFiles += $mainAgentsPath }
-
-        if ($multi.researchAgent -and $multi.researchAgent.enabled) {
-            $researchAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.researchAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.researchAgent -DefaultKey "researchAgent"))
-            if ($researchAgentsPath) { $managedAgentsFiles += $researchAgentsPath }
-        }
-
-        if ($multi.localChatAgent -and $multi.localChatAgent.enabled) {
-            $chatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localChatAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localChatAgent -DefaultKey "localChatAgent"))
-            if ($chatAgentsPath) { $managedAgentsFiles += $chatAgentsPath }
-        }
-
-        if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
-            $hostedChatAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.hostedTelegramAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.hostedTelegramAgent -DefaultKey "hostedTelegramAgent"))
-            if ($hostedChatAgentsPath) { $managedAgentsFiles += $hostedChatAgentsPath }
-        }
-
-        if ($multi.localReviewAgent -and $multi.localReviewAgent.enabled) {
-            $reviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localReviewAgent -DefaultKey "localReviewAgent"))
-            if ($reviewAgentsPath) { $managedAgentsFiles += $reviewAgentsPath }
-        }
-
-        if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
-            $coderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.localCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.localCoderAgent -DefaultKey "localCoderAgent"))
-            if ($coderAgentsPath) { $managedAgentsFiles += $coderAgentsPath }
-        }
-
-        if ($multi.remoteReviewAgent -and $multi.remoteReviewAgent.enabled) {
-            $remoteReviewAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.remoteReviewAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.remoteReviewAgent -DefaultKey "remoteReviewAgent"))
-            if ($remoteReviewAgentsPath) { $managedAgentsFiles += $remoteReviewAgentsPath }
-        }
-
-        if ($multi.remoteCoderAgent -and $multi.remoteCoderAgent.enabled) {
-            $remoteCoderAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath ([string]$multi.remoteCoderAgent.workspace) -ContentLines (Get-RolePolicyLines -RolePolicies $rolePolicies -Key (Get-AgentRolePolicyKey -AgentConfig $multi.remoteCoderAgent -DefaultKey "remoteCoderAgent"))
-            if ($remoteCoderAgentsPath) { $managedAgentsFiles += $remoteCoderAgentsPath }
+        else {
+            $staleOverlayPath = Join-Path (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) "AGENTS.md"
+            Remove-ManagedTextFileIfPresent -Path $staleOverlayPath
+            $workspaceAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $effectiveWorkspacePath -ContentLines $agentPolicyLines
+            if ($workspaceAgentsPath) { $managedAgentsFiles += $workspaceAgentsPath }
         }
     }
 }

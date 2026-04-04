@@ -655,6 +655,42 @@ Shared workspace note:
   same files instead of being isolated in separate folders.
 - Managed per-agent role separation now mainly comes from routing, model choice,
   and tool policy, while the shared workspace stays common.
+- This is the honest default for this toolkit because with `sandbox.mode=off`,
+  separate workspaces are mostly organization/default-cwd choices rather than
+  strong isolation boundaries.
+- Managed agents are no longer locked into only that one layout:
+  if `multiAgent.sharedWorkspace.enabled = true`, an individual managed agent
+  can still opt out with `workspaceMode: "private"`.
+- A private managed agent can set `workspace` explicitly, or if omitted it now
+  defaults to `/home/node/.openclaw/workspace-<agentId>`.
+- If you want a private agent to keep its own home workspace but still
+  collaborate with the shared project tree, set
+  `sharedWorkspaceAccess: true` on that agent.
+- `sharedWorkspaceAccess: true` adds config-managed instructions telling that
+  private agent where the shared project workspace lives and to use exact
+  absolute paths there when joining collaborative work.
+- The managed toolkit layout still covers a fixed set of role slots. If you want
+  a brand-new extra agent outside those slots, create it natively in OpenClaw
+  and then decide separately whether to extend toolkit management for it.
+
+Example mixed layout:
+
+```json
+"researchAgent": {
+  "enabled": true,
+  "id": "research",
+  "name": "Gemini Research",
+  "rolePolicyKey": "research",
+  "modelSource": "hosted",
+  "workspaceMode": "private",
+  "sharedWorkspaceAccess": true,
+  "workspace": "/home/node/.openclaw/workspace-research",
+  "modelRef": "google/gemini-3.1-flash-lite-preview"
+}
+```
+
+That gives `research` its own home workspace and AGENTS file, while still
+teaching it how to work against the shared project tree when needed.
 
 Purpose routing note:
 

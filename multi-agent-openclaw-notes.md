@@ -102,6 +102,43 @@ against the official OpenClaw docs/source in `D:\openclaw\openclaw`.
   durable workspace, while still keeping per-agent auth/session/model state
   isolated under `~/.openclaw/agents/<agentId>/...`.
 
+## Shared workspace versus private homes
+
+- If sandboxing is off, separate workspaces are mainly a default cwd and prompt
+  organization choice, not a strong security boundary.
+- That means "every agent has its own workspace, but they all really work in
+  one chosen project tree through absolute paths" is operationally very close
+  to "the shared project tree is their configured workspace".
+- The shared-workspace approach is still useful because it is more honest about
+  the real workflow: the default cwd, file tools, and workspace instructions all
+  point at the project the agents are actually collaborating on.
+- Private workspaces are still useful when you want an agent to have its own
+  scratch area, local notes, or role-specific home files while keeping the main
+  project tree collaborative.
+- In short:
+  shared workspace is better for direct collaboration;
+  private workspaces are better for role-specific homes;
+  sandboxing and tool policy are what really decide isolation.
+
+## Mixed workspace support in this toolkit
+
+- The toolkit now supports a mixed layout for the managed role slots.
+- Global shared collaboration still comes from `multiAgent.sharedWorkspace`.
+- Any managed agent can opt out of that shared default with
+  `workspaceMode: "private"`.
+- A private agent can set its own `workspace`, or if omitted the toolkit now
+  defaults it to `/home/node/.openclaw/workspace-<agentId>` (with `main`
+  defaulting to `/home/node/.openclaw/workspace`).
+- A private agent can also opt into shared-project collaboration guidance with
+  `sharedWorkspaceAccess: true`. That does not change hard permissions by
+  itself; it just tells the agent where the shared project tree lives and how to
+  use it.
+- The toolkit is not fully generic yet:
+  it manages a fixed set of role slots such as `main`, `research`,
+  `chat-local`, `review-local`, and the coder/reviewer delegates.
+  For totally new extra agents outside those slots, use native OpenClaw agent
+  creation or extend the toolkit schema further.
+
 ## Recommended house view
 
 - Treat "isolated agents" as the OpenClaw base model.
