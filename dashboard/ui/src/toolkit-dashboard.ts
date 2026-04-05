@@ -82,6 +82,21 @@ export class ToolkitDashboard extends LitElement {
     .status-content { font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.72rem; color: #bbb; white-space: pre; overflow-x: auto; line-height: 1.6; padding: 15px; background: #0f0f0f; flex-grow: 1; }
     .status-content::-webkit-scrollbar { height: 6px; }
     .status-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    .status-not-installed { background: #ff980020; box-shadow: 0 0 8px rgba(255, 152, 0, 0.3); }
+    .setup-guide { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border: 1px solid #00bcd4; border-radius: 12px; padding: 28px; margin-bottom: 30px; }
+    .setup-guide h2 { margin: 0 0 6px; font-size: 1.4rem; color: #fff; }
+    .setup-guide .subtitle { color: #888; font-size: 0.9rem; margin: 0 0 28px; }
+    .setup-steps { display: flex; flex-direction: column; gap: 14px; }
+    .setup-step { display: flex; align-items: center; gap: 18px; background: #252535; border: 1px solid #333; border-radius: 8px; padding: 16px 20px; }
+    .setup-step.done { border-color: #4caf50; background: #1a2a1a; }
+    .setup-step.active { border-color: #00bcd4; background: #0d1e2a; }
+    .step-num { width: 32px; height: 32px; border-radius: 50%; background: #333; color: #fff; font-weight: bold; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .setup-step.done .step-num { background: #4caf50; }
+    .setup-step.active .step-num { background: #00bcd4; color: #000; }
+    .step-body { flex: 1; }
+    .step-title { font-weight: 600; color: #fff; font-size: 0.95rem; margin-bottom: 3px; }
+    .step-desc { font-size: 0.8rem; color: #888; }
+    .step-done-badge { color: #4caf50; font-size: 0.75rem; font-weight: bold; }
   `;
 
   async firstUpdated() {
@@ -256,13 +271,13 @@ export class ToolkitDashboard extends LitElement {
 
   parseStatusOutput(output: string) {
       if (!output) return [];
-      const sections: { title: string, content: string, status: 'online'|'offline' }[] = [];
+      const sections: { title: string, content: string, status: 'online'|'offline'|'not-installed' }[] = [];
       const parts = output.split(/\[(.*?)\]/g);
       
       for (let i = 1; i < parts.length; i += 2) {
           const title = parts[i];
           let content = parts[i+1]?.trim() || '';
-          let status: 'online'|'offline' = 'online';
+          let status: 'online'|'offline'|'not-installed' = 'online';
           
           try {
               const json = JSON.parse(content);
@@ -273,8 +288,11 @@ export class ToolkitDashboard extends LitElement {
                       .join('\n');
               }
           } catch (e) {
-              if (content.toLowerCase().includes('not ready') || 
+              if (content.toLowerCase().includes('not installed')) {
+                  status = 'not-installed';
+              } else if (content.toLowerCase().includes('not ready') || 
                   content.toLowerCase().includes('failed') || 
+                  content.toLowerCase().includes('not responding') ||
                   content.toLowerCase().includes('error')) {
                   status = 'offline';
               }
@@ -294,12 +312,79 @@ export class ToolkitDashboard extends LitElement {
         'Ollama': 'ollama'
     };
 
+    const dockerSection = sections.find(s => s.title === 'Docker');
+    const ollamaSection = sections.find(s => s.title === 'Ollama');
+    const gatewaySection = sections.find(s => s.title === 'Gateway');
+
+    // If the script crashed and produced no parseable sections, treat as unprovisioned
+    const scriptFailed = sections.length === 0 && !!this.statusOutput;
+
+    const dockerNotInstalled = scriptFailed || dockerSection?.status === 'not-installed';
+    const ollamaNotInstalled = scriptFailed || ollamaSection?.status === 'not-installed';
+    const dockerNotReady = !scriptFailed && dockerSection?.status === 'offline';
+    const gatewayDown = !scriptFailed && (!gatewaySection || gatewaySection.status === 'offline' || gatewaySection.status === 'not-installed');
+
+    const isNewInstall = dockerNotInstalled || ollamaNotInstalled;
+    const isServicesDown = !isNewInstall && (dockerNotReady || gatewayDown);
+
+    const prereqsDone = !dockerNotInstalled;
+    const bootstrapDone = prereqsDone && !dockerNotReady && !gatewayDown;
+    const runningOk = bootstrapDone && !isServicesDown;
+
     return html`
       <header>
-        <h2>System Health Dashboard</h2>
-        <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Monitoring</button>
+        <h2>${isNewInstall ? '👋 Welcome to OpenClaw' : 'System Health Dashboard'}</h2>
+        <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>↻ Refresh</button>
       </header>
-      
+
+      ${isNewInstall ? html`
+        <div class="setup-guide">
+          <h2>🚀 Let's get you set up</h2>
+          <p class="subtitle">Some required software is not installed. Follow these steps to get OpenClaw running.</p>
+          <div class="setup-steps">
+            <div class="setup-step ${prereqsDone ? 'done' : 'active'}">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Check & Install Prerequisites</div>
+                <div class="step-desc">Audits your Windows setup and installs Docker Desktop, WSL2, and Ollama if needed.</div>
+              </div>
+              ${prereqsDone
+                ? html`<span class="step-done-badge">✓ Done</span>`
+                : html`<button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('prereqs')}>Run Prereqs</button>`}
+            </div>
+            <div class="setup-step ${bootstrapDone ? 'done' : prereqsDone ? 'active' : ''}">
+              <div class="step-num">2</div>
+              <div class="step-body">
+                <div class="step-title">Bootstrap OpenClaw</div>
+                <div class="step-desc">Clones the OpenClaw repo, builds Docker images, configures agents, and applies all hardening.</div>
+              </div>
+              ${bootstrapDone
+                ? html`<span class="step-done-badge">✓ Done</span>`
+                : html`<button class="btn btn-primary" ?disabled=${this.isRunning || !prereqsDone} @click=${() => this.runCommand('bootstrap')}>Run Bootstrap</button>`}
+            </div>
+            <div class="setup-step ${runningOk ? 'done' : bootstrapDone ? 'active' : ''}">
+              <div class="step-num">3</div>
+              <div class="step-body">
+                <div class="step-title">Start Services</div>
+                <div class="step-desc">Launches Docker, the OpenClaw gateway, and all configured agents.</div>
+              </div>
+              ${runningOk
+                ? html`<span class="step-done-badge">✓ Running</span>`
+                : html`<button class="btn btn-primary" ?disabled=${this.isRunning || !bootstrapDone} @click=${() => this.runCommand('start')}>Start</button>`}
+            </div>
+          </div>
+        </div>
+      ` : isServicesDown ? html`
+        <div class="setup-guide" style="border-color: #ff9800;">
+          <h2>⚠️ Services are stopped</h2>
+          <p class="subtitle">Prerequisites look good but the gateway or Docker isn't running.</p>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('start')}>▶ Start Services</button>
+            <button class="btn btn-secondary" ?disabled=${this.isRunning} @click=${() => this.runCommand('verify')}>Run Verify</button>
+          </div>
+        </div>
+      ` : ''}
+
       ${sections.length > 0 ? html`
           <div class="status-grid">
               ${sections.map(s => html`
@@ -307,26 +392,35 @@ export class ToolkitDashboard extends LitElement {
                       <div class="status-card-header">
                           <h4>${s.title}</h4>
                           <div style="display: flex; align-items: center; gap: 12px;">
-                              ${rebootMap[s.title] ? html`
+                              ${rebootMap[s.title] && s.status !== 'not-installed'
+                                && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady)) ? html`
                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;" 
                                           ?disabled=${this.isRunning}
                                           @click=${() => this.rebootService(rebootMap[s.title])}>
                                       Restart
                                   </button>
                               ` : ''}
-                              <span class="status-indicator ${s.status === 'online' ? 'status-online' : 'status-offline'}"></span>
+                              <span class="status-indicator ${
+                                s.status === 'online' ? 'status-online' :
+                                s.status === 'not-installed' ? 'status-not-installed' :
+                                'status-offline'
+                              }"></span>
                           </div>
                       </div>
                       <div class="status-content">${s.content}</div>
                   </div>
               `)}
           </div>
-      ` : html`
+      ` : !isNewInstall && !isServicesDown && this.statusOutput ? html`
           <div class="card">
             <p style="color: #888; margin-bottom: 15px;">Gathering live data from Docker and local gateway...</p>
             <div class="log-container" style="height: auto; max-height: 400px; background: #0f0f0f;">
-                ${this.statusOutput || 'Waiting for status report...'}
+                ${this.statusOutput}
             </div>
+          </div>
+      ` : this.statusOutput ? '' : html`
+          <div class="card">
+            <p style="color: #888;">Waiting for status report...</p>
           </div>
       `}
     `;

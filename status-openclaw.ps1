@@ -1,10 +1,22 @@
 [CmdletBinding()]
 param(
-    [string]$RepoPath = "D:\openclaw\openclaw",
-    [string]$HealthUrl = "http://127.0.0.1:18789/healthz"
+    [string]$RepoPath,
+    [string]$HealthUrl
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolve paths portably from the config file next to this script
+$configFile = [System.IO.Path]::Combine($PSScriptRoot, "openclaw-bootstrap.config.json")
+if (Test-Path $configFile) {
+    . ([System.IO.Path]::Combine($PSScriptRoot, "shared-config-paths.ps1"))
+    $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
+    $cfg = Resolve-PortableConfigPaths -Config $cfg -BaseDir $PSScriptRoot
+    if (-not $RepoPath)  { $RepoPath  = $cfg.repoPath }
+    if (-not $HealthUrl) { $HealthUrl = "http://127.0.0.1:$($cfg.gatewayPort)/healthz" }
+}
+if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::Combine($PSScriptRoot, '..', 'openclaw') }
+if (-not $HealthUrl) { $HealthUrl = "http://127.0.0.1:18789/healthz" }
 
 function Invoke-External {
     param(
@@ -33,7 +45,19 @@ function Invoke-External {
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
-    $null = $process.Start()
+
+    try {
+        $null = $process.Start()
+    } catch [System.ComponentModel.Win32Exception] {
+        if (-not $AllowFailure) {
+            throw "Command not found: $FilePath"
+        }
+        return [pscustomobject]@{
+            ExitCode = -1
+            Output   = "not installed"
+        }
+    }
+
     $stdout = $process.StandardOutput.ReadToEnd()
     $stderr = $process.StandardError.ReadToEnd()
     $process.WaitForExit()
@@ -59,7 +83,7 @@ $containers = Invoke-External -FilePath "docker" -Arguments @(
     "table {{.Names}}`t{{.Image}}`t{{.Status}}`t{{.Ports}}"
 ) -AllowFailure
 $composePs = Invoke-External -FilePath "docker" -Arguments @(
-    "compose", "-f", (Join-Path $RepoPath "docker-compose.yml"), "ps"
+    "compose", "-f", ([System.IO.Path]::Combine($RepoPath, "docker-compose.yml")), "ps"
 ) -AllowFailure
 $serve = Invoke-External -FilePath "tailscale" -Arguments @("serve", "status") -AllowFailure
 $ollama = Invoke-External -FilePath "ollama" -Arguments @("list") -AllowFailure
@@ -68,13 +92,19 @@ Write-Host "[Docker]" -ForegroundColor Cyan
 if ($dockerInfo.ExitCode -eq 0) {
     Write-Host "Docker engine: ready" -ForegroundColor Green
 }
+elseif ($dockerInfo.Output -eq "not installed") {
+    Write-Host "Docker: not installed" -ForegroundColor Red
+}
 else {
     Write-Host "Docker engine: not ready" -ForegroundColor Yellow
 }
 
 Write-Host ""
 Write-Host "[Gateway]" -ForegroundColor Cyan
-if ($health.ExitCode -eq 0 -and $health.Output -match '"ok"\s*:\s*true') {
+if ($dockerInfo.Output -eq "not installed") {
+    Write-Host "Gateway: not installed" -ForegroundColor Red
+}
+elseif ($health.ExitCode -eq 0 -and $health.Output -match '"ok"\s*:\s*true') {
     Write-Host $health.Output -ForegroundColor Green
 }
 else {
@@ -86,13 +116,19 @@ else {
 
 Write-Host ""
 Write-Host "[Compose]" -ForegroundColor Cyan
-if ($composePs.Output) {
+if ($dockerInfo.Output -eq "not installed") {
+    Write-Host "Compose: not installed"
+}
+elseif ($composePs.Output) {
     Write-Host $composePs.Output
 }
 
 Write-Host ""
 Write-Host "[Containers]" -ForegroundColor Cyan
-if ($containers.Output) {
+if ($dockerInfo.Output -eq "not installed") {
+    Write-Host "Containers: not installed"
+}
+elseif ($containers.Output) {
     Write-Host $containers.Output
 }
 
@@ -114,6 +150,9 @@ if ($ollama.ExitCode -eq 0) {
     else {
         Write-Host "Ollama: ready (no models loaded)" -ForegroundColor Green
     }
+}
+elseif ($ollama.Output -eq "not installed") {
+    Write-Host "Ollama: not installed" -ForegroundColor Red
 }
 else {
     Write-Host "Ollama: not responding" -ForegroundColor Yellow
