@@ -97,6 +97,7 @@ export class ToolkitDashboard extends LitElement {
     .step-title { font-weight: 600; color: #fff; font-size: 0.95rem; margin-bottom: 3px; }
     .step-desc { font-size: 0.8rem; color: #888; }
     .step-done-badge { color: #4caf50; font-size: 0.75rem; font-weight: bold; }
+    .setup-step .btn { white-space: nowrap; flex-shrink: 0; }
   `;
 
   async firstUpdated() {

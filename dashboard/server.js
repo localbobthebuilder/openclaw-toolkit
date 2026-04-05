@@ -93,7 +93,17 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     const data = JSON.parse(message);
     if (data.type === 'run-command') {
-      // ... existing code ...
+      const { command, args = [] } = data;
+      console.log(`Running command: ${command} ${args.join(' ')}`);
+      const child = spawn('cmd.exe', [
+        '/c',
+        path.join(toolkitDir, 'run-openclaw.cmd'),
+        command,
+        ...args
+      ]);
+      child.stdout.on('data', (d) => ws.send(JSON.stringify({ type: 'stdout', data: d.toString() })));
+      child.stderr.on('data', (d) => ws.send(JSON.stringify({ type: 'stderr', data: d.toString() })));
+      child.on('close', (code) => ws.send(JSON.stringify({ type: 'exit', code })));
     } else if (data.type === 'reboot-service') {
       const { service } = data;
       console.log(`Rebooting service: ${service}`);
