@@ -3,12 +3,16 @@ import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const port = 18791;
-const toolkitDir = 'D:\\openclaw\\openclaw-toolkit';
+const toolkitDir = path.resolve(__dirname, '..');
 const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
 
 app.use(cors());

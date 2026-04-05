@@ -2012,18 +2012,18 @@ Write-Host "Bootstrap complete." -ForegroundColor Green
 Write-Host "Private dashboard: $(tailscale serve status | Select-Object -First 1)"
 Write-Host ""
 Write-Host "Recommended next commands:" -ForegroundColor Cyan
-Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd help"
-Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd start"
-Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd update"
-Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard"
-Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd status"
+Write-Host "  .\run-openclaw.cmd help"
+Write-Host "  .\run-openclaw.cmd start"
+Write-Host "  .\run-openclaw.cmd update"
+Write-Host "  .\run-openclaw.cmd dashboard"
+Write-Host "  .\run-openclaw.cmd status"
 if ($config.PSObject.Properties.Name -contains "watchdog" -and -not $config.watchdog.installScheduledTask) {
-    Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd install-watchdog" -ForegroundColor DarkGray
+    Write-Host "  .\run-openclaw.cmd install-watchdog" -ForegroundColor DarkGray
 }
 if ($config.multiAgent -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
     $authReadyProviders = Get-AuthReadyHostedProviders
     if ("google" -notin @($authReadyProviders)) {
-        Write-Host "  D:\openclaw\openclaw-toolkit\run-openclaw.cmd gemini-auth" -ForegroundColor Yellow
+        Write-Host "  .\run-openclaw.cmd gemini-auth" -ForegroundColor Yellow
         Write-WarnLine "Gemini is configured as an optional hosted provider, but OpenClaw is not authenticated with Gemini yet."
     }
 }
