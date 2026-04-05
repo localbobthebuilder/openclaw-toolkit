@@ -87,6 +87,7 @@ export class ToolkitDashboard extends LitElement {
     window.onerror = (msg) => { this.logs = [...this.logs, `ERR: ${msg}`]; this.requestUpdate(); };
     window.onunhandledrejection = (event) => { this.logs = [...this.logs, `REJ: ${event.reason}`]; this.requestUpdate(); };
     await this.fetchConfig();
+    await new Promise(r => setTimeout(r, 1000));
     await this.fetchStatus();
     this.connectWS();
   }
