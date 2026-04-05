@@ -16,6 +16,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private showModelSelector: boolean = false;
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate'
   private ws: WebSocket | null = null;
+  private statusAbortController: AbortController | null = null;
 
   // Helper for API URL construction
   private getBaseUrl() {
@@ -86,10 +87,26 @@ export class ToolkitDashboard extends LitElement {
   async firstUpdated() {
     window.onerror = (msg) => { this.logs = [...this.logs, `ERR: ${msg}`]; this.requestUpdate(); };
     window.onunhandledrejection = (event) => { this.logs = [...this.logs, `REJ: ${event.reason}`]; this.requestUpdate(); };
-    await this.fetchConfig();
-    await new Promise(r => setTimeout(r, 1000));
-    await this.fetchStatus();
-    this.connectWS();
+    
+    // Wait for server to be responsive
+    let ready = false;
+    for (let i = 0; i < 5; i++) {
+        try {
+            await fetch(this.getBaseUrl() + '/api/config');
+            ready = true;
+            break;
+        } catch (e) {
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+
+    if (ready) {
+        await this.fetchConfig();
+        await this.fetchStatus();
+        this.connectWS();
+    } else {
+        console.error('Server failed to initialize after multiple attempts');
+    }
   }
 
   async fetchConfig() {
@@ -104,12 +121,22 @@ export class ToolkitDashboard extends LitElement {
   }
 
   async fetchStatus() {
+    if (this.statusAbortController) {
+      this.statusAbortController.abort();
+    }
+    this.statusAbortController = new AbortController();
+
     try {
-      const res = await fetch(this.getBaseUrl() + '/api/status');
+      const res = await fetch(this.getBaseUrl() + '/api/status', {
+        signal: this.statusAbortController.signal
+      });
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
       this.statusOutput = data.output;
-    } catch (err) {
-      console.error('Failed to fetch status', err);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('Failed to fetch status', err);
+      }
     }
   }
 
@@ -270,7 +297,7 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <header>
         <h2>System Health Dashboard</h2>
-        <button class="btn btn-secondary" @click=${this.fetchStatus}>Refresh Monitoring</button>
+        <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Monitoring</button>
       </header>
       
       ${sections.length > 0 ? html`
