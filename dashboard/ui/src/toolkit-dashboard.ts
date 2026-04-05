@@ -7,6 +7,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private config: any = null;
   @state() private savedConfig: any = null;
   @state() private statusOutput: string = '';
+  @state() private statusLoaded: boolean = false;
   @state() private logs: string[] = [];
   @state() private isRunning: boolean = false;
   @state() private activeTab: string = 'status';
@@ -141,6 +142,7 @@ export class ToolkitDashboard extends LitElement {
       this.statusAbortController.abort();
     }
     this.statusAbortController = new AbortController();
+    this.statusLoaded = false;
 
     try {
       const res = await fetch(this.getBaseUrl() + '/api/status', {
@@ -149,6 +151,7 @@ export class ToolkitDashboard extends LitElement {
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
       this.statusOutput = data.output;
+      this.statusLoaded = true;
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         console.error('Failed to fetch status', err);
@@ -338,7 +341,9 @@ export class ToolkitDashboard extends LitElement {
         <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>↻ Refresh</button>
       </header>
 
-      ${isNewInstall ? html`
+      ${!this.statusLoaded ? html`
+        <div class="card" style="color: #888;">⏳ Loading status...</div>
+      ` : isNewInstall ? html`
         <div class="setup-guide">
           <h2>🚀 Let's get you set up</h2>
           <p class="subtitle">Some required software is not installed. Follow these steps to get OpenClaw running.</p>
@@ -419,11 +424,7 @@ export class ToolkitDashboard extends LitElement {
                 ${this.statusOutput}
             </div>
           </div>
-      ` : this.statusOutput ? '' : html`
-          <div class="card">
-            <p style="color: #888;">Waiting for status report...</p>
-          </div>
-      `}
+      ` : ''}
     `;
   }
 
