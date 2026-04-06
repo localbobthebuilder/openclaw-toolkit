@@ -1054,7 +1054,7 @@ function Resolve-OllamaModelRef {
         }
     }
 
-    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+    foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $EndpointKey)) {
         if ($model.id) {
             $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $EndpointKey
             if ($candidate -in $availableRefs) {
@@ -1174,7 +1174,7 @@ function Get-PreferredLocalFallbackRef {
 
     $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
     $defaultEndpointKey = if ($null -ne $defaultEndpoint) { [string]$defaultEndpoint.key } else { "local" }
-    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+    foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $defaultEndpointKey)) {
         if (-not $model.id) {
             continue
         }

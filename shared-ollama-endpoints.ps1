@@ -1,3 +1,26 @@
+function Normalize-ToolkitOllamaModelEntries {
+    param($Entries)
+
+    $normalized = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($Entries)) {
+        if ($entry -and $entry.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$entry.id)) {
+            $normalized.Add($entry)
+        }
+    }
+
+    return $normalized.ToArray()
+}
+
+function Get-ToolkitLegacyLocalModelCatalog {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.ollama -and $Config.ollama.models) {
+        return @(Normalize-ToolkitOllamaModelEntries -Entries $Config.ollama.models)
+    }
+
+    return @()
+}
+
 function Get-ToolkitOllamaEndpoints {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -7,12 +30,12 @@ function Get-ToolkitOllamaEndpoints {
     }
     elseif ($Config.ollama -and $Config.ollama.enabled) {
         $legacy = [ordered]@{
-            key      = "local"
+            key        = "local"
             providerId = "ollama"
-            baseUrl  = if ($Config.ollama.baseUrl) { [string]$Config.ollama.baseUrl } else { "http://127.0.0.1:11434" }
-            apiKey   = if ($Config.ollama.apiKey) { [string]$Config.ollama.apiKey } else { "ollama-local" }
-            default  = $true
-            telemetry = [ordered]@{
+            baseUrl    = if ($Config.ollama.baseUrl) { [string]$Config.ollama.baseUrl } else { "http://127.0.0.1:11434" }
+            apiKey     = if ($Config.ollama.apiKey) { [string]$Config.ollama.apiKey } else { "ollama-local" }
+            default    = $true
+            telemetry  = [ordered]@{
                 kind = "local-nvidia-smi"
             }
         }
@@ -38,10 +61,10 @@ function Get-ToolkitOllamaEndpoints {
         }
 
         $item = [ordered]@{
-            key        = $key
-            providerId = $providerId
-            baseUrl    = if ($endpoint.baseUrl) { [string]$endpoint.baseUrl } else { "http://127.0.0.1:11434" }
-            hostBaseUrl = if ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) {
+            key               = $key
+            providerId        = $providerId
+            baseUrl           = if ($endpoint.baseUrl) { [string]$endpoint.baseUrl } else { "http://127.0.0.1:11434" }
+            hostBaseUrl       = if ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) {
                 [string]$endpoint.hostBaseUrl
             }
             elseif ($endpoint.baseUrl) {
@@ -50,8 +73,28 @@ function Get-ToolkitOllamaEndpoints {
             else {
                 "http://127.0.0.1:11434"
             }
-            apiKey     = if ($endpoint.apiKey) { [string]$endpoint.apiKey } else { "ollama-$key" }
-            default    = [bool]($endpoint.PSObject.Properties.Name -contains "default" -and $endpoint.default)
+            apiKey            = if ($endpoint.apiKey) { [string]$endpoint.apiKey } else { "ollama-$key" }
+            default           = [bool]($endpoint.PSObject.Properties.Name -contains "default" -and $endpoint.default)
+            usesEndpointModels = [bool]($endpoint.PSObject.Properties.Name -contains "models")
+            models            = @(
+                if ($endpoint.PSObject.Properties.Name -contains "models" -and $endpoint.models) {
+                    Normalize-ToolkitOllamaModelEntries -Entries $endpoint.models
+                }
+            )
+            legacyDesiredModelIds = @(
+                if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds" -and $endpoint.desiredModelIds) {
+                    foreach ($modelId in @($endpoint.desiredModelIds)) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$modelId)) {
+                            [string]$modelId
+                        }
+                    }
+                }
+            )
+            legacyModelOverrides = @(
+                if ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $endpoint.modelOverrides) {
+                    Normalize-ToolkitOllamaModelEntries -Entries $endpoint.modelOverrides
+                }
+            )
         }
 
         if ($endpoint.PSObject.Properties.Name -contains "telemetry" -and $endpoint.telemetry) {
@@ -63,32 +106,6 @@ function Get-ToolkitOllamaEndpoints {
         }
         else {
             $item.autoPullMissingModels = $true
-        }
-
-        if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds" -and $endpoint.desiredModelIds) {
-            $item.desiredModelIds = @(
-                foreach ($modelId in @($endpoint.desiredModelIds)) {
-                    if (-not [string]::IsNullOrWhiteSpace([string]$modelId)) {
-                        [string]$modelId
-                    }
-                }
-            )
-        }
-        else {
-            $item.desiredModelIds = @()
-        }
-
-        if ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $endpoint.modelOverrides) {
-            $item.modelOverrides = @(
-                foreach ($override in @($endpoint.modelOverrides)) {
-                    if ($override -and $override.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$override.id)) {
-                        $override
-                    }
-                }
-            )
-        }
-        else {
-            $item.modelOverrides = @()
         }
 
         if ($item.default) {
@@ -218,50 +235,6 @@ function Test-IsToolkitLocalModelRef {
     return $providerId -in @(Get-ToolkitOllamaProviderIds -Config $Config)
 }
 
-function Get-ToolkitLocalModelCatalog {
-    param([Parameter(Mandatory = $true)]$Config)
-
-    if ($Config.ollama -and $Config.ollama.models) {
-        return @($Config.ollama.models)
-    }
-
-    return @()
-}
-
-function Get-ToolkitEndpointModelOverrideCatalog {
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [string]$EndpointKey
-    )
-
-    $endpoint = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey $EndpointKey
-    if ($null -eq $endpoint) {
-        return @()
-    }
-
-    if ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $endpoint.modelOverrides) {
-        return @($endpoint.modelOverrides)
-    }
-
-    return @()
-}
-
-function Get-ToolkitEndpointModelOverrideEntry {
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string]$ModelId,
-        [string]$EndpointKey
-    )
-
-    foreach ($entry in @(Get-ToolkitEndpointModelOverrideCatalog -Config $Config -EndpointKey $EndpointKey)) {
-        if ($entry -and [string]$entry.id -eq $ModelId) {
-            return $entry
-        }
-    }
-
-    return $null
-}
-
 function Get-AgentOllamaEndpointKey {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -309,13 +282,128 @@ function Merge-ToolkitConfigObjects {
     return [pscustomobject]$merged
 }
 
+function Get-ToolkitEndpointDesiredModelIds {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$EndpointKey
+    )
+
+    $endpoint = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey $EndpointKey
+    if ($null -eq $endpoint) {
+        return @()
+    }
+
+    if ($endpoint.usesEndpointModels) {
+        return @(
+            foreach ($model in @($endpoint.models)) {
+                if ($model -and $model.id) {
+                    [string]$model.id
+                }
+            }
+        )
+    }
+
+    return @($endpoint.legacyDesiredModelIds)
+}
+
+function Get-ToolkitEndpointModelCatalog {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$EndpointKey
+    )
+
+    $endpoint = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey $EndpointKey
+    if ($null -eq $endpoint) {
+        return @()
+    }
+
+    if ($endpoint.usesEndpointModels) {
+        return @($endpoint.models)
+    }
+
+    $legacyCatalog = @(Get-ToolkitLegacyLocalModelCatalog -Config $Config)
+    $requestedIds = New-Object System.Collections.Generic.List[string]
+    foreach ($modelId in @($endpoint.legacyDesiredModelIds)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$modelId) -and [string]$modelId -notin @($requestedIds)) {
+            $requestedIds.Add([string]$modelId)
+        }
+    }
+    foreach ($override in @($endpoint.legacyModelOverrides)) {
+        if ($override -and $override.id -and [string]$override.id -notin @($requestedIds)) {
+            $requestedIds.Add([string]$override.id)
+        }
+    }
+    if ($requestedIds.Count -eq 0) {
+        foreach ($legacyModel in @($legacyCatalog)) {
+            if ($legacyModel -and $legacyModel.id -and [string]$legacyModel.id -notin @($requestedIds)) {
+                $requestedIds.Add([string]$legacyModel.id)
+            }
+        }
+    }
+
+    $effectiveCatalog = New-Object System.Collections.Generic.List[object]
+    foreach ($modelId in @($requestedIds)) {
+        $baseEntry = $null
+        foreach ($entry in @($legacyCatalog)) {
+            if ($entry -and [string]$entry.id -eq $modelId) {
+                $baseEntry = $entry
+                break
+            }
+        }
+
+        $overrideEntry = $null
+        foreach ($entry in @($endpoint.legacyModelOverrides)) {
+            if ($entry -and [string]$entry.id -eq $modelId) {
+                $overrideEntry = $entry
+                break
+            }
+        }
+
+        $effectiveEntry = Merge-ToolkitConfigObjects -BaseObject $baseEntry -OverrideObject $overrideEntry
+        if ($null -ne $effectiveEntry) {
+            $effectiveCatalog.Add($effectiveEntry)
+        }
+    }
+
+    return $effectiveCatalog.ToArray()
+}
+
+function Get-ToolkitLocalModelCatalog {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $catalog = New-Object System.Collections.Generic.List[object]
+    $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        foreach ($entry in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey ([string]$endpoint.key))) {
+            if ($entry -and $entry.id -and $seenIds.Add([string]$entry.id)) {
+                $catalog.Add($entry)
+            }
+        }
+    }
+
+    if ($catalog.Count -gt 0) {
+        return $catalog.ToArray()
+    }
+
+    return @(Get-ToolkitLegacyLocalModelCatalog -Config $Config)
+}
+
 function Get-ToolkitLocalModelEntry {
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string]$ModelId
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [string]$EndpointKey
     )
 
-    foreach ($entry in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+    $catalog = if ([string]::IsNullOrWhiteSpace($EndpointKey)) {
+        @(Get-ToolkitLocalModelCatalog -Config $Config)
+    }
+    else {
+        @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $EndpointKey)
+    }
+
+    foreach ($entry in $catalog) {
         if ($entry -and [string]$entry.id -eq $ModelId) {
             return $entry
         }
@@ -331,18 +419,12 @@ function Get-ToolkitEffectiveLocalModelEntry {
         [string]$EndpointKey
     )
 
-    $baseEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId
-    $overrideEntry = Get-ToolkitEndpointModelOverrideEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
-
-    if ($null -eq $baseEntry -and $null -eq $overrideEntry) {
-        return $null
-    }
-    if ($null -eq $baseEntry) {
-        return $overrideEntry
-    }
-    if ($null -eq $overrideEntry) {
-        return $baseEntry
+    if (-not [string]::IsNullOrWhiteSpace($EndpointKey)) {
+        $endpointEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
+        if ($null -ne $endpointEntry) {
+            return $endpointEntry
+        }
     }
 
-    return (Merge-ToolkitConfigObjects -BaseObject $baseEntry -OverrideObject $overrideEntry)
+    return (Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId)
 }

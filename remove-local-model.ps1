@@ -16,6 +16,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-Step {
     param([string]$Message)
@@ -72,7 +73,7 @@ function Get-LocalModelIds {
     param($Config)
 
     return @(
-        foreach ($entry in @($Config.ollama.models)) {
+        foreach ($entry in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
             if ($entry -and $entry.id) {
                 [string]$entry.id
             }
@@ -126,56 +127,66 @@ function Remove-ModelEntry {
         [Parameter(Mandatory = $true)][string]$ModelId
     )
 
-    $removed = $false
-    $remaining = @(
-        foreach ($entry in @($Config.ollama.models)) {
-            if ($entry -and [string]$entry.id -eq $ModelId) {
-                $removed = $true
-            }
-            else {
-                $entry
-            }
-        }
-    )
-
-    $Config.ollama.models = $remaining
-    return $removed
-}
-
-function Remove-EndpointModelState {
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string]$ModelId
-    )
-
     $changed = New-Object System.Collections.Generic.List[string]
+    if ($Config.ollama -and $Config.ollama.PSObject.Properties.Name -contains "models") {
+        $remaining = @(
+            foreach ($entry in @($Config.ollama.models)) {
+                if ($entry -and [string]$entry.id -ne $ModelId) {
+                    $entry
+                }
+            }
+        )
+        if (@($remaining).Count -ne @($Config.ollama.models).Count) {
+            $Config.ollama.models = $remaining
+            $changed.Add("ollama.models")
+        }
+    }
+
     foreach ($endpoint in @($Config.ollama.endpoints)) {
         if ($null -eq $endpoint) {
             continue
         }
 
-        $newDesiredIds = @(
-            foreach ($desiredId in @($endpoint.desiredModelIds)) {
-                if ([string]$desiredId -ne $ModelId) {
-                    [string]$desiredId
+        if ($endpoint.PSObject.Properties.Name -contains "models") {
+            $newModels = @(
+                foreach ($entry in @($endpoint.models)) {
+                    if ($entry -and [string]$entry.id -ne $ModelId) {
+                        $entry
+                    }
                 }
+            )
+            if (@($newModels).Count -ne @($endpoint.models).Count) {
+                $endpoint.models = $newModels
+                $changed.Add("$([string]$endpoint.key).models")
             }
-        )
-        if (@($newDesiredIds).Count -ne @($endpoint.desiredModelIds).Count) {
-            $endpoint.desiredModelIds = $newDesiredIds
-            $changed.Add("$([string]$endpoint.key).desiredModelIds")
         }
 
-        $newOverrides = @(
-            foreach ($override in @($endpoint.modelOverrides)) {
-                if ($override -and [string]$override.id -ne $ModelId) {
-                    $override
+        if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds") {
+            $newDesiredIds = @(
+                foreach ($desiredId in @($endpoint.desiredModelIds)) {
+                    if ([string]$desiredId -ne $ModelId) {
+                        [string]$desiredId
+                    }
                 }
+            )
+            if (@($newDesiredIds).Count -ne @($endpoint.desiredModelIds).Count) {
+                $endpoint.desiredModelIds = $newDesiredIds
+                $changed.Add("$([string]$endpoint.key).desiredModelIds")
             }
-        )
-        if (@($newOverrides).Count -ne @($endpoint.modelOverrides).Count) {
-            $endpoint.modelOverrides = $newOverrides
-            $changed.Add("$([string]$endpoint.key).modelOverrides")
+        }
+
+        if ($endpoint.PSObject.Properties.Name -contains "modelOverrides") {
+            $newOverrides = @(
+                foreach ($override in @($endpoint.modelOverrides)) {
+                    if ($override -and [string]$override.id -ne $ModelId) {
+                        $override
+                    }
+                }
+            )
+            if (@($newOverrides).Count -ne @($endpoint.modelOverrides).Count) {
+                $endpoint.modelOverrides = $newOverrides
+                $changed.Add("$([string]$endpoint.key).modelOverrides")
+            }
         }
     }
 
@@ -249,7 +260,7 @@ if ($ReplaceWith) {
         throw "-ReplaceWith cannot be the same model as -Model."
     }
     if ($ReplaceWith -notin $currentIds) {
-        throw "Replacement model '$ReplaceWith' is not present in the managed ollama.models list."
+        throw "Replacement model '$ReplaceWith' is not present in the managed endpoint model list."
     }
     $replacementId = $ReplaceWith
 }
@@ -265,11 +276,10 @@ if ($ReplaceWith -and -not $isManagedModel) {
 if ($isManagedModel) {
     Write-Step "Removing $Model from managed bootstrap config"
     if ($PSCmdlet.ShouldProcess($ConfigPath, "remove managed model $Model")) {
-        $removed = Remove-ModelEntry -Config $config -ModelId $Model
-        if (-not $removed) {
-            throw "Failed to remove '$Model' from managed ollama.models."
+        $endpointStateChanges = @(Remove-ModelEntry -Config $config -ModelId $Model)
+        if ($endpointStateChanges.Count -eq 0) {
+            throw "Failed to remove '$Model' from the managed bootstrap config."
         }
-        $endpointStateChanges = @(Remove-EndpointModelState -Config $config -ModelId $Model)
 
         $remainingIds = @(Get-LocalModelIds -Config $config)
         if (-not $replacementId -and $remainingIds.Count -gt 0) {

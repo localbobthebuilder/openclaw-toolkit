@@ -333,71 +333,61 @@ function Set-AgentLocalModel {
     return $true
 }
 
-function New-LocalModelEntry {
+function New-ManagedEndpointModelEntry {
     param(
+        $ExistingEntry,
         [Parameter(Mandatory = $true)][string]$ModelId,
         [Parameter(Mandatory = $true)][string]$DisplayName,
-        [Parameter(Mandatory = $true)][int]$ContextWindow,
-        [Parameter(Mandatory = $true)][int]$MaxTokensValue,
         [string[]]$Inputs = @("text"),
         [switch]$ReasoningModel,
+        [Parameter(Mandatory = $true)][int]$ContextWindow,
+        [Parameter(Mandatory = $true)][int]$MaxTokensValue,
         [int]$MinimumContextWindowValue = 24576,
         [string]$FallbackModelId
     )
 
-    $entry = [ordered]@{
-        id                   = $ModelId
-        name                 = $DisplayName
-        input                = @($Inputs)
-        cost                 = [ordered]@{
-            input      = 0
-            output     = 0
-            cacheRead  = 0
-            cacheWrite = 0
+    $entry = [ordered]@{}
+    if ($null -ne $ExistingEntry) {
+        foreach ($property in $ExistingEntry.PSObject.Properties) {
+            $entry[$property.Name] = $property.Value
         }
-        minimumContextWindow = $MinimumContextWindowValue
-        contextWindow        = $ContextWindow
-        maxTokens            = $MaxTokensValue
     }
+
+    $entry.id = $ModelId
+    $entry.name = $DisplayName
+    $entry.input = @($Inputs)
+    $entry.cost = [ordered]@{
+        input      = 0
+        output     = 0
+        cacheRead  = 0
+        cacheWrite = 0
+    }
+    $entry.minimumContextWindow = $MinimumContextWindowValue
+    $entry.contextWindow = $ContextWindow
+    $entry.maxTokens = $MaxTokensValue
 
     if ($ReasoningModel) {
         $entry.reasoning = $true
     }
-    if (-not [string]::IsNullOrWhiteSpace($FallbackModelId)) {
-        $entry.fallbackModelId = $FallbackModelId
-    }
-
-    return [pscustomobject]$entry
-}
-
-function New-EndpointModelOverrideEntry {
-    param(
-        [Parameter(Mandatory = $true)][string]$ModelId,
-        [Parameter(Mandatory = $true)][int]$ContextWindow,
-        [Parameter(Mandatory = $true)][int]$MaxTokensValue,
-        [int]$MinimumContextWindowValue = 24576,
-        [string]$FallbackModelId
-    )
-
-    $entry = [ordered]@{
-        id                   = $ModelId
-        minimumContextWindow = $MinimumContextWindowValue
-        contextWindow        = $ContextWindow
-        maxTokens            = $MaxTokensValue
+    elseif ($entry.Contains("reasoning")) {
+        $entry.Remove("reasoning")
     }
 
     if (-not [string]::IsNullOrWhiteSpace($FallbackModelId)) {
         $entry.fallbackModelId = $FallbackModelId
     }
+    elseif ($entry.Contains("fallbackModelId")) {
+        $entry.Remove("fallbackModelId")
+    }
 
     return [pscustomobject]$entry
 }
 
-function Set-EndpointModelOverride {
+function Set-EndpointModelEntry {
     param(
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)][string]$EndpointKey,
-        [Parameter(Mandatory = $true)]$OverrideEntry
+        [Parameter(Mandatory = $true)]$ModelEntry
     )
 
     foreach ($endpoint in @($Config.ollama.endpoints)) {
@@ -405,30 +395,36 @@ function Set-EndpointModelOverride {
             continue
         }
 
-        if (-not ($endpoint.PSObject.Properties.Name -contains "modelOverrides")) {
-            $endpoint | Add-Member -NotePropertyName modelOverrides -NotePropertyValue @()
+        if (-not ($endpoint.PSObject.Properties.Name -contains "models")) {
+            $endpoint | Add-Member -NotePropertyName models -NotePropertyValue @()
         }
 
-        $overrides = New-Object System.Collections.Generic.List[object]
+        $models = New-Object System.Collections.Generic.List[object]
         $replaced = $false
-        foreach ($existingOverride in @($endpoint.modelOverrides)) {
-            if ($existingOverride -and [string]$existingOverride.id -eq [string]$OverrideEntry.id) {
-                $overrides.Add($OverrideEntry)
+        foreach ($existingModel in @($endpoint.models)) {
+            if ($existingModel -and [string]$existingModel.id -eq [string]$ModelEntry.id) {
+                $models.Add($ModelEntry)
                 $replaced = $true
             }
-            elseif ($existingOverride) {
-                $overrides.Add($existingOverride)
+            elseif ($existingModel) {
+                $models.Add($existingModel)
             }
         }
         if (-not $replaced) {
-            $overrides.Add($OverrideEntry)
+            $models.Add($ModelEntry)
         }
 
-        $endpoint.modelOverrides = $overrides.ToArray()
+        $endpoint.models = $models.ToArray()
+        if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds") {
+            $null = $endpoint.PSObject.Properties.Remove("desiredModelIds")
+        }
+        if ($endpoint.PSObject.Properties.Name -contains "modelOverrides") {
+            $null = $endpoint.PSObject.Properties.Remove("modelOverrides")
+        }
         return
     }
 
-    throw "Could not find endpoint '$EndpointKey' while writing model override."
+    throw "Could not find endpoint '$EndpointKey' while writing model entry."
 }
 
 function Resolve-ConfiguredFallbackModelId {
@@ -497,7 +493,7 @@ function Resolve-ModelPlan {
     if ($rawMiB -gt $rawLimitMiB) {
         if ($FallbackModelId) {
             Write-Warning "Skipping $ModelId on endpoint '$($Endpoint.key)': raw size ${rawMiB}MiB exceeds 70% VRAM threshold (${rawLimitMiB}MiB). Falling back to $FallbackModelId."
-            return (Resolve-ModelPlan -Config $Config -Endpoint $Endpoint -ModelId $FallbackModelId -DisplayName $DisplayName -FallbackModelId (Resolve-ConfiguredFallbackModelId -Config $Config -ModelId $FallbackModelId) -AlreadyInstalled:$false -Visited $Visited)
+            return (Resolve-ModelPlan -Config $Config -Endpoint $Endpoint -ModelId $FallbackModelId -DisplayName $DisplayName -FallbackModelId (Resolve-ConfiguredFallbackModelId -Config $Config -EndpointKey $Endpoint.key -ModelId $FallbackModelId) -AlreadyInstalled:$false -Visited $Visited)
         }
 
         throw "Model '$ModelId' raw size ${rawMiB}MiB exceeds 70% of endpoint GPU VRAM (${rawLimitMiB}MiB). Configure a smaller fallback model."
@@ -589,69 +585,11 @@ if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumCont
     throw "Model '$($plan.ModelId)' only fit with contextWindow=$selectedContextWindow, which is below the minimum useful threshold of $MinimumContextWindow."
 }
 
-$newEntry = New-LocalModelEntry -ModelId $plan.ModelId -DisplayName $plan.DisplayName -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -Inputs $InputKinds -ReasoningModel:$Reasoning -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
-$endpointOverride = New-EndpointModelOverrideEntry -ModelId $plan.ModelId -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
+$existingEntry = Get-ToolkitEffectiveLocalModelEntry -Config $config -ModelId $plan.ModelId -EndpointKey $endpoint.key
+$newEntry = New-ManagedEndpointModelEntry -ExistingEntry $existingEntry -ModelId $plan.ModelId -DisplayName $plan.DisplayName -Inputs $InputKinds -ReasoningModel:$Reasoning -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
 
 Write-Step "Updating bootstrap config"
-$newModels = New-Object System.Collections.Generic.List[object]
-$replaced = $false
-foreach ($existingModel in @($config.ollama.models)) {
-    if ([string]$existingModel.id -eq $plan.ModelId) {
-        $mergedExisting = [ordered]@{}
-        foreach ($property in $existingModel.PSObject.Properties) {
-            $mergedExisting[$property.Name] = $property.Value
-        }
-        $mergedExisting.name = $plan.DisplayName
-        $mergedExisting.input = @($InputKinds)
-        $mergedExisting.cost = [ordered]@{
-            input      = 0
-            output     = 0
-            cacheRead  = 0
-            cacheWrite = 0
-        }
-        $mergedExisting.minimumContextWindow = $MinimumContextWindow
-        if ($Reasoning) {
-            $mergedExisting.reasoning = $true
-        }
-        elseif ($mergedExisting.Contains("reasoning")) {
-            $mergedExisting.Remove("reasoning")
-        }
-        if (-not [string]::IsNullOrWhiteSpace($fallbackModelId)) {
-            $mergedExisting.fallbackModelId = $fallbackModelId
-        }
-        elseif ($mergedExisting.Contains("fallbackModelId")) {
-            $mergedExisting.Remove("fallbackModelId")
-        }
-        $newModels.Add([pscustomobject]$mergedExisting)
-        $replaced = $true
-    }
-    else {
-        $newModels.Add($existingModel)
-    }
-}
-if (-not $replaced) {
-    $catalogEntry = [ordered]@{
-        id                   = $plan.ModelId
-        name                 = $plan.DisplayName
-        input                = @($InputKinds)
-        cost                 = [ordered]@{
-            input      = 0
-            output     = 0
-            cacheRead  = 0
-            cacheWrite = 0
-        }
-        minimumContextWindow = $MinimumContextWindow
-    }
-    if ($Reasoning) {
-        $catalogEntry.reasoning = $true
-    }
-    if (-not [string]::IsNullOrWhiteSpace($fallbackModelId)) {
-        $catalogEntry.fallbackModelId = $fallbackModelId
-    }
-    $newModels.Add([pscustomobject]$catalogEntry)
-}
-$config.ollama.models = $newModels.ToArray()
-Set-EndpointModelOverride -Config $config -EndpointKey $endpoint.key -OverrideEntry $endpointOverride
+Set-EndpointModelEntry -Config $config -EndpointKey $endpoint.key -ModelEntry $newEntry
 
 $assigned = $false
 if ($AssignTo) {
@@ -661,7 +599,7 @@ if ($AssignTo) {
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 
-Write-Host "Updated bootstrap config for $($endpoint.providerId)/$($plan.ModelId) with endpoint override contextWindow=$selectedContextWindow and maxTokens=$MaxTokens." -ForegroundColor Green
+Write-Host "Updated bootstrap config for $($endpoint.providerId)/$($plan.ModelId) with contextWindow=$selectedContextWindow and maxTokens=$MaxTokens." -ForegroundColor Green
 if ($assigned) {
     Write-Host "Assigned $($endpoint.providerId)/$($plan.ModelId) to agent $AssignTo on endpoint $($endpoint.key)." -ForegroundColor Green
 }

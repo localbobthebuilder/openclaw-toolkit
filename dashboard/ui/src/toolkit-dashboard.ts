@@ -15,7 +15,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private editingAgentKey: string | null = null;
   @state() private editingEndpointKey: string | null = null;
   @state() private showModelSelector: boolean = false;
-  @state() private selectorTarget: string | null = null; // 'tune' or 'candidate'
+  @state() private selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   private ws: WebSocket | null = null;
   private statusAbortController: AbortController | null = null;
 
@@ -609,6 +609,102 @@ export class ToolkitDashboard extends LitElement {
     `;
   }
 
+  getEndpointModels(endpoint: any) {
+    if (Array.isArray(endpoint?.models)) {
+      return endpoint.models;
+    }
+    if (Array.isArray(endpoint?.modelOverrides)) {
+      return endpoint.modelOverrides;
+    }
+    return [];
+  }
+
+  getEndpointHostedModels(endpoint: any) {
+    if (Array.isArray(endpoint?.hostedModels)) {
+      return endpoint.hostedModels;
+    }
+    return [];
+  }
+
+  isHostedCatalogModel(model: any) {
+    return typeof model?.modelRef === 'string' && model.modelRef.includes('/');
+  }
+
+  isLocalCatalogModel(model: any) {
+    return typeof model?.id === 'string' && model.id.length > 0;
+  }
+
+  cloneModelCatalogEntry(model: any) {
+    return JSON.parse(JSON.stringify(model));
+  }
+
+  getSharedModelCatalog() {
+    if (Array.isArray(this.config?.ollama?.models)) {
+      return this.config.ollama.models;
+    }
+    return [];
+  }
+
+  getKnownLocalModelCatalog() {
+    const models: any[] = [];
+    const seen = new Set<string>();
+
+    for (const model of this.getSharedModelCatalog()) {
+      if (this.isLocalCatalogModel(model) && !seen.has(model.id)) {
+        seen.add(model.id);
+        models.push(model);
+      }
+    }
+
+    for (const endpoint of this.config?.ollama?.endpoints || []) {
+      for (const model of this.getEndpointModels(endpoint)) {
+        if (this.isLocalCatalogModel(model) && !seen.has(model.id)) {
+          seen.add(model.id);
+          models.push(model);
+        }
+      }
+    }
+
+    return models;
+  }
+
+  getKnownHostedModelCatalog() {
+    const models: any[] = [];
+    const seen = new Set<string>();
+
+    for (const model of this.getSharedModelCatalog()) {
+      if (this.isHostedCatalogModel(model) && !seen.has(model.modelRef)) {
+        seen.add(model.modelRef);
+        models.push(model);
+      }
+    }
+
+    for (const endpoint of this.config?.ollama?.endpoints || []) {
+      for (const model of this.getEndpointHostedModels(endpoint)) {
+        if (this.isHostedCatalogModel(model) && !seen.has(model.modelRef)) {
+          seen.add(model.modelRef);
+          models.push(model);
+        }
+      }
+    }
+
+    return models;
+  }
+
+  ensureSharedModelCatalog() {
+    if (!Array.isArray(this.config?.ollama?.models)) {
+      this.config.ollama.models = [
+        ...this.getKnownLocalModelCatalog().map((model: any) => this.cloneModelCatalogEntry(model)),
+        ...this.getKnownHostedModelCatalog().map((model: any) => this.cloneModelCatalogEntry(model))
+      ];
+    }
+    return this.config.ollama.models;
+  }
+
+  getOllamaModelCatalog() {
+    return this.getKnownLocalModelCatalog();
+  }
+
   renderEndpointsConfig() {
     if (this.editingEndpointKey) {
         return this.renderEndpointEditor(this.editingEndpointKey);
@@ -625,7 +721,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${ep.key}</span>
-              <span class="item-sub">${ep.hostBaseUrl} | ${ep.modelOverrides?.length || 0} tuned models</span>
+              <span class="item-sub">${ep.hostBaseUrl} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure & Tune Models</button>
@@ -640,6 +736,8 @@ export class ToolkitDashboard extends LitElement {
   renderEndpointEditor(key: string) {
       const ep = this.config.ollama.endpoints.find((e: any) => e.key === key);
       if (!ep) return html`Endpoint not found`;
+      const endpointModels = this.getEndpointModels(ep);
+      const endpointHostedModels = this.getEndpointHostedModels(ep);
 
       return html`
         <div class="card">
@@ -659,10 +757,10 @@ export class ToolkitDashboard extends LitElement {
                 </div>
             </div>
 
-            <h4 style="color: #666; margin-top: 20px;">Hardware-Tuned Models (Overrides)</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These models are fine-tuned for this machine's VRAM.</p>
-            
-            ${(ep.modelOverrides || []).map((mo: any, idx: number) => html`
+            <h4 style="color: #666; margin-top: 20px;">Endpoint Models</h4>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this endpoint. Bootstrap will pull them when they fit the machine.</p>
+             
+            ${endpointModels.map((mo: any, idx: number) => html`
                 <div class="item-row">
                     <div class="item-info">
                         <span class="item-title">${mo.id}</span>
@@ -670,32 +768,54 @@ export class ToolkitDashboard extends LitElement {
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
-                        <button class="btn btn-danger" @click=${() => { ep.modelOverrides.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                        <button class="btn btn-danger" @click=${() => { endpointModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
                     </div>
                 </div>
             `)}
 
             <div style="margin-top: 20px;">
-                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Tune New Model from Catalog</button>
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Add Local Model from Catalog</button>
+            </div>
+
+            <h4 style="color: #666; margin-top: 24px;">Hosted Models</h4>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models for this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs.</p>
+
+            ${endpointHostedModels.map((model: any, idx: number) => html`
+                <div class="item-row">
+                    <div class="item-info">
+                        <span class="item-title">${model.name || model.modelRef}</span>
+                        <span class="item-sub">${model.modelRef}${model.fallbackModelId ? ` | Local fallback: ollama/${model.fallbackModelId}` : ''}</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                    </div>
+                </div>
+            `)}
+
+            <div style="margin-top: 20px;">
+                <button class="btn btn-secondary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model from Catalog</button>
             </div>
         </div>
       `;
   }
 
   renderModelSelector() {
-      const models = this.config.ollama.models;
+      const models = this.selectorTarget === 'endpoint-hosted'
+        ? this.getKnownHostedModelCatalog()
+        : this.getKnownLocalModelCatalog();
       return html`
         <div class="modal-overlay">
             <div class="modal">
                 <div class="card-header" style="padding: 20px;">
-                    <h3>Select Model from Catalog</h3>
+                    <h3>${this.selectorTarget === 'endpoint-hosted' ? 'Select Hosted Model from Catalog' : 'Select Local Model from Catalog'}</h3>
                     <button class="btn btn-ghost" @click=${() => this.showModelSelector = false}>Close</button>
                 </div>
                 <div class="modal-body">
+                    ${models.length === 0 ? html`<div class="item-sub">No matching models are in the shared catalog yet.</div>` : ''}
                     ${models.map((m: any) => html`
-                        <div class="selectable-item" @click=${() => this.handleModelSelected(m.id)}>
-                            <div class="item-title">${m.name || m.id}</div>
-                            <div class="item-sub">ID: ${m.id}</div>
+                        <div class="selectable-item" @click=${() => this.handleModelSelected(this.selectorTarget === 'endpoint-hosted' ? m.modelRef : m.id)}>
+                            <div class="item-title">${m.name || m.id || m.modelRef}</div>
+                            <div class="item-sub">${this.selectorTarget === 'endpoint-hosted' ? `Ref: ${m.modelRef}` : `ID: ${m.id}`}</div>
                         </div>
                     `)}
                 </div>
@@ -711,6 +831,17 @@ export class ToolkitDashboard extends LitElement {
           if (maxCtx) {
               this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', this.editingEndpointKey!, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
           }
+      } else if (this.selectorTarget === 'endpoint-hosted') {
+          const endpoint = this.config.ollama.endpoints.find((e: any) => e.key === this.editingEndpointKey);
+          const catalogEntry = this.getKnownHostedModelCatalog().find((entry: any) => entry.modelRef === modelId);
+          if (!endpoint || !catalogEntry) return;
+          if (!Array.isArray(endpoint.hostedModels)) endpoint.hostedModels = [];
+          if (endpoint.hostedModels.some((entry: any) => entry.modelRef === modelId)) {
+              alert(`Hosted model "${modelId}" is already added to endpoint "${endpoint.key}".`);
+              return;
+          }
+          endpoint.hostedModels.push(this.cloneModelCatalogEntry(catalogEntry));
+          this.requestUpdate();
       } else if (this.selectorTarget === 'candidate') {
           const agent = this.getEditingAgent();
           const ref = `ollama/${modelId}`;
@@ -730,25 +861,57 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderModelsConfig() {
+    const hasSharedCatalog = Array.isArray(this.config?.ollama?.models);
+    const localModels = hasSharedCatalog ? this.getSharedModelCatalog().filter((model: any) => this.isLocalCatalogModel(model)) : this.getKnownLocalModelCatalog();
+    const hostedModels = hasSharedCatalog ? this.getSharedModelCatalog().filter((model: any) => this.isHostedCatalogModel(model)) : this.getKnownHostedModelCatalog();
     return html`
       <div class="card">
         <div class="card-header">
-          <h3>Master Model Catalog</h3>
-          <button class="btn btn-ghost" @click=${() => this.addModel()}>+ Add to Catalog</button>
+          <h3>Known Models</h3>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-ghost" @click=${() => this.addModel()}>+ Add Local</button>
+            <button class="btn btn-ghost" @click=${() => this.addHostedModel()}>+ Add Hosted</button>
+          </div>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">The catalog lists all models known to OpenClaw. Endpoints use these definitions as a base.</p>
-        ${repeat(this.config.ollama.models, (m: any) => m.id, (m: any, idx) => html`
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">
+          ${hasSharedCatalog
+            ? 'This shared catalog feeds endpoint model selection. Local endpoint models still decide what each machine should pull and run.'
+            : 'No shared catalog exists yet. The view below is inferred from endpoint-local and endpoint-hosted models; adding a catalog model will seed a reusable shared catalog from this list.'}
+        </p>
+        <h4 style="color: #666; margin-bottom: 10px;">Local Catalog</h4>
+        ${repeat(localModels, (m: any) => m.id, (m: any) => {
+          const idx = hasSharedCatalog ? this.getSharedModelCatalog().indexOf(m) : -1;
+          return html`
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${m.name || m.id}</span>
               <span class="item-sub">${m.id} | Min Ctx: ${m.minimumContextWindow || 24576}</span>
             </div>
-            <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary" @click=${() => this.editModel(idx)}>Edit</button>
-              <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove</button>
-            </div>
+            ${hasSharedCatalog && idx >= 0 ? html`
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" @click=${() => this.editModel(idx)}>Edit</button>
+                <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove</button>
+              </div>
+            ` : ''}
           </div>
-        `)}
+        `;})}
+        <h4 style="color: #666; margin: 20px 0 10px;">Hosted Catalog</h4>
+        ${repeat(hostedModels, (m: any) => m.modelRef, (m: any) => {
+          const idx = hasSharedCatalog ? this.getSharedModelCatalog().indexOf(m) : -1;
+          return html`
+          <div class="item-row">
+            <div class="item-info">
+              <span class="item-title">${m.name || m.modelRef}</span>
+              <span class="item-sub">${m.modelRef}${m.fallbackModelId ? ` | Local fallback: ollama/${m.fallbackModelId}` : ''}</span>
+            </div>
+            ${hasSharedCatalog && idx >= 0 ? html`
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" @click=${() => this.editModel(idx)}>Edit</button>
+                <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove</button>
+              </div>
+            ` : ''}
+          </div>
+        `;})}
       </div>
     `;
   }
@@ -866,7 +1029,8 @@ export class ToolkitDashboard extends LitElement {
     const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
     
     const selectedEndpoint = this.config.ollama.endpoints.find((e: any) => e.key === agent.endpointKey);
-    const availableTunedModels = selectedEndpoint ? (selectedEndpoint.modelOverrides || []).map((mo: any) => mo.id) : [];
+    const availableTunedModels = selectedEndpoint ? this.getEndpointModels(selectedEndpoint).map((mo: any) => mo.id) : [];
+    const availableHostedModels = selectedEndpoint ? this.getEndpointHostedModels(selectedEndpoint).map((model: any) => model.modelRef) : [];
 
     return html`
         <div class="card">
@@ -923,10 +1087,28 @@ export class ToolkitDashboard extends LitElement {
                     </div>
                 </div>
             ` : html`
-                <div class="form-group">
-                    <label>Model Reference (Hosted)</label>
-                    <input type="text" .value=${agent.modelRef} @input=${(e: any) => { agent.modelRef = e.target.value; this.requestUpdate(); }}>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Endpoint (optional)</label>
+                        <select @change=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
+                            <option value="">No endpoint</option>
+                            ${endpoints.map((ep: string) => html`<option value=${ep} ?selected=${agent.endpointKey === ep}>${ep}</option>`)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Model Reference (Hosted)</label>
+                        <input type="text" .value=${agent.modelRef} @input=${(e: any) => { agent.modelRef = e.target.value; this.requestUpdate(); }}>
+                    </div>
                 </div>
+                ${availableHostedModels.length > 0 ? html`
+                    <div class="form-group">
+                        <label>Pick from Endpoint Hosted Models</label>
+                        <select @change=${(e: any) => { if (e.target.value) { agent.modelRef = e.target.value; this.requestUpdate(); } }}>
+                            <option value="">Select Hosted Model</option>
+                            ${availableHostedModels.map((ref: string) => html`<option value=${ref} ?selected=${agent.modelRef === ref}>${ref}</option>`)}
+                        </select>
+                    </div>
+                ` : ''}
             `}
 
             <div class="form-group">
@@ -953,14 +1135,32 @@ export class ToolkitDashboard extends LitElement {
                             ${availableTunedModels.map((m: string) => html`<option value=${m}>${m}</option>`)}
                         </select>
                     ` : html`
-                        <button class="btn btn-ghost btn-small" @click=${() => {
-                            const val = prompt('Enter hosted model ref (e.g. anthropic/claude-3-5-sonnet):');
-                            if (val) {
-                                if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
-                                agent.candidateModelRefs.push(val);
-                                this.requestUpdate();
-                            }
-                        }}>+ Add Hosted Model Ref</button>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            ${availableHostedModels.length > 0 ? html`
+                                <select @change=${(e: any) => {
+                                    const val = e.target.value;
+                                    if (val) {
+                                        if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
+                                        if (!agent.candidateModelRefs.includes(val)) {
+                                            agent.candidateModelRefs.push(val);
+                                            this.requestUpdate();
+                                        }
+                                        e.target.value = '';
+                                    }
+                                }}>
+                                    <option value="">+ Add Endpoint Hosted Model</option>
+                                    ${availableHostedModels.map((ref: string) => html`<option value=${ref}>${ref}</option>`)}
+                                </select>
+                            ` : ''}
+                            <button class="btn btn-ghost btn-small" @click=${() => {
+                                const val = prompt('Enter hosted model ref (e.g. anthropic/claude-sonnet-4-6 or ollama/kimi-k2.5:cloud):');
+                                if (val) {
+                                    if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
+                                    agent.candidateModelRefs.push(val);
+                                    this.requestUpdate();
+                                }
+                            }}>+ Add Hosted Model Ref</button>
+                        </div>
                     `}
                 </div>
             </div>
@@ -1038,7 +1238,7 @@ export class ToolkitDashboard extends LitElement {
     const key = prompt('Endpoint Key:');
     if (key) {
         if (!this.config.ollama.endpoints) this.config.ollama.endpoints = [];
-        this.config.ollama.endpoints.push({ key, providerId: 'ollama', hostBaseUrl: 'http://127.0.0.1:11434', baseUrl: 'http://host.docker.internal:11434', modelOverrides: [] });
+        this.config.ollama.endpoints.push({ key, providerId: 'ollama', hostBaseUrl: 'http://127.0.0.1:11434', baseUrl: 'http://host.docker.internal:11434', models: [] });
         this.requestUpdate();
     }
   }
@@ -1053,12 +1253,36 @@ export class ToolkitDashboard extends LitElement {
   addModel() {
       const id = prompt('Model ID:');
       if (id) {
-          this.config.ollama.models.push({ id, name: id, input: ['text'], minimumContextWindow: 24576 });
+          const models = this.ensureSharedModelCatalog();
+          if (models.some((model: any) => model.id === id)) {
+              alert(`Model "${id}" is already in the catalog.`);
+              return;
+          }
+          models.push({ id, name: id, input: ['text'], minimumContextWindow: 24576 });
+          this.requestUpdate();
+      }
+  }
+
+  addHostedModel() {
+      const modelRef = prompt('Hosted model ref (e.g. openai-codex/gpt-5.4 or ollama/kimi-k2.5:cloud):');
+      if (modelRef) {
+          const models = this.ensureSharedModelCatalog();
+          if (models.some((model: any) => model.modelRef === modelRef)) {
+              alert(`Hosted model "${modelRef}" is already in the catalog.`);
+              return;
+          }
+          const fallbackModelId = prompt('Optional local fallback model ID (e.g. qwen3-coder:30b):', '') || '';
+          const entry: any = { modelRef, name: modelRef };
+          if (fallbackModelId.trim()) {
+              entry.fallbackModelId = fallbackModelId.trim();
+          }
+          models.push(entry);
           this.requestUpdate();
       }
   }
 
   removeModel(idx: number) {
+      if (!Array.isArray(this.config?.ollama?.models)) return;
       if (confirm('Remove model?')) {
           this.config.ollama.models.splice(idx, 1);
           this.requestUpdate();
@@ -1066,9 +1290,18 @@ export class ToolkitDashboard extends LitElement {
   }
 
   editModel(idx: number) {
+      if (!Array.isArray(this.config?.ollama?.models)) return;
       const m = this.config.ollama.models[idx];
-      const name = prompt('Name:', m.name);
+      const name = prompt('Name:', m.name || m.id || m.modelRef);
       if (name) m.name = name;
+      if (m.modelRef) {
+          const fallback = prompt('Optional local fallback model ID:', m.fallbackModelId || '');
+          if (fallback && fallback.trim()) {
+              m.fallbackModelId = fallback.trim();
+          } else {
+              delete m.fallbackModelId;
+          }
+      }
       this.requestUpdate();
   }
 }

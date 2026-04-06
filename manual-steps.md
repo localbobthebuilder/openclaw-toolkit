@@ -125,7 +125,14 @@ Example:
     {
       "key": "review-pc",
       "baseUrl": "http://desktop-r9ab74f:11434",
-      "desiredModelIds": ["qwen2.5:7b"],
+      "models": [
+        {
+          "id": "qwen2.5:7b",
+          "name": "Qwen 2.5 7B",
+          "input": ["text"],
+          "minimumContextWindow": 16384
+        }
+      ],
       "autoPullMissingModels": true
     }
   ]
@@ -133,7 +140,7 @@ Example:
 ```
 
 With that in place, `bootstrap` will try to pull `qwen2.5:7b` onto
-`review-pc` automatically.
+`review-pc` automatically when it fits the endpoint VRAM budget.
 
 OpenClaw model failover note:
 
@@ -465,7 +472,7 @@ bootstrap, run:
 .\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
 ```
 
-Do not hand-edit `ollama.models` in the bootstrap config unless you are fixing
+Do not hand-edit endpoint `models` in the bootstrap config unless you are fixing
 something surgically and know exactly why. The normal workflow should be:
 
 - add a model with `add-local-model`

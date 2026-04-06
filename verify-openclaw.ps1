@@ -464,9 +464,11 @@ function Resolve-ExpectedStrongModelRef {
     }
 
     if ($Config.multiAgent.strongAgent.allowLocalFallback) {
-        foreach ($model in @($Config.ollama.models)) {
+        $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
+        $defaultEndpointKey = if ($null -ne $defaultEndpoint) { [string]$defaultEndpoint.key } else { "local" }
+        foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $defaultEndpointKey)) {
             if ($model.id) {
-                $candidate = "ollama/" + [string]$model.id
+                $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $defaultEndpointKey
                 if ($candidate -in @($LiveConfig.agents.defaults.models.PSObject.Properties.Name)) {
                     return $candidate
                 }
@@ -768,7 +770,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         }
         if ($config.ollama -and $config.ollama.enabled) {
             foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $config)) {
-                foreach ($model in @($config.ollama.models)) {
+                foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $config -EndpointKey ([string]$endpoint.key))) {
                     if ($model.id) {
                         $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Convert-ToolkitLocalModelIdToRef -Config $config -ModelId ([string]$model.id) -EndpointKey ([string]$endpoint.key))
                     }

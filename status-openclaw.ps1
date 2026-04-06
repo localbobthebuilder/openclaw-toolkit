@@ -343,9 +343,10 @@ function Get-OllamaEndpointSnapshots {
             }
         }
 
-        if ($reachable -and $endpoint.PSObject.Properties.Name -contains "desiredModelIds" -and $endpoint.desiredModelIds) {
+        $desiredModelIds = @(Get-ToolkitEndpointDesiredModelIds -Config $BootstrapConfig -EndpointKey ([string]$endpoint.key))
+        if ($reachable -and $desiredModelIds.Count -gt 0) {
             $missingDesiredIds = @(
-                foreach ($desiredId in @($endpoint.desiredModelIds)) {
+                foreach ($desiredId in $desiredModelIds) {
                     if ([string]$desiredId -notin $modelIds) {
                         [string]$desiredId
                     }

@@ -1165,7 +1165,7 @@ function Resolve-OllamaModelRef {
         return $desiredResolvedRef
     }
 
-    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+    foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $EndpointKey)) {
         if ($model.id) {
             $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $EndpointKey
             if ($candidate -in @($AvailableRefs)) {
@@ -1303,7 +1303,7 @@ function Ensure-OllamaState {
     }
 
     foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
-        foreach ($desiredModelId in @($endpoint.desiredModelIds)) {
+        foreach ($desiredModelId in @(Get-ToolkitEndpointDesiredModelIds -Config $Config -EndpointKey ([string]$endpoint.key))) {
             if (-not [string]::IsNullOrWhiteSpace([string]$desiredModelId)) {
                 $requestKey = "$([string]$endpoint.key)::$([string]$desiredModelId)"
                 if ($referencedLocalModelKeys.Add($requestKey)) {
@@ -1332,7 +1332,7 @@ function Ensure-OllamaState {
                 }
 
                 if ($null -ne $vramBudgetMiB) {
-                    $catalogEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $request.modelId
+                    $catalogEntry = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId $request.modelId -EndpointKey $request.endpointKey
                     $estimateMiB = $null
 
                     $registryMiB = Get-OllamaRegistryModelSizeMiB -ModelId $request.modelId
@@ -1383,16 +1383,13 @@ function Ensure-OllamaState {
 
         $providerModels = @()
         $configuredIds = @()
-        foreach ($configuredModel in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+        foreach ($configuredModel in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey ([string]$endpoint.key))) {
             if (-not $configuredModel.id) {
                 continue
             }
             $configuredIds = Add-UniqueString -List $configuredIds -Value ([string]$configuredModel.id)
             if ([string]$configuredModel.id -in $availableIds) {
-                $effectiveConfiguredModel = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId ([string]$configuredModel.id) -EndpointKey ([string]$endpoint.key)
-                if ($null -ne $effectiveConfiguredModel) {
-                    $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $effectiveConfiguredModel)
-                }
+                $providerModels += (Convert-ConfiguredLocalModelToProviderModel -Model $configuredModel)
             }
         }
 
@@ -1467,7 +1464,7 @@ function Get-PreferredLocalFallbackRef {
 
     $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
     $defaultEndpointKey = if ($null -ne $defaultEndpoint) { [string]$defaultEndpoint.key } else { "local" }
-    foreach ($model in @(Get-ToolkitLocalModelCatalog -Config $Config)) {
+    foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $defaultEndpointKey)) {
         if ($model.id) {
             $candidate = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$model.id) -EndpointKey $defaultEndpointKey
             if ($candidate -in @($AvailableOllamaRefs)) {
