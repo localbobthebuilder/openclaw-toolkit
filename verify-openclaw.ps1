@@ -899,6 +899,180 @@ function Test-TelegramChannelEnabled {
     return $false
 }
 
+function Get-TelegramAccountCount {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return 0
+    }
+
+    if (-not ($TelegramConfig.PSObject.Properties.Name -contains "accounts") -or $null -eq $TelegramConfig.accounts) {
+        return 0
+    }
+
+    return @($TelegramConfig.accounts.PSObject.Properties).Count
+}
+
+function Get-TelegramGroupCount {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return 0
+    }
+
+    if (-not ($TelegramConfig.PSObject.Properties.Name -contains "groups") -or $null -eq $TelegramConfig.groups) {
+        return 0
+    }
+
+    $groups = $TelegramConfig.groups
+    if ($groups -is [System.Collections.IList]) {
+        return $groups.Count
+    }
+
+    return @($groups.PSObject.Properties).Count
+}
+
+function Invoke-LoggedTelegramConfigCheck {
+    param(
+        $BootstrapTelegramConfig,
+        $LiveConfig
+    )
+
+    Write-Step "Telegram channel config"
+    $started = Get-Date
+
+    $toolkitTelegramConfigured = $null -ne $BootstrapTelegramConfig
+    $toolkitTelegramEnabled = $toolkitTelegramConfigured -and [bool]$BootstrapTelegramConfig.enabled
+    $toolkitTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $BootstrapTelegramConfig
+
+    if ($null -eq $LiveConfig) {
+        $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+        $message = "Could not read live host config for Telegram verification."
+        Write-Detail "$message ($elapsed)" ([ConsoleColor]::Yellow)
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output   = $message
+        }
+    }
+
+    $liveTelegramConfig = Resolve-OpenClawConfigDocumentPathValue -Document $LiveConfig -Path "channels.telegram"
+    if ($null -eq $liveTelegramConfig) {
+        $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+        if ($toolkitTelegramEnabled) {
+            $message = if ($toolkitTelegramHasCredentials) {
+                "channels.telegram is not initialized in live config yet. Re-run bootstrap to apply Telegram setup."
+            }
+            else {
+                "Telegram setup incomplete: channels.telegram is not initialized in live config yet. Run .\run-openclaw.cmd telegram-setup or use the dashboard Telegram Setup action."
+            }
+            Write-Detail "$message ($elapsed)" ([ConsoleColor]::Red)
+            return [pscustomobject]@{
+                ExitCode = 1
+                Output   = $message
+            }
+        }
+
+        $message = if ($toolkitTelegramConfigured) {
+            "Telegram is disabled in toolkit config and not initialized in live config."
+        }
+        else {
+            "Telegram is not configured in toolkit config or live config."
+        }
+        Write-Detail "$message ($elapsed)" ([ConsoleColor]::Yellow)
+        return [pscustomobject]@{
+            ExitCode = 0
+            Output   = $message
+        }
+    }
+
+    $liveTelegramEnabled = Test-TelegramChannelEnabled -TelegramConfig $liveTelegramConfig
+    $liveTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $liveTelegramConfig
+    $liveTelegramAccountCount = Get-TelegramAccountCount -TelegramConfig $liveTelegramConfig
+    $liveTelegramGroupCount = Get-TelegramGroupCount -TelegramConfig $liveTelegramConfig
+    $lines = New-Object System.Collections.Generic.List[string]
+    $hasIssue = $false
+
+    if ($toolkitTelegramEnabled) {
+        [void]$lines.Add("PASS: Toolkit config enables Telegram.")
+        if (-not $toolkitTelegramHasCredentials) {
+            [void]$lines.Add("INFO: Toolkit config leaves Telegram credentials external; live config must be populated via telegram-setup or prior onboarding.")
+        }
+    }
+    elseif ($toolkitTelegramConfigured) {
+        [void]$lines.Add("INFO: Toolkit config does not enable Telegram.")
+    }
+    else {
+        [void]$lines.Add("INFO: Toolkit config has no Telegram section.")
+    }
+
+    if ($liveTelegramEnabled) {
+        [void]$lines.Add("PASS: Live config enables Telegram.")
+    }
+    else {
+        $message = "Live config contains channels.telegram but it is not enabled."
+        if ($toolkitTelegramEnabled) {
+            $hasIssue = $true
+            [void]$lines.Add("FAIL: $message")
+        }
+        else {
+            [void]$lines.Add("INFO: $message")
+        }
+    }
+
+    if ($liveTelegramHasCredentials) {
+        [void]$lines.Add("PASS: Live config has Telegram credentials (masked in report).")
+    }
+    else {
+        $message = "Live config is missing a Telegram bot token or token file."
+        if ($toolkitTelegramEnabled -or $liveTelegramEnabled) {
+            $hasIssue = $true
+            [void]$lines.Add("FAIL: $message")
+        }
+        else {
+            [void]$lines.Add("INFO: $message")
+        }
+    }
+
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "dmPolicy" -and $liveTelegramConfig.dmPolicy) {
+        [void]$lines.Add("DM policy: $([string]$liveTelegramConfig.dmPolicy)")
+    }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "allowFrom") {
+        [void]$lines.Add("Allowed DM senders: $(@($liveTelegramConfig.allowFrom).Count)")
+    }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "groupPolicy" -and $liveTelegramConfig.groupPolicy) {
+        [void]$lines.Add("Group policy: $([string]$liveTelegramConfig.groupPolicy)")
+    }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "groupAllowFrom") {
+        [void]$lines.Add("Allowed group senders: $(@($liveTelegramConfig.groupAllowFrom).Count)")
+    }
+    [void]$lines.Add("Configured groups: $liveTelegramGroupCount")
+    if ($liveTelegramAccountCount -gt 0) {
+        [void]$lines.Add("Configured accounts: $liveTelegramAccountCount")
+    }
+
+    $liveTelegramExecApprovals = if ($liveTelegramConfig.PSObject.Properties.Name -contains "execApprovals") { $liveTelegramConfig.execApprovals } else { $null }
+    if ($null -ne $liveTelegramExecApprovals) {
+        [void]$lines.Add("Exec approvals: $([bool]$liveTelegramExecApprovals.enabled)")
+        [void]$lines.Add("Exec approvers: $(@($liveTelegramExecApprovals.approvers).Count)")
+        if ($liveTelegramExecApprovals.PSObject.Properties.Name -contains "target" -and $liveTelegramExecApprovals.target) {
+            [void]$lines.Add("Exec target: $([string]$liveTelegramExecApprovals.target)")
+        }
+    }
+
+    $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+    if ($hasIssue) {
+        Write-Detail "Telegram live config needs attention in $elapsed" ([ConsoleColor]::Red)
+    }
+    else {
+        Write-Detail "Telegram setup status checked in $elapsed" ([ConsoleColor]::Green)
+    }
+
+    return [pscustomobject]@{
+        ExitCode = if ($hasIssue) { 1 } else { 0 }
+        Output   = ($lines -join [Environment]::NewLine)
+    }
+}
+
 function Resolve-HostWorkspacePath {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -1485,20 +1659,7 @@ if (Test-CheckRequested -Names @("models")) {
 }
 $telegramConfig = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("telegram")) {
-    $telegramMissingMessage = "Config path not found: channels.telegram"
-    if ($config.telegram -and [bool]$config.telegram.enabled) {
-        if (Test-TelegramCredentialConfigured -TelegramConfig $config.telegram) {
-            $telegramMissingMessage = "channels.telegram is not initialized in live config yet. Re-run bootstrap to apply Telegram setup."
-        }
-        else {
-            $telegramMissingMessage = "Telegram setup incomplete: channels.telegram is not initialized in live config yet. Run .\run-openclaw.cmd telegram-setup or use the dashboard Telegram Setup action."
-        }
-    }
-    elseif ($config.telegram) {
-        $telegramMissingMessage = "Telegram is not enabled in toolkit config."
-    }
-
-    $telegramConfig = Invoke-LoggedConfigLookup -Label "Telegram channel config" -Document $liveConfig -Path "channels.telegram" -UnavailableMessage "Could not read live host config for Telegram verification." -MissingMessage $telegramMissingMessage
+    $telegramConfig = Invoke-LoggedTelegramConfigCheck -BootstrapTelegramConfig $config.telegram -LiveConfig $liveConfig
 }
 $audioConfig = New-SkippedExternalResult
 $audioBackendProbe = New-SkippedExternalResult
@@ -2349,6 +2510,7 @@ if (Test-CheckRequested -Names @("docker")) {
     Write-SummaryStatusDetail -Label "Docker env paths" -Status $(if ($dockerEnvPaths.ExitCode -eq 0) { 'PASS' } else { 'FAIL' })
     Write-SummaryStatusDetail -Label "Managed images" -Status $(if ($managedImages.ExitCode -eq 0) { 'PASS' } else { 'INFO/INCOMPLETE' })
 }
+if (Test-CheckRequested -Names @("telegram")) { Write-SummaryStatusDetail -Label "Telegram config" -Status $(if ($telegramConfig.ExitCode -eq 0) { 'PASS' } else { 'FAIL' }) }
 if (Test-CheckRequested -Names @("voice")) { Write-SummaryStatusDetail -Label "Voice smoke test" -Status (Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null) }
 if (Test-CheckRequested -Names @("local-model")) {
     Write-SummaryStatusDetail -Label "Local model smoke test" -Status (Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured)
