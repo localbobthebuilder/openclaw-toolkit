@@ -35,6 +35,8 @@ Most important commands:
   `run-openclaw.cmd update`
 - Daily startup:
   `run-openclaw.cmd start`
+- Launch interactive in-container onboarding after services are up:
+  `run-openclaw.cmd onboard`
 - Health/status check:
   `run-openclaw.cmd status`
 - Open the authenticated dashboard:

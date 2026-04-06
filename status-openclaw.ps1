@@ -106,6 +106,53 @@ function Invoke-External {
     }
 }
 
+function Invoke-OpenClawCli {
+    param(
+        [string[]]$Arguments = @(),
+        [string]$ContainerName = "openclaw-openclaw-gateway-1",
+        [switch]$AllowFailure,
+        [int]$TimeoutSeconds = 8,
+        [bool]$DockerInstalled = $true,
+        [bool]$DockerReady = $true,
+        [bool]$BootstrapReady = $true
+    )
+
+    if (-not $DockerInstalled) {
+        if (-not $AllowFailure) {
+            throw "Docker is not installed on this machine."
+        }
+
+        return [pscustomobject]@{
+            ExitCode = -1
+            Output   = "not installed"
+        }
+    }
+
+    if (-not $DockerReady) {
+        if (-not $AllowFailure) {
+            throw "Docker is not ready."
+        }
+
+        return [pscustomobject]@{
+            ExitCode = -1
+            Output   = "gateway not running"
+        }
+    }
+
+    if (-not $BootstrapReady) {
+        if (-not $AllowFailure) {
+            throw "Bootstrap has not been run yet."
+        }
+
+        return [pscustomobject]@{
+            ExitCode = -1
+            Output   = "bootstrap not run yet"
+        }
+    }
+
+    return Invoke-External -FilePath "docker" -Arguments (@("exec", $ContainerName, "openclaw") + $Arguments) -AllowFailure:$AllowFailure -TimeoutSeconds $TimeoutSeconds
+}
+
 function Get-AuthProfilesSnapshot {
     param([string]$ContainerName = "openclaw-openclaw-gateway-1")
 
@@ -515,6 +562,9 @@ if ($dockerEngineReady) {
     $composePs  = [PSCustomObject]@{ ExitCode = -1; Output = "" }
 }
 $serve  = Invoke-External -FilePath "tailscale" -Arguments @("serve", "status") -AllowFailure
+$bootstrapReady = Test-Path $RepoPath
+$gatewayContainerName = "openclaw-openclaw-gateway-1"
+$openClawVersion = Invoke-OpenClawCli -Arguments @("--version") -AllowFailure -TimeoutSeconds 5 -ContainerName $gatewayContainerName -DockerInstalled:$dockerInstalled -DockerReady:$dockerEngineReady -BootstrapReady:$bootstrapReady
 $ollamaVersion = Invoke-External -FilePath "ollama" -Arguments @("--version") -AllowFailure -TimeoutSeconds 5
 $ollamaInstalled = $ollamaVersion.ExitCode -ne -1
 if ($ollamaInstalled) {
@@ -524,7 +574,6 @@ else {
     $ollamaList = [PSCustomObject]@{ ExitCode = -1; Output = "not installed" }
 }
 $ollamaReady = $ollamaInstalled -and $ollamaList.ExitCode -eq 0
-$bootstrapReady = Test-Path $RepoPath
 $authProfilesSnapshot = if ($dockerEngineReady -and $bootstrapReady) { Get-AuthProfilesSnapshot } else { $null }
 $bootstrapConfigText = if (Test-Path $configFile) { Get-Content $configFile -Raw } else { "" }
 $hostOpenClawConfigPath = Get-HostOpenClawConfigPath -BootstrapConfig $bootstrapConfig
@@ -579,6 +628,32 @@ if ($bootstrapReady) {
     Write-Host "Repo: found at $RepoPath" -ForegroundColor Green
 } else {
     Write-Host "Repo: not cloned yet" -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "[OpenClaw CLI]" -ForegroundColor Cyan
+if (-not $dockerInstalled) {
+    Write-Host "OpenClaw CLI: not installed because Docker is not installed" -ForegroundColor Yellow
+    Write-Host "Run: .\run-openclaw.cmd cli --version"
+}
+elseif (-not $dockerEngineReady) {
+    Write-Host "OpenClaw CLI: gateway not running because Docker is not ready" -ForegroundColor Yellow
+    Write-Host "Run: .\run-openclaw.cmd start"
+}
+elseif (-not $bootstrapReady) {
+    Write-Host "OpenClaw CLI: bootstrap not run yet" -ForegroundColor Yellow
+    Write-Host "Run: .\run-openclaw.cmd bootstrap"
+}
+elseif ($openClawVersion.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($openClawVersion.Output)) {
+    Write-Host "OpenClaw CLI: available in gateway container" -ForegroundColor Green
+    Write-Host $openClawVersion.Output.Trim()
+}
+else {
+    Write-Host "OpenClaw CLI: gateway not running" -ForegroundColor Yellow
+    if ($openClawVersion.Output) {
+        Write-Host $openClawVersion.Output.Trim()
+    }
+    Write-Host "Run: .\run-openclaw.cmd start"
 }
 
 Write-Host ""

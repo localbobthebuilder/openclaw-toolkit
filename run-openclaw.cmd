@@ -34,6 +34,7 @@ if /I "%ACTION%"=="backup" goto :backup
 if /I "%ACTION%"=="restore" goto :restore
 if /I "%ACTION%"=="update" goto :update
 if /I "%ACTION%"=="start" goto :start
+if /I "%ACTION%"=="onboard" goto :onboard
 if /I "%ACTION%"=="status" goto :status
 if /I "%ACTION%"=="dashboard" goto :dashboard
 if /I "%ACTION%"=="phone-dashboard" goto :phone_dashboard
@@ -58,6 +59,7 @@ if /I "%ACTION%"=="remote-review-smoke" goto :remote_review_smoke
 if /I "%ACTION%"=="local-delegate-test" goto :local_delegate_test
 if /I "%ACTION%"=="temp-agent-probe" goto :temp_agent_probe
 if /I "%ACTION%"=="model-fit" goto :model_fit
+if /I "%ACTION%"=="cli" goto :cli
 if /I "%ACTION%"=="add-local-model" goto :add_local_model
 if /I "%ACTION%"=="remove-local-model" goto :remove_local_model
 if /I "%ACTION%"=="sandbox-test" goto :sandbox_test
@@ -91,6 +93,10 @@ goto :eof
 :start
 call "%SCRIPT_DIR%run-start.cmd" %FORWARD_ARGS%
 goto :eof
+
+:onboard
+call "%SCRIPT_DIR%run-openclaw-onboard.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
 
 :status
 call "%SCRIPT_DIR%run-status.cmd" %FORWARD_ARGS%
@@ -188,6 +194,10 @@ goto :eof
 call "%SCRIPT_DIR%run-model-fit.cmd" %FORWARD_ARGS%
 goto :eof
 
+:cli
+call "%SCRIPT_DIR%run-openclaw-cli.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
+
 :add_local_model
 call "%SCRIPT_DIR%run-add-local-model.cmd" %FORWARD_ARGS%
 goto :eof
@@ -229,8 +239,16 @@ echo.
 echo   run-openclaw.cmd start
 echo     Start Docker/Ollama/OpenClaw and open the localhost dashboard with pairing auto-repair.
 echo.
+echo   run-openclaw.cmd onboard
+echo     Launch interactive OpenClaw onboarding inside the gateway container in a new PowerShell window when needed.
+echo.
 echo   run-openclaw.cmd status
 echo     Show Docker, gateway, and Tailscale status.
+echo.
+echo   run-openclaw.cmd cli --version
+echo   run-openclaw.cmd cli doctor
+echo   run-openclaw.cmd cli gateway status
+echo     Run the official OpenClaw CLI inside the gateway container and stream the result.
 echo.
 echo   run-openclaw.cmd dashboard
 echo     Open the localhost tokenized dashboard.

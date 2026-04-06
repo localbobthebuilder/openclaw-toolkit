@@ -407,6 +407,7 @@ export class ToolkitDashboard extends LitElement {
     const prereqsDone = !dockerNotInstalled && !wsl2NotInstalled && !virtNotReady;
     const bootstrapDone = prereqsDone && !dockerNotReady && !repoNotCloned;
     const runningOk = bootstrapDone && !gatewayDown;
+    const canLaunchOnboarding = runningOk;
 
     const shouldShowAuthAction = (section: { title: string, content: string, status: 'online'|'offline'|'not-installed' }) =>
       !!authActionMap[section.title] && (section.status !== 'online' || section.content.includes('Run:'));
@@ -464,6 +465,16 @@ export class ToolkitDashboard extends LitElement {
             <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('start')}>▶ Start Services</button>
             <button class="btn btn-secondary" ?disabled=${this.isRunning} @click=${() => this.runCommand('verify')}>Run Verify</button>
           </div>
+        </div>
+      ` : ''}
+
+      ${canLaunchOnboarding ? html`
+        <div class="card" style="border-color: #00bcd4;">
+          <div class="card-header">
+            <h3>Interactive onboarding</h3>
+          </div>
+          <p style="color: #888; margin-bottom: 16px;">OpenClaw onboarding asks questions and needs a real interactive terminal, so the toolkit launches it in a separate PowerShell window instead of the dashboard log pane.</p>
+          <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('onboard')}>Launch Onboarding</button>
         </div>
       ` : ''}
 
@@ -533,7 +544,11 @@ export class ToolkitDashboard extends LitElement {
       { id: 'update', name: 'Update', desc: 'Update OpenClaw repo and rebuild' },
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
       { id: 'start', name: 'Start', desc: 'Start all services and OpenClaw' },
+      { id: 'onboard', name: 'Interactive Onboarding', desc: 'Launch openclaw onboard in a separate PowerShell window so you can answer prompts and make onboarding choices' },
       { id: 'stop', name: 'Stop', desc: 'Stop all services and OpenClaw' },
+      { id: 'cli', args: ['--version'], name: 'OpenClaw CLI Version', desc: 'Run openclaw --version inside the gateway container and stream the result' },
+      { id: 'cli', args: ['doctor'], name: 'OpenClaw Doctor', desc: 'Run openclaw doctor inside the gateway container and stream config diagnostics' },
+      { id: 'cli', args: ['gateway', 'status'], name: 'OpenClaw Gateway Status', desc: 'Run openclaw gateway status inside the gateway container and stream the result' },
       { id: 'toolkit-dashboard-rebuild', name: 'Rebuild Toolkit Dashboard', desc: 'Rebuild UI and restart the toolkit dashboard server. Page will auto-reconnect.' }
     ];
 
@@ -544,7 +559,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="card">
             <h3>${op.name}</h3>
             <p style="color: #888; font-size: 0.85rem; margin: 10px 0 20px;">${op.desc}</p>
-            <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand(op.id)}>Run Action</button>
+            <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand(op.id, op.args ?? [])}>Run Action</button>
           </div>
         `)}
       </div>
