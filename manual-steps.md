@@ -854,6 +854,28 @@ Other hosted auth helpers:
 
 Use the older flows only if you have a specific reason.
 
+- GitHub Copilot for OpenClaw:
+
+```powershell
+.\run-openclaw.cmd copilot-auth
+```
+
+- This runs OpenClaw's built-in `github-copilot` device-login flow inside the gateway container.
+- Host-side Copilot CLI or Windows Credential Manager state does not make the gateway ready by itself.
+
+- Ollama cloud auth:
+
+```powershell
+.\run-openclaw.cmd ollama-auth
+```
+
+- Use this only for Ollama `:cloud` models and Ollama Web Search.
+- Local Ollama models on your PC do **not** require Ollama sign-in.
+- The toolkit now treats Ollama as three separate surfaces:
+  - runtime availability
+  - local model inventory
+  - cloud auth state
+
 ## 6. Sandbox notes
 
 The bootstrap now hardens Dockerized OpenClaw further by:

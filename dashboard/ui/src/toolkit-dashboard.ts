@@ -334,16 +334,21 @@ export class ToolkitDashboard extends LitElement {
                       .join('\n');
               }
           } catch (e) {
-              if (content.toLowerCase().includes('not installed') ||
-                  content.toLowerCase().includes('not enabled') ||
-                  content.toLowerCase().includes('timed out') ||
-                  content.toLowerCase().includes('not cloned yet') ||
-                  content.toLowerCase().includes('bootstrap not run yet')) {
-                  status = 'not-installed';
-              } else if (content.toLowerCase().includes('not ready') || 
-                  content.toLowerCase().includes('failed') || 
-                  content.toLowerCase().includes('not responding') ||
-                  content.toLowerCase().includes('error')) {
+               if (content.toLowerCase().includes('not installed') ||
+                    content.toLowerCase().includes('not enabled') ||
+                    content.toLowerCase().includes('timed out') ||
+                    content.toLowerCase().includes('not configured yet') ||
+                    content.toLowerCase().includes('not authenticated') ||
+                    content.toLowerCase().includes('not verified yet') ||
+                    content.toLowerCase().includes('sign in required') ||
+                    content.toLowerCase().includes('not cloned yet') ||
+                    content.toLowerCase().includes('bootstrap not run yet')) {
+                   status = 'not-installed';
+                } else if (content.toLowerCase().includes('not ready') || 
+                    content.toLowerCase().includes('not running') ||
+                   content.toLowerCase().includes('failed') || 
+                   content.toLowerCase().includes('not responding') ||
+                   content.toLowerCase().includes('error')) {
                   status = 'offline';
               }
           }
@@ -359,11 +364,21 @@ export class ToolkitDashboard extends LitElement {
         'Docker': 'docker',
         'Gateway': 'gateway',
         'Tailscale Serve': 'tailscale',
-        'Ollama': 'ollama'
+        'Ollama Runtime': 'ollama'
+    };
+    const authActionMap: Record<string, string> = {
+        'OpenAI Auth': 'openai-auth',
+        'Claude Auth': 'claude-auth',
+        'Gemini Auth': 'gemini-auth',
+        'Copilot Auth': 'copilot-auth',
+        'Ollama Cloud Auth': 'ollama-auth'
+    };
+    const authActionLabelMap: Record<string, string> = {
+        'Ollama Cloud Auth': 'Sign in'
     };
 
     const dockerSection = sections.find(s => s.title === 'Docker');
-    const ollamaSection = sections.find(s => s.title === 'Ollama');
+    const ollamaSection = sections.find(s => s.title === 'Ollama Runtime');
     const gatewaySection = sections.find(s => s.title === 'Gateway');
     const wsl2Section = sections.find(s => s.title === 'WSL2');
     const virtSection = sections.find(s => s.title === 'Virtualization');
@@ -388,6 +403,9 @@ export class ToolkitDashboard extends LitElement {
     const prereqsDone = !dockerNotInstalled && !wsl2NotInstalled && !virtNotReady;
     const bootstrapDone = prereqsDone && !dockerNotReady && !repoNotCloned;
     const runningOk = bootstrapDone && !gatewayDown;
+
+    const shouldShowAuthAction = (section: { title: string, content: string, status: 'online'|'offline'|'not-installed' }) =>
+      !!authActionMap[section.title] && (section.status !== 'online' || section.content.includes('Run:'));
 
     return html`
       <header>
@@ -426,7 +444,7 @@ export class ToolkitDashboard extends LitElement {
               <div class="step-num">3</div>
               <div class="step-body">
                 <div class="step-title">Start Services</div>
-                <div class="step-desc">Launches Docker, the OpenClaw gateway, and all configured agents.</div>
+                <div class="step-desc">Starts all services and OpenClaw.</div>
               </div>
               ${runningOk
                 ? html`<span class="step-done-badge">✓ Running</span>`
@@ -450,11 +468,18 @@ export class ToolkitDashboard extends LitElement {
               ${sections.map(s => html`
                   <div class="status-card">
                       <div class="status-card-header">
-                          <h4>${s.title}</h4>
-                          <div style="display: flex; align-items: center; gap: 12px;">
-                              ${rebootMap[s.title] && s.status !== 'not-installed'
-                                && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady))
-                                && !(s.title === 'Docker' && dockerNotInstalled) ? html`
+                           <h4>${s.title}</h4>
+                           <div style="display: flex; align-items: center; gap: 12px;">
+                                ${shouldShowAuthAction(s) ? html`
+                                    <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
+                                            ?disabled=${this.isRunning}
+                                            @click=${() => this.runCommand(authActionMap[s.title])}>
+                                        ${authActionLabelMap[s.title] ?? 'Authenticate'}
+                                    </button>
+                                ` : ''}
+                               ${rebootMap[s.title] && s.status !== 'not-installed'
+                                 && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady))
+                                 && !(s.title === 'Docker' && dockerNotInstalled) ? html`
                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;" 
                                           ?disabled=${this.isRunning}
                                           @click=${() => this.rebootService(rebootMap[s.title])}>
@@ -503,9 +528,9 @@ export class ToolkitDashboard extends LitElement {
       { id: 'bootstrap', name: 'Bootstrap', desc: 'Full installation/hardening' },
       { id: 'update', name: 'Update', desc: 'Update OpenClaw repo and rebuild' },
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
-      { id: 'start', name: 'Start', desc: 'Launch Docker and OpenClaw' },
-      { id: 'stop', name: 'Stop', desc: 'Stop all services' },
-      { id: 'toolkit-dashboard-rebuild', name: 'Rebuild Dashboard', desc: 'Rebuild UI and restart the toolkit dashboard server. Page will auto-reconnect.' }
+      { id: 'start', name: 'Start', desc: 'Start all services and OpenClaw' },
+      { id: 'stop', name: 'Stop', desc: 'Stop all services and OpenClaw' },
+      { id: 'toolkit-dashboard-rebuild', name: 'Rebuild Toolkit Dashboard', desc: 'Rebuild UI and restart the toolkit dashboard server. Page will auto-reconnect.' }
     ];
 
     return html`

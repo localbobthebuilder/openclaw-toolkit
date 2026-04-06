@@ -42,8 +42,10 @@ if /I "%ACTION%"=="toolkit-dashboard-stop" goto :toolkit_dashboard_stop
 if /I "%ACTION%"=="toolkit-dashboard-rebuild" goto :toolkit_dashboard_rebuild
 if /I "%ACTION%"=="dashboard-repair" goto :dashboard_repair
 if /I "%ACTION%"=="openai-auth" goto :openai_auth
+if /I "%ACTION%"=="ollama-auth" goto :ollama_auth
 if /I "%ACTION%"=="gemini-auth" goto :gemini_auth
 if /I "%ACTION%"=="claude-auth" goto :claude_auth
+if /I "%ACTION%"=="copilot-auth" goto :copilot_auth
 if /I "%ACTION%"=="verify" goto :verify
 if /I "%ACTION%"=="agents" goto :agents
 if /I "%ACTION%"=="watchdog" goto :watchdog
@@ -122,12 +124,20 @@ goto :eof
 call "%SCRIPT_DIR%run-openai-auth.cmd" %FORWARD_ARGS%
 goto :eof
 
+:ollama_auth
+call "%SCRIPT_DIR%run-ollama-auth.cmd" %FORWARD_ARGS%
+goto :eof
+
 :gemini_auth
 call "%SCRIPT_DIR%run-gemini-auth.cmd" %FORWARD_ARGS%
 goto :eof
 
 :claude_auth
 call "%SCRIPT_DIR%run-claude-auth.cmd" %FORWARD_ARGS%
+goto :eof
+
+:copilot_auth
+call "%SCRIPT_DIR%run-copilot-auth.cmd" %FORWARD_ARGS%
 goto :eof
 
 :verify
@@ -243,11 +253,17 @@ echo.
 echo   run-openclaw.cmd openai-auth
 echo     Run the one-time OpenAI Codex OAuth flow for OpenClaw, then re-apply bootstrap.
 echo.
+echo   run-openclaw.cmd ollama-auth
+echo     Run host-side Ollama sign-in for cloud Ollama models and Ollama Web Search.
+echo.
 echo   run-openclaw.cmd gemini-auth
 echo     Run the one-time Gemini API-key auth flow for OpenClaw, then re-apply bootstrap.
 echo.
 echo   run-openclaw.cmd claude-auth
 echo     Run Anthropic auth for OpenClaw. Default is API-key auth; use -Method paste-token or -Method cli only if you intentionally want those flows.
+echo.
+echo   run-openclaw.cmd copilot-auth
+echo     Run OpenClaw's built-in GitHub Copilot device-login flow inside the gateway container.
 echo.
 echo   run-openclaw.cmd verify
 echo     Refresh the verification report. Use -Checks to target specific verification areas.

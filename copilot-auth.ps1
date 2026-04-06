@@ -24,7 +24,7 @@ if (-not $SkipRelaunch) {
     $launched = Restart-InInteractiveWindowIfNeeded `
         -ScriptPath $PSCommandPath `
         -Arguments $launchArgs `
-        -WindowTitle "OpenClaw Toolkit - OpenAI Auth"
+        -WindowTitle "OpenClaw Toolkit - Copilot Auth"
     if ($launched) { return }
 }
 
@@ -85,24 +85,23 @@ if ($containerProbe.ExitCode -ne 0 -or ($containerProbe.Output -split "`r?`n") -
     throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') start"
 }
 
-Write-Step "Starting interactive OpenAI Codex auth flow"
-Write-Host "This runs OpenClaw's own OpenAI Codex OAuth login inside the gateway container." -ForegroundColor Yellow
-Write-Host "That is separate from any host-browser or host-CLI login state." -ForegroundColor Yellow
+Write-Step "Starting GitHub Copilot auth"
+Write-Host "This runs OpenClaw's built-in GitHub Copilot provider login inside the gateway container." -ForegroundColor Yellow
+Write-Host "That is separate from any host Copilot CLI login or Windows Credential Manager state." -ForegroundColor Yellow
+Write-Host "Keep this terminal window open until the OpenClaw device flow finishes." -ForegroundColor Yellow
 
-& docker exec -it $ContainerName node dist/index.js models auth login --provider openai-codex --set-default
+& docker exec -it $ContainerName node dist/index.js models auth login-github-copilot --yes
 if ($LASTEXITCODE -ne 0) {
-    throw "OpenAI Codex auth login did not complete successfully."
+    throw "GitHub Copilot auth login did not complete successfully."
 }
 
 if (-not $SkipBootstrap) {
     Write-Step "Reapplying bootstrap so managed models and agents are refreshed"
     & (Join-Path (Split-Path -Parent $PSCommandPath) "bootstrap-openclaw.ps1") -ConfigPath $ConfigPath
     if ($LASTEXITCODE -ne 0) {
-        throw "Bootstrap failed after OpenAI auth."
+        throw "Bootstrap failed after GitHub Copilot auth."
     }
 }
 
 Write-Host ""
-Write-Host "OpenAI Codex auth flow finished." -ForegroundColor Green
-
-
+Write-Host "GitHub Copilot auth flow finished." -ForegroundColor Green

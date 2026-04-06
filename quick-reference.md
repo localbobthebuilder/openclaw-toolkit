@@ -45,10 +45,14 @@ Most important commands:
   `run-openclaw.cmd dashboard-repair`
 - Complete the one-time OpenAI Codex OAuth for OpenClaw:
   `run-openclaw.cmd openai-auth`
+- Sign in to Ollama for cloud models and Ollama Web Search:
+  `run-openclaw.cmd ollama-auth`
 - Complete the one-time Gemini API-key auth for OpenClaw:
   `run-openclaw.cmd gemini-auth`
 - Complete Anthropic auth for OpenClaw:
   `run-openclaw.cmd claude-auth`
+- Complete GitHub Copilot auth for OpenClaw:
+  `run-openclaw.cmd copilot-auth`
 - Full verification and smoke tests:
   `run-openclaw.cmd verify`
 - Targeted verification:

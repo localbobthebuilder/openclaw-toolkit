@@ -3,13 +3,31 @@ param(
     [string]$ConfigPath,
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
     [string]$Provider = "google",
-    [switch]$SkipBootstrap
+    [switch]$SkipBootstrap,
+    [switch]$SkipRelaunch
 )
 
 $ErrorActionPreference = "Stop"
 
 if (-not $ConfigPath) {
     $ConfigPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "openclaw-bootstrap.config.json"
+}
+
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-interactive-window.ps1")
+
+if (-not $SkipRelaunch) {
+    $launchArgs = @()
+    if ($ConfigPath) { $launchArgs += @("-ConfigPath", $ConfigPath) }
+    if ($ContainerName) { $launchArgs += @("-ContainerName", $ContainerName) }
+    if ($Provider) { $launchArgs += @("-Provider", $Provider) }
+    if ($SkipBootstrap) { $launchArgs += "-SkipBootstrap" }
+    $launchArgs += "-SkipRelaunch"
+
+    $launched = Restart-InInteractiveWindowIfNeeded `
+        -ScriptPath $PSCommandPath `
+        -Arguments $launchArgs `
+        -WindowTitle "OpenClaw Toolkit - Gemini Auth"
+    if ($launched) { return }
 }
 
 function Write-Step {
