@@ -4,7 +4,7 @@ import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +14,22 @@ const app = express();
 const port = 18791;
 const toolkitDir = path.resolve(__dirname, '..');
 const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
+const defaultWhisperModels = [
+  'tiny',
+  'tiny.en',
+  'base',
+  'base.en',
+  'small',
+  'small.en',
+  'medium',
+  'medium.en',
+  'large',
+  'large-v1',
+  'large-v2',
+  'large-v3',
+  'large-v3-turbo',
+  'turbo'
+];
 
 // Simulate terminal \r handling and strip spinner noise from command output
 function cleanOutputChunk(raw) {
@@ -29,6 +45,49 @@ function cleanOutputChunk(raw) {
     .join('\n')
     // Collapse runs of 3+ blank lines down to 2
     .replace(/\n{3,}/g, '\n\n');
+}
+
+function getWhisperModels() {
+  const pythonSnippet = 'import json, whisper; print(json.dumps(sorted(list(whisper.available_models()))))';
+  const result = spawnSync('docker', [
+    'exec',
+    'openclaw-openclaw-gateway-1',
+    'sh',
+    '-lc',
+    `python3 -c '${pythonSnippet}'`
+  ], {
+    cwd: toolkitDir,
+    encoding: 'utf8',
+    timeout: 8000
+  });
+
+  if (result.status === 0) {
+    try {
+      const models = JSON.parse((result.stdout || '').trim());
+      if (Array.isArray(models) && models.every((entry) => typeof entry === 'string' && entry.trim().length > 0)) {
+        return {
+          models,
+          source: 'gateway',
+          error: null
+        };
+      }
+    } catch (err) {
+      return {
+        models: defaultWhisperModels,
+        source: 'fallback',
+        error: `Failed to parse whisper model list: ${err.message}`
+      };
+    }
+  }
+
+  const stderr = (result.stderr || '').trim();
+  const stdout = (result.stdout || '').trim();
+  const error = stderr || stdout || (result.error ? result.error.message : 'Whisper model query failed');
+  return {
+    models: defaultWhisperModels,
+    source: 'fallback',
+    error
+  };
 }
 
 app.use(cors());
@@ -79,7 +138,7 @@ app.get('/api/status', (req, res) => {
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-File', path.join(toolkitDir, 'status-openclaw.ps1')
-  ]);
+  ], { cwd: toolkitDir });
 
   let output = '';
   child.stdout.on('data', (data) => output += data.toString());
@@ -88,6 +147,11 @@ app.get('/api/status', (req, res) => {
   child.on('close', (code) => {
     res.json({ output, code });
   });
+});
+
+app.get('/api/voice-models', (req, res) => {
+  const result = getWhisperModels();
+  res.json(result);
 });
 
 // Fallback for SPA routing: serve index.html for any other GET requests that weren't matched

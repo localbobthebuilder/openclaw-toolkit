@@ -31,6 +31,25 @@ if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::GetFullPath((Join-Path $PS
 if (-not $HealthUrl) { $HealthUrl = "http://127.0.0.1:18789/healthz" }
 if (-not $composeFilePath) { $composeFilePath = [System.IO.Path]::Combine($RepoPath, "docker-compose.yml") }
 
+$script:ConvertFromJsonSupportsDepth = (Get-Command ConvertFrom-Json).Parameters.ContainsKey("Depth")
+
+function ConvertFrom-JsonCompat {
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [AllowEmptyString()]
+        [string]$InputObject,
+        [int]$Depth = 50
+    )
+
+    process {
+        if ($script:ConvertFromJsonSupportsDepth) {
+            return ($InputObject | ConvertFrom-Json -Depth $Depth)
+        }
+
+        return ($InputObject | ConvertFrom-Json)
+    }
+}
+
 function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -318,7 +337,7 @@ function Get-AuthProfilesSnapshot {
         return [pscustomobject]@{
             Available = $true
             Exists    = $true
-            Data      = ($jsonText | ConvertFrom-Json -Depth 50)
+            Data      = ($jsonText | ConvertFrom-JsonCompat -Depth 50)
         }
     }
     catch {
@@ -377,7 +396,7 @@ function Read-JsonFile {
     }
 
     try {
-        return (Get-Content $Path -Raw | ConvertFrom-Json -Depth 50)
+        return (Get-Content $Path -Raw | ConvertFrom-JsonCompat -Depth 50)
     }
     catch {
         return $null
@@ -434,6 +453,28 @@ function Test-TelegramCredentialConfigured {
     if ($TelegramConfig.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramConfig.accounts) {
         foreach ($accountProperty in @($TelegramConfig.accounts.PSObject.Properties)) {
             if (Test-TelegramCredentialConfigured -TelegramConfig $accountProperty.Value) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Test-TelegramChannelEnabled {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return $false
+    }
+
+    if ($TelegramConfig.PSObject.Properties.Name -contains "enabled" -and [bool]$TelegramConfig.enabled) {
+        return $true
+    }
+
+    if ($TelegramConfig.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramConfig.accounts) {
+        foreach ($accountProperty in @($TelegramConfig.accounts.PSObject.Properties)) {
+            if (Test-TelegramChannelEnabled -TelegramConfig $accountProperty.Value) {
                 return $true
             }
         }
@@ -562,7 +603,7 @@ function Get-OllamaEndpointSnapshots {
         if ($result.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($result.Output)) {
             $payload = [string]$result.Output
             try {
-                $parsed = $payload | ConvertFrom-Json -Depth 50
+                $parsed = $payload | ConvertFrom-JsonCompat -Depth 50
                 $modelIds = @(
                     foreach ($entry in @($parsed.models)) {
                         $modelId = if ($entry.PSObject.Properties.Name -contains "model" -and $entry.model) {
@@ -668,7 +709,7 @@ fetch(url, { signal: controller.signal })
     }
 
     try {
-        $parsed = $payload | ConvertFrom-Json -Depth 10
+        $parsed = $payload | ConvertFrom-JsonCompat -Depth 10
         return [pscustomobject]@{
             Reachable = [bool]$parsed.ok
             ProbeUrl  = $probeUrl
@@ -881,7 +922,7 @@ if (-not $dockerInstalled) {
 Write-Host ""
 Write-Host "[Telegram]" -ForegroundColor Cyan
 $telegramWanted = $null -ne $bootstrapTelegramConfig -and [bool]$bootstrapTelegramConfig.enabled
-$telegramLiveEnabled = $null -ne $liveTelegramConfig -and [bool]$liveTelegramConfig.enabled
+$telegramLiveEnabled = Test-TelegramChannelEnabled -TelegramConfig $liveTelegramConfig
 $bootstrapTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $bootstrapTelegramConfig
 $liveTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $liveTelegramConfig
 if (-not $telegramWanted -and -not $telegramLiveEnabled) {

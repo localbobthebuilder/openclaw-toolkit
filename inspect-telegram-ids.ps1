@@ -6,6 +6,9 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
+Write-Host "Scanning recent Telegram gateway logs for seen user and group IDs..." -ForegroundColor Cyan
+Write-Host "Use this only when you need Telegram IDs for allowlists or group routing." -ForegroundColor DarkGray
+
 $json = & docker @(Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("channels", "logs", "--json", "--channel", "telegram", "--lines", [string]$Lines))
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to read Telegram channel logs from the gateway."
@@ -68,4 +71,10 @@ if ($groupRows) {
 }
 else {
     Write-Host "No Telegram group IDs found in recent logs." -ForegroundColor Yellow
+}
+
+if (-not $userRows -and -not $groupRows) {
+    Write-Host "" 
+    Write-Host "Nothing useful was found yet. That usually means no recent Telegram pairing requests, DMs, or group traffic reached the gateway logs." -ForegroundColor DarkGray
+    Write-Host "You can ignore this unless you are trying to discover Telegram IDs for allowlists or routing." -ForegroundColor DarkGray
 }

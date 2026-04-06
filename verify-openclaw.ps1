@@ -76,6 +76,25 @@ if (-not $usingPowerShellCore -and $null -ne $pwshCommand) {
     Write-Host "      pwsh -ExecutionPolicy Bypass -File $($MyInvocation.MyCommand.Path)" -ForegroundColor Yellow
 }
 
+$script:ConvertFromJsonSupportsDepth = (Get-Command ConvertFrom-Json).Parameters.ContainsKey("Depth")
+
+function ConvertFrom-JsonCompat {
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [AllowEmptyString()]
+        [string]$InputObject,
+        [int]$Depth = 50
+    )
+
+    process {
+        if ($script:ConvertFromJsonSupportsDepth) {
+            return ($InputObject | ConvertFrom-Json -Depth $Depth)
+        }
+
+        return ($InputObject | ConvertFrom-Json)
+    }
+}
+
 function Write-Step {
     param([string]$Message)
     Write-Host ""
@@ -723,7 +742,7 @@ function Get-SmokeStructuredResult {
     }
 
     try {
-        return ($match.Groups[1].Value | ConvertFrom-Json -Depth 20)
+        return ($match.Groups[1].Value | ConvertFrom-JsonCompat -Depth 20)
     }
     catch {
         return $null
@@ -784,7 +803,7 @@ function Get-OpenClawConfigDocument {
         }
 
         try {
-            return $raw | ConvertFrom-Json -Depth 50
+            return $raw | ConvertFrom-JsonCompat -Depth 50
         }
         catch {
             $repaired = ($raw -replace '(?:\\r\\n|\\n|\\r)+$', '').Trim()
@@ -792,7 +811,7 @@ function Get-OpenClawConfigDocument {
                 return $null
             }
 
-            return $repaired | ConvertFrom-Json -Depth 50
+            return $repaired | ConvertFrom-JsonCompat -Depth 50
         }
     }
     catch {
@@ -850,6 +869,28 @@ function Test-TelegramCredentialConfigured {
     if ($TelegramConfig.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramConfig.accounts) {
         foreach ($accountProperty in @($TelegramConfig.accounts.PSObject.Properties)) {
             if (Test-TelegramCredentialConfigured -TelegramConfig $accountProperty.Value) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Test-TelegramChannelEnabled {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return $false
+    }
+
+    if ($TelegramConfig.PSObject.Properties.Name -contains "enabled" -and [bool]$TelegramConfig.enabled) {
+        return $true
+    }
+
+    if ($TelegramConfig.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramConfig.accounts) {
+        foreach ($accountProperty in @($TelegramConfig.accounts.PSObject.Properties)) {
+            if (Test-TelegramChannelEnabled -TelegramConfig $accountProperty.Value) {
                 return $true
             }
         }
@@ -2018,7 +2059,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
 
         $liveTelegramConfig = Resolve-OpenClawConfigDocumentPathValue -Document $liveConfig -Path "channels.telegram"
         if ($telegramRouteTargetAgentId) {
-            if ($null -eq $liveTelegramConfig -or -not [bool]$liveTelegramConfig.enabled) {
+            if (-not (Test-TelegramChannelEnabled -TelegramConfig $liveTelegramConfig)) {
                 $multiAgentVerification += "INFO: Telegram routing checks skipped because channels.telegram is not enabled in live config"
             }
             else {
@@ -2055,7 +2096,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         }
 
         if ($config.telegram -and $config.telegram.execApprovals) {
-            if ($null -eq $liveTelegramConfig -or -not [bool]$liveTelegramConfig.enabled) {
+            if (-not (Test-TelegramChannelEnabled -TelegramConfig $liveTelegramConfig)) {
                 $multiAgentVerification += "INFO: Telegram exec approval checks skipped because channels.telegram is not enabled in live config"
             }
             else {

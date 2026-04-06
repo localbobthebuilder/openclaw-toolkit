@@ -8,6 +8,9 @@ export class ToolkitDashboard extends LitElement {
   @state() private savedConfig: any = null;
   @state() private statusOutput: string = '';
   @state() private statusLoaded: boolean = false;
+  @state() private voiceWhisperModels: string[] = [];
+  @state() private voiceWhisperModelSource: string = 'fallback';
+  @state() private voiceWhisperModelError: string = '';
   @state() private logs: string[] = [];
   @state() private isRunning: boolean = false;
   @state() private activeTab: string = 'status';
@@ -121,6 +124,7 @@ export class ToolkitDashboard extends LitElement {
 
     if (ready) {
         await this.fetchConfig();
+        await this.fetchVoiceModels();
         await this.fetchStatus();
         this.connectWS();
     } else {
@@ -158,6 +162,27 @@ export class ToolkitDashboard extends LitElement {
       if (err.name !== 'AbortError') {
         console.error('Failed to fetch status', err);
       }
+    }
+  }
+
+  async fetchVoiceModels() {
+    try {
+      const res = await fetch(this.getBaseUrl() + '/api/voice-models');
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      if (Array.isArray(data.models)) {
+        const models = data.models.filter((entry: any): entry is string => typeof entry === 'string' && entry.trim().length > 0) as string[];
+        this.voiceWhisperModels = Array.from(new Set<string>(models));
+      } else {
+        this.voiceWhisperModels = [];
+      }
+      this.voiceWhisperModelSource = typeof data.source === 'string' ? data.source : 'fallback';
+      this.voiceWhisperModelError = typeof data.error === 'string' ? data.error : '';
+    } catch (err) {
+      console.error('Failed to fetch voice models', err);
+      this.voiceWhisperModels = [];
+      this.voiceWhisperModelSource = 'fallback';
+      this.voiceWhisperModelError = String(err);
     }
   }
 
@@ -382,6 +407,29 @@ export class ToolkitDashboard extends LitElement {
       return this.config.telegram;
   }
 
+  ensureVoiceNotesConfig() {
+      if (!this.config.voiceNotes || typeof this.config.voiceNotes !== 'object') {
+          this.config.voiceNotes = {};
+      }
+      if (typeof this.config.voiceNotes.enabled !== 'boolean') {
+          this.config.voiceNotes.enabled = true;
+      }
+      if (!this.config.voiceNotes.mode) {
+          this.config.voiceNotes.mode = 'local-whisper';
+      }
+      if (!this.config.voiceNotes.gatewayImageTag) {
+          this.config.voiceNotes.gatewayImageTag = 'openclaw:local-voice';
+      }
+      if (typeof this.config.voiceNotes.whisperModel !== 'string' || !this.config.voiceNotes.whisperModel.trim()) {
+          this.config.voiceNotes.whisperModel = 'base';
+      }
+      return this.config.voiceNotes;
+  }
+
+  getVoiceWhisperModelOptions() {
+      return Array.from(new Set(this.voiceWhisperModels)).sort((a, b) => a.localeCompare(b));
+  }
+
   ensureTelegramExecApprovalsConfig() {
       const telegram = this.ensureTelegramConfig();
       if (!telegram.execApprovals || typeof telegram.execApprovals !== 'object') {
@@ -571,11 +619,11 @@ export class ToolkitDashboard extends LitElement {
                                             @click=${() => this.runCommand('telegram-setup')}>
                                        Setup
                                    </button>
-                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
-                                           ?disabled=${this.isRunning}
-                                           @click=${() => this.runCommand('telegram-ids')}>
-                                       IDs
-                                   </button>
+                                    <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
+                                            ?disabled=${this.isRunning}
+                                            @click=${() => this.runCommand('telegram-ids')}>
+                                        Seen IDs
+                                    </button>
                                ` : ''}
                                <span class="status-indicator ${
                                  s.status === 'online' ? 'status-online' :
@@ -622,7 +670,7 @@ export class ToolkitDashboard extends LitElement {
       { id: 'start', name: 'Start', desc: 'Start all services and OpenClaw' },
       { id: 'onboard', name: 'Interactive Onboarding', desc: 'Launch openclaw onboard in a separate PowerShell window so you can answer prompts and make onboarding choices' },
       { id: 'telegram-setup', name: 'Telegram Setup', desc: 'Launch the interactive Telegram channel setup wizard in a separate PowerShell window without storing any token in toolkit config' },
-      { id: 'telegram-ids', name: 'Telegram IDs From Logs', desc: 'Inspect recent Telegram user and group IDs seen by the gateway so you can fill allowlists and group routing safely' },
+      { id: 'telegram-ids', name: 'Telegram Seen IDs', desc: 'Scan recent Telegram gateway logs for user and group IDs when you need values for allowlists or group routing' },
       { id: 'stop', name: 'Stop', desc: 'Stop all services and OpenClaw' },
       { id: 'cli', args: ['--version'], name: 'OpenClaw CLI Version', desc: 'Run openclaw --version inside the gateway container and stream the result' },
       { id: 'cli', args: ['doctor'], name: 'OpenClaw Doctor', desc: 'Run openclaw doctor inside the gateway container and stream config diagnostics' },
@@ -957,8 +1005,21 @@ export class ToolkitDashboard extends LitElement {
     if (!clone) return clone;
     if (!clone.ollama) clone.ollama = {};
     if (!clone.skills || typeof clone.skills !== 'object') clone.skills = {};
+    if (!clone.voiceNotes || typeof clone.voiceNotes !== 'object') clone.voiceNotes = {};
     if (typeof clone.skills.enableAll !== 'boolean') {
       clone.skills.enableAll = clone.skills.enableAll === false || clone.skills.enableAll === 'false' ? false : true;
+    }
+    if (typeof clone.voiceNotes.enabled !== 'boolean') {
+      clone.voiceNotes.enabled = clone.voiceNotes.enabled === false || clone.voiceNotes.enabled === 'false' ? false : true;
+    }
+    if (typeof clone.voiceNotes.mode !== 'string' || !clone.voiceNotes.mode.trim()) {
+      clone.voiceNotes.mode = 'local-whisper';
+    }
+    if (typeof clone.voiceNotes.gatewayImageTag !== 'string' || !clone.voiceNotes.gatewayImageTag.trim()) {
+      clone.voiceNotes.gatewayImageTag = 'openclaw:local-voice';
+    }
+    if (typeof clone.voiceNotes.whisperModel !== 'string' || !clone.voiceNotes.whisperModel.trim()) {
+      clone.voiceNotes.whisperModel = 'base';
     }
     if (clone.telegram && typeof clone.telegram === 'object') {
       delete clone.telegram.botToken;
@@ -1954,25 +2015,55 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderFeaturesConfig() {
-    const telegram = (this.config?.telegram && typeof this.config.telegram === 'object') ? this.config.telegram : {};
-    const telegramAllowFrom = Array.isArray(telegram.allowFrom) ? telegram.allowFrom : [];
-    const telegramGroupAllowFrom = Array.isArray(telegram.groupAllowFrom) ? telegram.groupAllowFrom : [];
-    const telegramGroups = Array.isArray(telegram.groups) ? telegram.groups : [];
-    const telegramExecApprovals = (telegram.execApprovals && typeof telegram.execApprovals === 'object') ? telegram.execApprovals : { approvers: [], target: 'dm' };
-    const telegramExecApprovers = Array.isArray(telegramExecApprovals.approvers) ? telegramExecApprovals.approvers : [];
+      const telegram = (this.config?.telegram && typeof this.config.telegram === 'object') ? this.config.telegram : {};
+      const voiceNotes = this.ensureVoiceNotesConfig();
+      const whisperModelOptions = this.getVoiceWhisperModelOptions();
+      const selectedWhisperModel = whisperModelOptions.includes(voiceNotes.whisperModel) ? voiceNotes.whisperModel : '__custom__';
+      const telegramAllowFrom = Array.isArray(telegram.allowFrom) ? telegram.allowFrom : [];
+      const telegramGroupAllowFrom = Array.isArray(telegram.groupAllowFrom) ? telegram.groupAllowFrom : [];
+      const telegramGroups = Array.isArray(telegram.groups) ? telegram.groups : [];
+      const telegramExecApprovals = (telegram.execApprovals && typeof telegram.execApprovals === 'object') ? telegram.execApprovals : { approvers: [], target: 'dm' };
+      const telegramExecApprovers = Array.isArray(telegramExecApprovals.approvers) ? telegramExecApprovals.approvers : [];
     return html`
       <div class="grid-2">
         <div class="card">
-          <div class="card-header"><h3>Voice</h3></div>
+          <div class="card-header">
+            <h3>Voice</h3>
+            <button class="btn btn-ghost" @click=${() => this.fetchVoiceModels()}>Refresh Models</button>
+          </div>
           <div class="form-group">
             <label class="toggle-switch">
-                <input type="checkbox" ?checked=${this.config.voiceNotes.enabled} @change=${(e: any) => { this.config.voiceNotes.enabled = e.target.checked; this.requestUpdate(); }}>
+                <input type="checkbox" ?checked=${voiceNotes.enabled} @change=${(e: any) => { this.ensureVoiceNotesConfig().enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Voice Transcription
             </label>
           </div>
           <div class="form-group">
             <label>Whisper Model</label>
-            <input type="text" .value=${this.config.voiceNotes.whisperModel} @input=${(e: any) => this.config.voiceNotes.whisperModel = e.target.value}>
+            <select .value=${selectedWhisperModel} @change=${(e: any) => {
+              const value = e.target.value;
+              if (value !== '__custom__') {
+                this.ensureVoiceNotesConfig().whisperModel = value;
+              }
+              this.requestUpdate();
+            }}>
+              ${whisperModelOptions.map((model) => html`<option value=${model}>${model}</option>`)}
+              <option value="__custom__">Custom model...</option>
+            </select>
+            ${selectedWhisperModel === '__custom__' ? html`
+              <input
+                type="text"
+                .value=${voiceNotes.whisperModel}
+                placeholder="Enter a custom whisper model"
+                @input=${(e: any) => { this.ensureVoiceNotesConfig().whisperModel = e.target.value; this.requestUpdate(); }}>
+            ` : ''}
+            <span class="help-text">
+              ${this.voiceWhisperModelSource === 'gateway'
+                ? 'Fetched from the whisper package inside the gateway image.'
+                : 'Using the built-in whisper model list because the gateway model query is unavailable right now.'}
+            </span>
+            ${this.voiceWhisperModelError ? html`
+              <span class="help-text">Model query detail: ${this.voiceWhisperModelError}</span>
+            ` : ''}
           </div>
         </div>
         
