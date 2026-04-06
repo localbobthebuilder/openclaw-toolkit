@@ -13,6 +13,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-ProgressLine {
     param(
@@ -123,8 +124,26 @@ function Invoke-AgentTurn {
         [Parameter(Mandatory = $true)][string]$AgentId,
         [Parameter(Mandatory = $true)][string]$SessionId,
         [Parameter(Mandatory = $true)][string]$Message,
+        [string]$ModelOverrideRef,
         [int]$Timeout = 180
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($ModelOverrideRef)) {
+        $switchResult = Invoke-External -FilePath "docker" -Arguments @(
+            "exec", $ContainerName,
+            "node", "dist/index.js",
+            "agent",
+            "--agent", $AgentId,
+            "--session-id", $SessionId,
+            "--message", "/model $ModelOverrideRef",
+            "--timeout", "60",
+            "--json"
+        )
+        $switchJson = $switchResult.Output | ConvertFrom-Json -Depth 50
+        if ($switchJson.status -ne "ok") {
+            throw "Agent model switch for '$AgentId' to '$ModelOverrideRef' did not return status ok."
+        }
+    }
 
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
@@ -184,6 +203,106 @@ function Get-AgentPrimaryModelRef {
     }
 
     return ""
+}
+
+function Add-UniqueString {
+    param(
+        [string[]]$List = @(),
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return @($List)
+    }
+
+    if ($Value -notin @($List)) {
+        return @(@($List) + $Value)
+    }
+
+    return @($List)
+}
+
+function Get-AgentModelCandidateRefs {
+    param(
+        [Parameter(Mandatory = $true)]$LiveConfig,
+        [Parameter(Mandatory = $true)][string]$AgentId
+    )
+
+    $refs = @()
+    $agent = @($LiveConfig.agents.list) | Where-Object { $_.id -eq $AgentId } | Select-Object -First 1
+    if ($agent -and $agent.model) {
+        if ($agent.model.primary) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$agent.model.primary)
+        }
+        foreach ($fallbackRef in @($agent.model.fallbacks)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$fallbackRef)
+        }
+    }
+
+    if (@($refs).Count -eq 0 -and $LiveConfig.agents.defaults -and $LiveConfig.agents.defaults.model) {
+        if ($LiveConfig.agents.defaults.model.primary) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$LiveConfig.agents.defaults.model.primary)
+        }
+        foreach ($fallbackRef in @($LiveConfig.agents.defaults.model.fallbacks)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$fallbackRef)
+        }
+    }
+
+    return @($refs)
+}
+
+function Get-AgentSmokeModelPlan {
+    param(
+        [Parameter(Mandatory = $true)]$BootstrapConfig,
+        [Parameter(Mandatory = $true)]$LiveConfig,
+        [Parameter(Mandatory = $true)][string]$AgentId
+    )
+
+    $candidateRefs = @(Get-AgentModelCandidateRefs -LiveConfig $LiveConfig -AgentId $AgentId)
+    if (@($candidateRefs).Count -eq 0) {
+        return [pscustomobject]@{
+            status           = "pass"
+            modelOverrideRef = $null
+            detail           = ""
+        }
+    }
+
+    $primaryRef = [string]$candidateRefs[0]
+    $hostedCandidates = @($candidateRefs | Where-Object { $_ -and $_ -notlike "ollama*/*" })
+    if (@($hostedCandidates).Count -gt 0) {
+        return [pscustomobject]@{
+            status           = "pass"
+            modelOverrideRef = $null
+            detail           = ""
+        }
+    }
+
+    $unusableReasons = @()
+    foreach ($candidateRef in @($candidateRefs)) {
+        $status = Get-ToolkitLocalModelRefRuntimeStatus -Config $BootstrapConfig -ModelRef ([string]$candidateRef)
+        if ($status.usable) {
+            return [pscustomobject]@{
+                status           = "pass"
+                modelOverrideRef = if ([string]$candidateRef -ne $primaryRef) { [string]$candidateRef } else { $null }
+                detail           = if ([string]$candidateRef -ne $primaryRef) { "Switching smoke session from $primaryRef to usable fallback $candidateRef." } else { "" }
+            }
+        }
+
+        if ($status.isLocal -and -not [string]::IsNullOrWhiteSpace([string]$status.reason)) {
+            $unusableReasons = Add-UniqueString -List $unusableReasons -Value ([string]$status.reason)
+        }
+    }
+
+    return [pscustomobject]@{
+        status           = "skip"
+        modelOverrideRef = $null
+        detail           = if (@($unusableReasons).Count -gt 0) {
+            "No usable local runtime candidate is available for $AgentId. $(@($unusableReasons) -join ' ')"
+        }
+        else {
+            "No usable runtime candidate is available for $AgentId."
+        }
+    }
 }
 
 function Stop-OllamaModelFromRef {
@@ -341,9 +460,20 @@ try {
         if ($chatModelRef) {
             $modelsToStop.Add($chatModelRef)
         }
+        $chatModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $chatAgentId
+        if ($chatModelPlan.status -eq "skip") {
+            $outputLines.Add("SKIP: $chatAgentId smoke skipped because no endpoint-defined local model currently fits.")
+            $outputLines.Add($chatModelPlan.detail)
+            $checkResults.Add((New-CheckResult -Name "chat" -Status "skip" -AgentId $chatAgentId -Category "fit" -Detail $chatModelPlan.detail))
+        }
+        else {
         try {
+            if ($chatModelPlan.modelOverrideRef) {
+                $modelsToStop.Add([string]$chatModelPlan.modelOverrideRef)
+                $outputLines.Add("INFO: $($chatModelPlan.detail)")
+            }
             Write-ProgressLine "[$chatAgentId] Initializing a real git repo in the shared workspace" Gray
-            $chatInit = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $chatRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -Timeout $TimeoutSeconds
+            $chatInit = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $chatRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatInitReply = (Get-AgentReplyText -AgentJson $chatInit).Trim()
             if (-not (Test-Path (Join-Path $chatRepoPath ".git"))) {
                 throw "Expected git repo at $chatRepoPath, but .git directory was not created. Agent reply: $chatInitReply"
@@ -352,7 +482,7 @@ try {
             $outputLines.Add("Runtime: $(Get-AgentRuntimeRef -AgentJson $chatInit)")
 
             Write-ProgressLine "[$chatAgentId] Writing a README inside that repo" Gray
-            $chatWrite = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$chatRepoName/README.md with exactly this content: telegram smoke test. Then reply with exactly WRITE_OK and nothing else." -Timeout $TimeoutSeconds
+            $chatWrite = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$chatRepoName/README.md with exactly this content: telegram smoke test. Then reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatWriteReply = (Get-AgentReplyText -AgentJson $chatWrite).Trim()
             if ($chatWriteReply -ne "WRITE_OK" -and $chatWriteReply -ne "telegram smoke test") {
                 throw "Expected WRITE_OK from $chatAgentId after README write, but got: $chatWriteReply"
@@ -368,7 +498,7 @@ try {
             $outputLines.Add("PASS: $chatAgentId wrote README.md in shared workspace")
 
             Write-ProgressLine "[$chatAgentId] Reading the README back through OpenClaw" Gray
-            $chatRead = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-read-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$chatRepoName/README.md. Reply with exactly the file contents and nothing else." -Timeout $TimeoutSeconds
+            $chatRead = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-read-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$chatRepoName/README.md. Reply with exactly the file contents and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatReadReply = (Get-AgentReplyText -AgentJson $chatRead).Trim()
             if ((Normalize-SmokeSentence -Text $chatReadReply) -ne "telegram smoke test") {
                 throw "Expected README readback 'telegram smoke test', but got: $chatReadReply"
@@ -376,7 +506,7 @@ try {
             $outputLines.Add("PASS: $chatAgentId read back README.md content")
 
             Write-ProgressLine "[$chatAgentId] Running git status inside the repo" Gray
-            $chatStatus = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${chatRepoName}: git status --short --branch. Reply with the exact git output and nothing else." -Timeout $TimeoutSeconds
+            $chatStatus = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${chatRepoName}: git status --short --branch. Reply with the exact git output and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatStatusReply = (Get-AgentReplyText -AgentJson $chatStatus).Trim()
             $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $chatRepoPath, "status", "--short", "--branch")).Output.Trim()
             if ($hostStatus -ne $chatStatusReply) {
@@ -396,6 +526,7 @@ try {
             $outputLines.Add("FAIL: $chatAgentId useful git/file workflow failed [$category]")
             $outputLines.Add($message)
             $checkResults.Add((New-CheckResult -Name "chat" -Status "fail" -AgentId $chatAgentId -Category $category -Detail $message))
+        }
         }
     }
     else {
@@ -440,9 +571,20 @@ try {
         if ($reviewModelRef) {
             $modelsToStop.Add($reviewModelRef)
         }
+        $reviewModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $reviewAgentId
+        if ($reviewModelPlan.status -eq "skip") {
+            $outputLines.Add("SKIP: $reviewAgentId smoke skipped because no endpoint-defined local model currently fits.")
+            $outputLines.Add($reviewModelPlan.detail)
+            $checkResults.Add((New-CheckResult -Name "review" -Status "skip" -AgentId $reviewAgentId -Category "fit" -Detail $reviewModelPlan.detail))
+        }
+        else {
         try {
+            if ($reviewModelPlan.modelOverrideRef) {
+                $modelsToStop.Add([string]$reviewModelPlan.modelOverrideRef)
+                $outputLines.Add("INFO: $($reviewModelPlan.detail)")
+            }
             Write-ProgressLine "[$reviewAgentId] Verifying read-only review access to the shared workspace" Gray
-            $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$reviewProbeName. If it contains the exact phrase 'review smoke ok', reply with exactly REVIEW_OK and nothing else." -Timeout $TimeoutSeconds
+            $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$reviewProbeName. If it contains the exact phrase 'review smoke ok', reply with exactly REVIEW_OK and nothing else." -ModelOverrideRef $reviewModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
             if ($reviewReply -ne "REVIEW_OK") {
                 throw "Expected REVIEW_OK from $reviewAgentId, but got: $reviewReply"
@@ -460,6 +602,7 @@ try {
             $outputLines.Add($message)
             $checkResults.Add((New-CheckResult -Name "review" -Status "fail" -AgentId $reviewAgentId -Category $category -Detail $message))
         }
+        }
     }
     else {
         $outputLines.Add("SKIP: review-local agent is disabled in bootstrap config.")
@@ -471,9 +614,20 @@ try {
         if ($coderModelRef) {
             $modelsToStop.Add($coderModelRef)
         }
+        $coderModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $coderAgentId
+        if ($coderModelPlan.status -eq "skip") {
+            $outputLines.Add("SKIP: $coderAgentId smoke skipped because no endpoint-defined local model currently fits.")
+            $outputLines.Add($coderModelPlan.detail)
+            $checkResults.Add((New-CheckResult -Name "coder" -Status "skip" -AgentId $coderAgentId -Category "fit" -Detail $coderModelPlan.detail))
+        }
+        else {
         try {
+            if ($coderModelPlan.modelOverrideRef) {
+                $modelsToStop.Add([string]$coderModelPlan.modelOverrideRef)
+                $outputLines.Add("INFO: $($coderModelPlan.detail)")
+            }
             Write-ProgressLine "[$coderAgentId] Creating a bounded coding artifact in the shared workspace" Gray
-            $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exactly this content: coder smoke ok. Then reply with exactly CODER_WRITE_OK and nothing else." -Timeout $TimeoutSeconds
+            $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exactly this content: coder smoke ok. Then reply with exactly CODER_WRITE_OK and nothing else." -ModelOverrideRef $coderModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $coderReply = (Get-AgentReplyText -AgentJson $coderWrite).Trim()
             if ($coderReply -ne "CODER_WRITE_OK") {
                 throw "Expected CODER_WRITE_OK from $coderAgentId, but got: $coderReply"
@@ -497,6 +651,7 @@ try {
             $outputLines.Add("FAIL: $coderAgentId bounded write workflow failed [$category]")
             $outputLines.Add($message)
             $checkResults.Add((New-CheckResult -Name "coder" -Status "fail" -AgentId $coderAgentId -Category $category -Detail $message))
+        }
         }
     }
     else {

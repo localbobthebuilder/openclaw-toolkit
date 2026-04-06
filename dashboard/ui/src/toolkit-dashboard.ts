@@ -42,6 +42,7 @@ export class ToolkitDashboard extends LitElement {
     .card-header h3 { margin: 0; font-size: 1.1rem; color: #00bcd4; }
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
+    .help-text { display: block; margin-top: 6px; font-size: 0.85rem; color: #888; }
     input, select, textarea { width: 100%; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
     input:focus, select:focus, textarea:focus { border-color: #00bcd4; outline: none; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -340,6 +341,9 @@ export class ToolkitDashboard extends LitElement {
           } catch (e) {
                if (content.toLowerCase().includes('not installed') ||
                     content.toLowerCase().includes('not enabled') ||
+                    content.toLowerCase().includes('not initialized') ||
+                    content.toLowerCase().includes('setup incomplete') ||
+                    content.toLowerCase().includes('missing bot token') ||
                     content.toLowerCase().includes('timed out') ||
                     content.toLowerCase().includes('not configured yet') ||
                     content.toLowerCase().includes('not authenticated') ||
@@ -360,6 +364,56 @@ export class ToolkitDashboard extends LitElement {
           sections.push({ title, content, status });
       }
       return sections;
+  }
+
+  ensureTelegramConfig() {
+      if (!this.config.telegram || typeof this.config.telegram !== 'object') {
+          this.config.telegram = {};
+      }
+      if (!Array.isArray(this.config.telegram.allowFrom)) {
+          this.config.telegram.allowFrom = [];
+      }
+      if (!Array.isArray(this.config.telegram.groupAllowFrom)) {
+          this.config.telegram.groupAllowFrom = [];
+      }
+      if (!Array.isArray(this.config.telegram.groups)) {
+          this.config.telegram.groups = [];
+      }
+      return this.config.telegram;
+  }
+
+  ensureTelegramExecApprovalsConfig() {
+      const telegram = this.ensureTelegramConfig();
+      if (!telegram.execApprovals || typeof telegram.execApprovals !== 'object') {
+          telegram.execApprovals = {};
+      }
+      if (!Array.isArray(telegram.execApprovals.approvers)) {
+          telegram.execApprovals.approvers = [];
+      }
+      if (!telegram.execApprovals.target) {
+          telegram.execApprovals.target = 'dm';
+      }
+      return telegram.execApprovals;
+  }
+
+  parseCommaSeparatedList(value: string) {
+      return value.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+  }
+
+  addTelegramGroup() {
+      const telegram = this.ensureTelegramConfig();
+      telegram.groups.push({
+          id: '',
+          requireMention: true,
+          allowFrom: []
+      });
+      this.requestUpdate();
+  }
+
+  removeTelegramGroup(index: number) {
+      const telegram = this.ensureTelegramConfig();
+      telegram.groups.splice(index, 1);
+      this.requestUpdate();
   }
 
   renderStatus() {
@@ -387,9 +441,15 @@ export class ToolkitDashboard extends LitElement {
     const wsl2Section = sections.find(s => s.title === 'WSL2');
     const virtSection = sections.find(s => s.title === 'Virtualization');
     const bootstrapSection = sections.find(s => s.title === 'Bootstrap');
+    const managedImagesSection = sections.find(s => s.title === 'Managed Images');
 
     // If the script crashed and produced no parseable sections, treat as unprovisioned
     const scriptFailed = sections.length === 0 && !!this.statusOutput;
+
+    const managedImageCounts = managedImagesSection?.content.match(/(\d+)\s*\/\s*(\d+)\s*present/i);
+    const managedImagesPresentCount = managedImageCounts ? Number(managedImageCounts[1]) : 0;
+    const managedImagesExpectedCount = managedImageCounts ? Number(managedImageCounts[2]) : 0;
+    const bootstrapAssetsIncomplete = !scriptFailed && managedImagesExpectedCount > 0 && managedImagesPresentCount < managedImagesExpectedCount;
 
     const dockerNotInstalled = scriptFailed || dockerSection?.status === 'not-installed';
     const ollamaNotInstalled = scriptFailed || ollamaSection?.status === 'not-installed';
@@ -399,15 +459,19 @@ export class ToolkitDashboard extends LitElement {
     // Bootstrap is done when the repo has been cloned (repoPath exists)
     const repoNotCloned = !scriptFailed && (!bootstrapSection || bootstrapSection.status === 'not-installed');
     const gatewayDown = !scriptFailed && (!gatewaySection || gatewaySection.status === 'offline');
+    const bootstrapProvisioning = bootstrapAssetsIncomplete && gatewayDown;
 
-    const isNewInstall = dockerNotInstalled || ollamaNotInstalled || wsl2NotInstalled || virtNotReady || repoNotCloned;
+    const isNewInstall = dockerNotInstalled || ollamaNotInstalled || wsl2NotInstalled || virtNotReady || repoNotCloned || bootstrapProvisioning;
     const isServicesDown = !isNewInstall && (dockerNotReady || gatewayDown);
 
     // Step progression
     const prereqsDone = !dockerNotInstalled && !wsl2NotInstalled && !virtNotReady;
-    const bootstrapDone = prereqsDone && !dockerNotReady && !repoNotCloned;
+    const bootstrapDone = prereqsDone && !dockerNotReady && !repoNotCloned && !bootstrapAssetsIncomplete;
     const runningOk = bootstrapDone && !gatewayDown;
     const canLaunchOnboarding = runningOk;
+    const setupSubtitle = bootstrapProvisioning
+      ? 'Bootstrap is still provisioning the managed Docker images. Let it finish before starting services.'
+      : 'Some required software is not installed or bootstrap has not completed yet. Follow these steps to get OpenClaw running.';
 
     const shouldShowAuthAction = (section: { title: string, content: string, status: 'online'|'offline'|'not-installed' }) =>
       !!authActionMap[section.title] && (section.status !== 'online' || section.content.includes('Run:'));
@@ -423,7 +487,7 @@ export class ToolkitDashboard extends LitElement {
       ` : isNewInstall ? html`
         <div class="setup-guide">
           <h2>🚀 Let's get you set up</h2>
-          <p class="subtitle">Some required software is not installed. Follow these steps to get OpenClaw running.</p>
+          <p class="subtitle">${setupSubtitle}</p>
           <div class="setup-steps">
             <div class="setup-step ${prereqsDone ? 'done' : 'active'}">
               <div class="step-num">1</div>
@@ -493,17 +557,29 @@ export class ToolkitDashboard extends LitElement {
                                     </button>
                                 ` : ''}
                                ${rebootMap[s.title] && s.status !== 'not-installed'
-                                 && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady))
-                                 && !(s.title === 'Docker' && dockerNotInstalled) ? html`
-                                  <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;" 
-                                          ?disabled=${this.isRunning}
-                                          @click=${() => this.rebootService(rebootMap[s.title])}>
-                                      Restart
-                                  </button>
-                              ` : ''}
-                              <span class="status-indicator ${
-                                s.status === 'online' ? 'status-online' :
-                                s.status === 'not-installed' ? 'status-not-installed' :
+                                  && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady))
+                                  && !(s.title === 'Docker' && dockerNotInstalled) ? html`
+                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;" 
+                                           ?disabled=${this.isRunning}
+                                           @click=${() => this.rebootService(rebootMap[s.title])}>
+                                       Restart
+                                   </button>
+                               ` : ''}
+                               ${s.title === 'Telegram' ? html`
+                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
+                                           ?disabled=${this.isRunning}
+                                           @click=${() => this.runCommand('onboard')}>
+                                       Setup
+                                   </button>
+                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
+                                           ?disabled=${this.isRunning}
+                                           @click=${() => this.runCommand('telegram-ids')}>
+                                       IDs
+                                   </button>
+                               ` : ''}
+                               <span class="status-indicator ${
+                                 s.status === 'online' ? 'status-online' :
+                                 s.status === 'not-installed' ? 'status-not-installed' :
                                 'status-offline'
                               }"></span>
                           </div>
@@ -545,6 +621,7 @@ export class ToolkitDashboard extends LitElement {
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
       { id: 'start', name: 'Start', desc: 'Start all services and OpenClaw' },
       { id: 'onboard', name: 'Interactive Onboarding', desc: 'Launch openclaw onboard in a separate PowerShell window so you can answer prompts and make onboarding choices' },
+      { id: 'telegram-ids', name: 'Telegram IDs From Logs', desc: 'Inspect recent Telegram user and group IDs seen by the gateway so you can fill allowlists and group routing safely' },
       { id: 'stop', name: 'Stop', desc: 'Stop all services and OpenClaw' },
       { id: 'cli', args: ['--version'], name: 'OpenClaw CLI Version', desc: 'Run openclaw --version inside the gateway container and stream the result' },
       { id: 'cli', args: ['doctor'], name: 'OpenClaw Doctor', desc: 'Run openclaw doctor inside the gateway container and stream config diagnostics' },
@@ -625,6 +702,37 @@ export class ToolkitDashboard extends LitElement {
                 <input type="checkbox" ?checked=${this.config.ollama.enabled} @change=${(e: any) => { this.config.ollama.enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Ollama Local Models Support
             </label>
+        </div>
+        <div class="form-group">
+          <label>Auto-Pull VRAM Budget (%)</label>
+          <input
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            .value=${String(Math.round((typeof this.config.ollama.pullVramBudgetFraction === 'number' ? this.config.ollama.pullVramBudgetFraction : 0.7) * 100))}
+            @input=${(e: any) => {
+              const parsed = Number(e.target.value);
+              const normalized = Number.isFinite(parsed) ? Math.min(100, Math.max(1, parsed)) / 100 : 0.7;
+              this.config.ollama.pullVramBudgetFraction = normalized;
+              this.requestUpdate();
+            }}>
+          <div class="help-text">Auto-pull rejects local models above this percentage of an endpoint's total GPU VRAM.</div>
+        </div>
+        <div class="form-group">
+          <label>Model Fit VRAM Headroom (MiB)</label>
+          <input
+            type="number"
+            min="0"
+            step="128"
+            .value=${String(Math.round(typeof this.config.ollama.vramHeadroomMiB === 'number' ? this.config.ollama.vramHeadroomMiB : 1536))}
+            @input=${(e: any) => {
+              const parsed = Number(e.target.value);
+              const normalized = Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 1536;
+              this.config.ollama.vramHeadroomMiB = normalized;
+              this.requestUpdate();
+            }}>
+          <div class="help-text">Reserve this much GPU VRAM when probing the largest safe local-model context window.</div>
         </div>
       </div>
     `;
@@ -789,6 +897,14 @@ export class ToolkitDashboard extends LitElement {
     const clone = JSON.parse(JSON.stringify(config));
     if (!clone) return clone;
     if (!clone.ollama) clone.ollama = {};
+    if (typeof clone.ollama.pullVramBudgetFraction !== 'number' || !Number.isFinite(clone.ollama.pullVramBudgetFraction) || clone.ollama.pullVramBudgetFraction <= 0 || clone.ollama.pullVramBudgetFraction > 1) {
+      const parsedBudget = Number(clone.ollama.pullVramBudgetFraction);
+      clone.ollama.pullVramBudgetFraction = Number.isFinite(parsedBudget) && parsedBudget > 0 && parsedBudget <= 1 ? parsedBudget : 0.7;
+    }
+    if (typeof clone.ollama.vramHeadroomMiB !== 'number' || !Number.isFinite(clone.ollama.vramHeadroomMiB) || clone.ollama.vramHeadroomMiB < 0) {
+      const parsedHeadroom = Number(clone.ollama.vramHeadroomMiB);
+      clone.ollama.vramHeadroomMiB = Number.isFinite(parsedHeadroom) && parsedHeadroom >= 0 ? Math.round(parsedHeadroom) : 1536;
+    }
 
     const normalizeEndpoint = (endpoint: any) => {
       const normalized: any = {
@@ -1754,6 +1870,12 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderFeaturesConfig() {
+    const telegram = (this.config?.telegram && typeof this.config.telegram === 'object') ? this.config.telegram : {};
+    const telegramAllowFrom = Array.isArray(telegram.allowFrom) ? telegram.allowFrom : [];
+    const telegramGroupAllowFrom = Array.isArray(telegram.groupAllowFrom) ? telegram.groupAllowFrom : [];
+    const telegramGroups = Array.isArray(telegram.groups) ? telegram.groups : [];
+    const telegramExecApprovals = (telegram.execApprovals && typeof telegram.execApprovals === 'object') ? telegram.execApprovals : { approvers: [], target: 'dm' };
+    const telegramExecApprovers = Array.isArray(telegramExecApprovals.approvers) ? telegramExecApprovals.approvers : [];
     return html`
       <div class="grid-2">
         <div class="card">
@@ -1774,13 +1896,100 @@ export class ToolkitDashboard extends LitElement {
           <div class="card-header"><h3>Telegram</h3></div>
           <div class="form-group">
              <label class="toggle-switch">
-                <input type="checkbox" ?checked=${this.config.telegram.enabled} @change=${(e: any) => { this.config.telegram.enabled = e.target.checked; this.requestUpdate(); }}>
+                <input type="checkbox" ?checked=${telegram.enabled} @change=${(e: any) => { this.ensureTelegramConfig().enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Telegram Bot
-            </label>
+             </label>
+             <span class="help-text">Telegram uses long polling by default. Add a bot token or token file before bootstrap can initialize the live channel.</span>
+          </div>
+          <div class="form-group">
+            <label>Bot Token</label>
+            <input type="password" .value=${telegram.botToken || ''} @input=${(e: any) => { this.ensureTelegramConfig().botToken = e.target.value; this.requestUpdate(); }}>
+            <span class="help-text">Optional. Paste the BotFather token here, or leave it blank and use Token File instead.</span>
+          </div>
+          <div class="form-group">
+            <label>Token File</label>
+            <input type="text" .value=${telegram.tokenFile || ''} @input=${(e: any) => { this.ensureTelegramConfig().tokenFile = e.target.value; this.requestUpdate(); }}>
+            <span class="help-text">Optional. Preferred when you want the secret to stay outside openclaw-bootstrap.config.json.</span>
+          </div>
+          <div class="form-group">
+            <label>DM Policy</label>
+            <select @change=${(e: any) => { this.ensureTelegramConfig().dmPolicy = e.target.value; this.requestUpdate(); }}>
+              <option value="pairing" ?selected=${(telegram.dmPolicy || 'pairing') === 'pairing'}>pairing</option>
+              <option value="allowlist" ?selected=${telegram.dmPolicy === 'allowlist'}>allowlist</option>
+              <option value="open" ?selected=${telegram.dmPolicy === 'open'}>open</option>
+              <option value="disabled" ?selected=${telegram.dmPolicy === 'disabled'}>disabled</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Allowed User IDs (comma separated)</label>
-            <input type="text" .value=${(this.config.telegram.allowFrom || []).join(',')} @input=${(e: any) => this.config.telegram.allowFrom = e.target.value.split(',').map((s: string) => s.trim())}>
+            <input type="text" .value=${telegramAllowFrom.join(',')} @input=${(e: any) => { this.ensureTelegramConfig().allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Group Policy</label>
+            <select @change=${(e: any) => { this.ensureTelegramConfig().groupPolicy = e.target.value; this.requestUpdate(); }}>
+              <option value="allowlist" ?selected=${(telegram.groupPolicy || 'allowlist') === 'allowlist'}>allowlist</option>
+              <option value="open" ?selected=${telegram.groupPolicy === 'open'}>open</option>
+              <option value="disabled" ?selected=${telegram.groupPolicy === 'disabled'}>disabled</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Allowed Group Sender IDs (comma separated)</label>
+            <input type="text" .value=${telegramGroupAllowFrom.join(',')} @input=${(e: any) => { this.ensureTelegramConfig().groupAllowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+            <span class="help-text">Leave empty to fall back to the DM allowlist. Put group chat IDs under the groups list below, not here.</span>
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+                <input type="checkbox" ?checked=${!!telegramExecApprovals.enabled} @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig().enabled = e.target.checked; this.requestUpdate(); }}>
+                Enable Telegram exec approvals
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Exec Approver IDs (comma separated)</label>
+            <input type="text" .value=${telegramExecApprovers.join(',')} @input=${(e: any) => { this.ensureTelegramExecApprovalsConfig().approvers = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Exec Approval Target</label>
+            <select @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig().target = e.target.value; this.requestUpdate(); }}>
+              <option value="dm" ?selected=${(telegramExecApprovals.target || 'dm') === 'dm'}>dm</option>
+              <option value="channel" ?selected=${telegramExecApprovals.target === 'channel'}>channel</option>
+              <option value="both" ?selected=${telegramExecApprovals.target === 'both'}>both</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <div class="card-header" style="margin-bottom: 12px;">
+              <h3>Allowed Groups</h3>
+              <button class="btn btn-ghost" @click=${() => this.addTelegramGroup()}>+ Add Group</button>
+            </div>
+            ${telegramGroups.length === 0 ? html`
+              <span class="help-text">No Telegram groups configured yet. Add a negative Telegram group ID here to enable trusted group routing.</span>
+            ` : telegramGroups.map((group: any, index: number) => html`
+              <div class="card" style="padding: 14px; margin-bottom: 12px;">
+                <div class="form-group">
+                  <label>Group ID</label>
+                  <input type="text" .value=${group.id || ''} @input=${(e: any) => { group.id = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                  <label class="toggle-switch">
+                    <input type="checkbox" ?checked=${group.requireMention !== false} @change=${(e: any) => { group.requireMention = e.target.checked; this.requestUpdate(); }}>
+                    Require mention
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label>Allowed Sender IDs (comma separated)</label>
+                  <input type="text" .value=${Array.isArray(group.allowFrom) ? group.allowFrom.join(',') : ''} @input=${(e: any) => { group.allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                  <label>Group Policy Override</label>
+                  <select @change=${(e: any) => { group.groupPolicy = e.target.value; this.requestUpdate(); }}>
+                    <option value="" ?selected=${!group.groupPolicy}>Use top-level policy</option>
+                    <option value="allowlist" ?selected=${group.groupPolicy === 'allowlist'}>allowlist</option>
+                    <option value="open" ?selected=${group.groupPolicy === 'open'}>open</option>
+                    <option value="disabled" ?selected=${group.groupPolicy === 'disabled'}>disabled</option>
+                  </select>
+                </div>
+                <button class="btn btn-danger" @click=${() => this.removeTelegramGroup(index)}>Remove Group</button>
+              </div>
+            `)}
           </div>
         </div>
       </div>

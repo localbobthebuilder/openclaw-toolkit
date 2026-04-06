@@ -6,11 +6,12 @@ function Get-ToolkitGatewayOpenClawNoRespawnValue {
     return "1"
 }
 
-function Get-ToolkitGatewayOpenClawDockerExecArgs {
+function Get-ToolkitGatewayDockerExecArgs {
     param(
         [Parameter(Mandatory = $true)][string]$ContainerName,
-        [string[]]$Arguments = @(),
-        [switch]$Interactive
+        [Parameter(Mandatory = $true)][string[]]$Command,
+        [switch]$Interactive,
+        [switch]$IncludeOpenClawNoRespawn
     )
 
     $dockerArgs = New-Object System.Collections.Generic.List[string]
@@ -18,18 +19,29 @@ function Get-ToolkitGatewayOpenClawDockerExecArgs {
     if ($Interactive) {
         $dockerArgs.Add("-it")
     }
-    $dockerArgs.Add("-e")
-    $dockerArgs.Add("OPENCLAW_NO_RESPAWN=$(Get-ToolkitGatewayOpenClawNoRespawnValue)")
+    if ($IncludeOpenClawNoRespawn) {
+        $dockerArgs.Add("-e")
+        $dockerArgs.Add("OPENCLAW_NO_RESPAWN=$(Get-ToolkitGatewayOpenClawNoRespawnValue)")
+    }
     $dockerArgs.Add("-e")
     $dockerArgs.Add("NODE_COMPILE_CACHE=$(Get-ToolkitGatewayNodeCompileCachePath)")
     $dockerArgs.Add($ContainerName)
-    $dockerArgs.Add("openclaw")
 
-    foreach ($argument in @($Arguments)) {
-        $dockerArgs.Add([string]$argument)
+    foreach ($part in @($Command)) {
+        $dockerArgs.Add([string]$part)
     }
 
     return $dockerArgs.ToArray()
+}
+
+function Get-ToolkitGatewayOpenClawDockerExecArgs {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [string[]]$Arguments = @(),
+        [switch]$Interactive
+    )
+
+    return Get-ToolkitGatewayDockerExecArgs -ContainerName $ContainerName -Interactive:$Interactive -IncludeOpenClawNoRespawn -Command (@("openclaw") + @($Arguments))
 }
 
 function Get-ToolkitGatewayNodeDockerExecArgs {
@@ -39,20 +51,5 @@ function Get-ToolkitGatewayNodeDockerExecArgs {
         [switch]$Interactive
     )
 
-    $dockerArgs = New-Object System.Collections.Generic.List[string]
-    $dockerArgs.Add("exec")
-    if ($Interactive) {
-        $dockerArgs.Add("-it")
-    }
-    $dockerArgs.Add("-e")
-    $dockerArgs.Add("NODE_COMPILE_CACHE=$(Get-ToolkitGatewayNodeCompileCachePath)")
-    $dockerArgs.Add($ContainerName)
-    $dockerArgs.Add("node")
-    $dockerArgs.Add("dist/index.js")
-
-    foreach ($argument in @($Arguments)) {
-        $dockerArgs.Add([string]$argument)
-    }
-
-    return $dockerArgs.ToArray()
+    return Get-ToolkitGatewayDockerExecArgs -ContainerName $ContainerName -Interactive:$Interactive -Command (@("node", "dist/index.js") + @($Arguments))
 }

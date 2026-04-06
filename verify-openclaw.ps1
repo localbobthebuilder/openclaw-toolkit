@@ -64,6 +64,9 @@ $script:RequestedChecks = Resolve-RequestedChecks -Values $Checks
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-toolkit-logging.ps1")
+
+Enable-ToolkitTimestampedOutput
 
 $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -341,6 +344,95 @@ function Get-HostWorkspaceDir {
     return (Join-Path (Get-HostConfigDir -Config $Config) "workspace")
 }
 
+function Get-OpenClawConfigDocument {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $configFile = Join-Path (Get-HostConfigDir -Config $Config) "openclaw.json"
+    if (-not (Test-Path $configFile)) {
+        return $null
+    }
+
+    try {
+        $raw = (Get-Content -Raw $configFile).Trim()
+        if (-not $raw) {
+            return $null
+        }
+
+        try {
+            return $raw | ConvertFrom-Json -Depth 50
+        }
+        catch {
+            $repaired = ($raw -replace '(?:\\r\\n|\\n|\\r)+$', '').Trim()
+            if (-not $repaired) {
+                return $null
+            }
+
+            return $repaired | ConvertFrom-Json -Depth 50
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Resolve-OpenClawConfigDocumentPathValue {
+    param(
+        [Parameter(Mandatory = $true)]$Document,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $current = $Document
+    foreach ($segment in @($Path -split '\.')) {
+        if ($null -eq $current) {
+            return $null
+        }
+
+        if ($current -is [System.Collections.IList] -and $segment -match '^\d+$') {
+            $index = [int]$segment
+            if ($index -lt 0 -or $index -ge $current.Count) {
+                return $null
+            }
+            $current = $current[$index]
+            continue
+        }
+
+        if (-not ($current.PSObject.Properties.Name -contains $segment)) {
+            return $null
+        }
+
+        $current = $current.$segment
+    }
+
+    return $current
+}
+
+function Test-TelegramCredentialConfigured {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return $false
+    }
+
+    foreach ($propertyName in @("botToken", "tokenFile")) {
+        if ($TelegramConfig.PSObject.Properties.Name -contains $propertyName) {
+            $value = [string]$TelegramConfig.$propertyName
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return $true
+            }
+        }
+    }
+
+    if ($TelegramConfig.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramConfig.accounts) {
+        foreach ($accountProperty in @($TelegramConfig.accounts.PSObject.Properties)) {
+            if (Test-TelegramCredentialConfigured -TelegramConfig $accountProperty.Value) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
 function Resolve-HostWorkspacePath {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -409,14 +501,204 @@ function Convert-NormalizedJson {
     return ($Value | ConvertTo-Json -Depth 50 -Compress)
 }
 
+function Convert-DisplayJson {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return ""
+    }
+
+    if ($Value -is [string]) {
+        return [string]$Value
+    }
+
+    return ($Value | ConvertTo-Json -Depth 50)
+}
+
+function Invoke-LoggedConfigLookup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        $Document,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$UnavailableMessage,
+        [string]$MissingMessage
+    )
+
+    if (-not $UnavailableMessage) {
+        $UnavailableMessage = "Could not read live host config."
+    }
+    if (-not $MissingMessage) {
+        $MissingMessage = "Config path not found: $Path"
+    }
+
+    Write-Step $Label
+    $started = Get-Date
+
+    if ($null -eq $Document) {
+        $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+        Write-Detail "$UnavailableMessage ($elapsed)" ([ConsoleColor]::Yellow)
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output   = $UnavailableMessage
+        }
+    }
+
+    $value = Resolve-OpenClawConfigDocumentPathValue -Document $Document -Path $Path
+    if ($null -eq $value) {
+        $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+        Write-Detail "$MissingMessage ($elapsed)" ([ConsoleColor]::Yellow)
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output   = $MissingMessage
+        }
+    }
+
+    $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+    Write-Detail "Collected from host config in $elapsed" ([ConsoleColor]::Green)
+    return [pscustomobject]@{
+        ExitCode = 0
+        Output   = (Convert-DisplayJson -Value $value)
+    }
+}
+
+function Get-ManagedDockerImageTags {
+    param($BootstrapConfig)
+
+    $tags = New-Object System.Collections.Generic.List[string]
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    $gatewayImageTag = if ($null -ne $BootstrapConfig -and
+        $BootstrapConfig.PSObject.Properties.Name -contains "sandbox" -and
+        $null -ne $BootstrapConfig.sandbox -and
+        $BootstrapConfig.sandbox.PSObject.Properties.Name -contains "gatewayImageTag" -and
+        -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.sandbox.gatewayImageTag)) {
+        [string]$BootstrapConfig.sandbox.gatewayImageTag
+    }
+    else {
+        "openclaw:local"
+    }
+    if ($seen.Add($gatewayImageTag)) {
+        $tags.Add($gatewayImageTag)
+    }
+
+    $sandboxBaseImage = if ($null -ne $BootstrapConfig -and
+        $BootstrapConfig.PSObject.Properties.Name -contains "sandbox" -and
+        $null -ne $BootstrapConfig.sandbox -and
+        $BootstrapConfig.sandbox.PSObject.Properties.Name -contains "sandboxBaseImage" -and
+        -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.sandbox.sandboxBaseImage)) {
+        [string]$BootstrapConfig.sandbox.sandboxBaseImage
+    }
+    else {
+        "openclaw-sandbox:bookworm-slim"
+    }
+    if ($seen.Add($sandboxBaseImage)) {
+        $tags.Add($sandboxBaseImage)
+    }
+
+    $sandboxImage = if ($null -ne $BootstrapConfig -and
+        $BootstrapConfig.PSObject.Properties.Name -contains "sandbox" -and
+        $null -ne $BootstrapConfig.sandbox -and
+        $BootstrapConfig.sandbox.PSObject.Properties.Name -contains "sandboxImage" -and
+        -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.sandbox.sandboxImage)) {
+        [string]$BootstrapConfig.sandbox.sandboxImage
+    }
+    else {
+        "openclaw-sandbox-common:bookworm-slim"
+    }
+    if ($seen.Add($sandboxImage)) {
+        $tags.Add($sandboxImage)
+    }
+
+    $voiceNotesEnabled = $true
+    $voiceNotesMode = "local-whisper"
+    $voiceGatewayImageTag = "openclaw:local-voice"
+    if ($null -ne $BootstrapConfig -and $BootstrapConfig.PSObject.Properties.Name -contains "voiceNotes" -and $null -ne $BootstrapConfig.voiceNotes) {
+        if ($BootstrapConfig.voiceNotes.PSObject.Properties.Name -contains "enabled") {
+            $voiceNotesEnabled = [bool]$BootstrapConfig.voiceNotes.enabled
+        }
+        if ($BootstrapConfig.voiceNotes.PSObject.Properties.Name -contains "mode" -and -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.voiceNotes.mode)) {
+            $voiceNotesMode = [string]$BootstrapConfig.voiceNotes.mode
+        }
+        if ($BootstrapConfig.voiceNotes.PSObject.Properties.Name -contains "gatewayImageTag" -and -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.voiceNotes.gatewayImageTag)) {
+            $voiceGatewayImageTag = [string]$BootstrapConfig.voiceNotes.gatewayImageTag
+        }
+    }
+
+    if ($voiceNotesEnabled -and $voiceNotesMode -eq "local-whisper" -and $seen.Add($voiceGatewayImageTag)) {
+        $tags.Add($voiceGatewayImageTag)
+    }
+
+    return $tags.ToArray()
+}
+
+function Get-ManagedDockerImageStatus {
+    param(
+        $BootstrapConfig,
+        [bool]$DockerInstalled,
+        [bool]$DockerReady,
+        [bool]$BootstrapReady
+    )
+
+    $expectedTags = @(Get-ManagedDockerImageTags -BootstrapConfig $BootstrapConfig)
+    $presentTags = New-Object System.Collections.Generic.List[string]
+    $missingTags = New-Object System.Collections.Generic.List[string]
+    $state = "ready"
+
+    if (-not $DockerInstalled) {
+        $state = "not installed"
+        foreach ($tag in $expectedTags) {
+            $missingTags.Add($tag)
+        }
+    }
+    elseif (-not $DockerReady) {
+        $state = "not ready"
+        foreach ($tag in $expectedTags) {
+            $missingTags.Add($tag)
+        }
+    }
+    elseif (-not $BootstrapReady) {
+        $state = "bootstrap not run yet"
+        foreach ($tag in $expectedTags) {
+            $missingTags.Add($tag)
+        }
+    }
+    else {
+        foreach ($tag in $expectedTags) {
+            $probe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", $tag) -AllowFailure
+            if ($probe.ExitCode -eq 0) {
+                $presentTags.Add($tag)
+            }
+            else {
+                $missingTags.Add($tag)
+            }
+        }
+
+        if ($missingTags.Count -gt 0) {
+            $state = "bootstrap not complete yet"
+        }
+    }
+
+    return [pscustomobject]@{
+        State        = $state
+        ExpectedTags = $expectedTags
+        PresentTags  = $presentTags.ToArray()
+        MissingTags  = $missingTags.ToArray()
+        Complete     = ($expectedTags.Count -eq 0 -or $missingTags.Count -eq 0)
+    }
+}
+
 function Test-BindingMatch {
     param(
-        [Parameter(Mandatory = $true)]$Binding,
+        $Binding,
         [Parameter(Mandatory = $true)][string]$AgentId,
         [Parameter(Mandatory = $true)][string]$Channel,
         [Parameter(Mandatory = $true)][string]$PeerKind,
         [Parameter(Mandatory = $true)][string]$PeerId
     )
+
+    if ($null -eq $Binding -or $null -eq $Binding.match -or $null -eq $Binding.match.peer) {
+        return $false
+    }
 
     return (
         $Binding.agentId -eq $AgentId -and
@@ -442,12 +724,7 @@ function Resolve-ExpectedStrongModelRef {
         $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$Config.multiAgent.strongAgent.modelRef)
     }
 
-    $authReadyProviders = @()
-    foreach ($profile in @($LiveConfig.auth.profiles.PSObject.Properties.Value)) {
-        if ($profile.provider) {
-            $authReadyProviders = Add-UniqueString -List $authReadyProviders -Value ([string]$profile.provider)
-        }
-    }
+    $authReadyProviders = @(Get-AuthReadyProvidersFromLiveConfig -LiveConfig $LiveConfig)
 
     foreach ($candidateRef in @($candidateRefs)) {
         if ($candidateRef -like "ollama/*") {
@@ -483,6 +760,13 @@ function Get-AuthReadyProvidersFromLiveConfig {
     param([Parameter(Mandatory = $true)]$LiveConfig)
 
     $providers = @()
+    if (-not ($LiveConfig.PSObject.Properties.Name -contains "auth") -or
+        $null -eq $LiveConfig.auth -or
+        -not ($LiveConfig.auth.PSObject.Properties.Name -contains "profiles") -or
+        $null -eq $LiveConfig.auth.profiles) {
+        return @()
+    }
+
     foreach ($profile in @($LiveConfig.auth.profiles.PSObject.Properties.Value)) {
         if ($profile.provider) {
             $providers = Add-UniqueString -List $providers -Value ([string]$profile.provider)
@@ -494,8 +778,8 @@ function Get-AuthReadyProvidersFromLiveConfig {
 
 function Resolve-ExpectedHostedCandidateModelRef {
     param(
-        [Parameter(Mandatory = $true)][string[]]$CandidateRefs,
-        [Parameter(Mandatory = $true)][string[]]$AuthReadyProviders
+        [string[]]$CandidateRefs = @(),
+        [string[]]$AuthReadyProviders = @()
     )
 
     $candidates = @()
@@ -521,6 +805,132 @@ function Resolve-ExpectedHostedCandidateModelRef {
     return $null
 }
 
+function Get-EnabledExtraAgentConfigs {
+    param($MultiConfig)
+
+    if ($null -eq $MultiConfig -or -not ($MultiConfig.PSObject.Properties.Name -contains "extraAgents") -or $null -eq $MultiConfig.extraAgents) {
+        return @()
+    }
+
+    return @(
+        foreach ($extraAgent in @($MultiConfig.extraAgents)) {
+            if ($null -eq $extraAgent) {
+                continue
+            }
+
+            $isEnabled = $true
+            if ($extraAgent.PSObject.Properties.Name -contains "enabled" -and $null -ne $extraAgent.enabled) {
+                $isEnabled = [bool]$extraAgent.enabled
+            }
+            if (-not $isEnabled) {
+                continue
+            }
+
+            $extraAgent
+        }
+    )
+}
+
+function Test-ConfiguredAgentUsesSharedWorkspace {
+    param(
+        $MultiConfig,
+        $AgentConfig
+    )
+
+    if ($null -eq $MultiConfig -or -not ($MultiConfig.sharedWorkspace -and $MultiConfig.sharedWorkspace.enabled)) {
+        return $false
+    }
+
+    if ($null -ne $AgentConfig -and
+        $AgentConfig.PSObject.Properties.Name -contains "workspaceMode" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.workspaceMode)) {
+        return ([string]$AgentConfig.workspaceMode).ToLowerInvariant() -eq "shared"
+    }
+
+    return $true
+}
+
+function Get-ExpectedManagedModelRefs {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$LiveConfig
+    )
+
+    $actualModelAllowlist = @()
+    if ($LiveConfig.agents.defaults.models) {
+        $actualModelAllowlist = @($LiveConfig.agents.defaults.models.PSObject.Properties.Name | ForEach-Object { [string]$_ })
+    }
+    $availableLocalRefs = @(
+        foreach ($modelRef in @($actualModelAllowlist)) {
+            if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $modelRef) -or $modelRef -like "ollama/*") {
+                [string]$modelRef
+            }
+        }
+    )
+
+    $refs = @()
+
+    function Add-RefIfUsable {
+        param(
+            [string[]]$List,
+            [string]$ModelRef
+        )
+
+        if ([string]::IsNullOrWhiteSpace($ModelRef)) {
+            return @($List)
+        }
+
+        $modelRefText = [string]$ModelRef
+        if (((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $modelRefText) -or $modelRefText -like "ollama/*") -and ($modelRefText -notin @($availableLocalRefs))) {
+            return @($List)
+        }
+
+        return @(Add-UniqueString -List $List -Value $modelRefText)
+    }
+
+    if ($LiveConfig.agents.defaults.model -and $LiveConfig.agents.defaults.model.primary) {
+        $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$LiveConfig.agents.defaults.model.primary)
+    }
+    foreach ($agent in @($LiveConfig.agents.list)) {
+        if ($agent -and $agent.model -and $agent.model.primary) {
+            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$agent.model.primary)
+        }
+    }
+
+    $agentConfigs = @(
+        $Config.multiAgent.strongAgent,
+        $Config.multiAgent.researchAgent,
+        $Config.multiAgent.localChatAgent,
+        $Config.multiAgent.hostedTelegramAgent,
+        $Config.multiAgent.localReviewAgent,
+        $Config.multiAgent.localCoderAgent,
+        $Config.multiAgent.remoteReviewAgent,
+        $Config.multiAgent.remoteCoderAgent
+    ) + @(Get-EnabledExtraAgentConfigs -MultiConfig $Config.multiAgent)
+
+    foreach ($agentConfig in @($agentConfigs)) {
+        if ($null -eq $agentConfig) {
+            continue
+        }
+        if ($agentConfig.PSObject.Properties.Name -contains "enabled" -and -not [bool]$agentConfig.enabled) {
+            continue
+        }
+
+        if ($agentConfig.modelRef) {
+            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$agentConfig.modelRef)
+        }
+        foreach ($candidateRef in @($agentConfig.candidateModelRefs)) {
+            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$candidateRef)
+        }
+    }
+
+    foreach ($ref in @($availableLocalRefs)) {
+        $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$ref)
+    }
+
+    return @($refs)
+}
+
 if (-not (Test-Path $ConfigPath)) {
     throw "Config not found: $ConfigPath"
 }
@@ -543,19 +953,11 @@ if (-not (Test-Path $config.repoPath)) {
 }
 
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
-$liveConfig = $null
-if (Test-Path $hostConfigPath) {
-    try {
-        $liveConfig = Get-Content -Raw $hostConfigPath | ConvertFrom-Json -Depth 50
-    }
-    catch {
-        $liveConfig = $null
-    }
-}
+$liveConfig = Get-OpenClawConfigDocument -Config $config
 
 @(
     @{ Name = "curl.exe"; Required = (Test-CheckRequested -Names @("health")) },
-    @{ Name = "docker"; Required = (Test-CheckRequested -Names @("docker", "models", "telegram", "voice", "local-model", "agent", "sandbox", "chat-write", "audit")) },
+    @{ Name = "docker"; Required = (Test-CheckRequested -Names @("docker", "models", "voice", "local-model", "agent", "sandbox", "chat-write", "audit")) },
     @{ Name = "tailscale"; Required = (Test-CheckRequested -Names @("tailscale")) },
     @{ Name = "git"; Required = (Test-CheckRequested -Names @("git")) }
 ) | Where-Object { $_.Required } | ForEach-Object {
@@ -574,8 +976,29 @@ if (Test-CheckRequested -Names @("health")) {
     $health = Invoke-LoggedExternal -Label "Gateway health check" -FilePath "curl.exe" -Arguments @("-s", $config.verification.healthUrl) -AllowFailure -SuccessSummary "Gateway health endpoint responded." -FailureSummary "Gateway health endpoint did not return success."
 }
 $dockerPs = New-SkippedExternalResult
+$managedImages = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("docker")) {
     $dockerPs = Invoke-LoggedExternal -Label "Docker container status" -FilePath "docker" -Arguments @("ps", "--format", "table {{.Names}}`t{{.Status}}`t{{.Ports}}") -SuccessSummary "Docker responded with running container list."
+
+    Write-Step "Managed Docker image completeness"
+    $started = Get-Date
+    $imageStatus = Get-ManagedDockerImageStatus -BootstrapConfig $config -DockerInstalled $true -DockerReady:($dockerPs.ExitCode -eq 0) -BootstrapReady:(Test-Path $hostConfigPath)
+    $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+    if ($imageStatus.Complete) {
+        Write-Detail "Managed image set is complete in $elapsed" ([ConsoleColor]::Green)
+    }
+    else {
+        Write-Detail "Managed image set is incomplete in $elapsed" ([ConsoleColor]::Yellow)
+    }
+    $managedImageLines = @(
+        "State: $($imageStatus.State)",
+        "Present: $(if (@($imageStatus.PresentTags).Count -gt 0) { @($imageStatus.PresentTags) -join ', ' } else { '(none)' })",
+        "Missing: $(if (@($imageStatus.MissingTags).Count -gt 0) { @($imageStatus.MissingTags) -join ', ' } else { '(none)' })"
+    )
+    $managedImages = [pscustomobject]@{
+        ExitCode = if ($imageStatus.Complete) { 0 } else { 1 }
+        Output   = ($managedImageLines -join [Environment]::NewLine)
+    }
 }
 $serveStatus = New-SkippedExternalResult
 $funnelStatus = New-SkippedExternalResult
@@ -591,12 +1014,25 @@ if (Test-CheckRequested -Names @("models")) {
 }
 $telegramConfig = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("telegram")) {
-    $telegramConfig = Invoke-LoggedExternal -Label "Telegram channel config" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "config", "get", "channels.telegram") -AllowFailure -SuccessSummary "Collected Telegram config." -FailureSummary "Could not collect Telegram config."
+    $telegramMissingMessage = "Config path not found: channels.telegram"
+    if ($config.telegram -and [bool]$config.telegram.enabled) {
+        if (Test-TelegramCredentialConfigured -TelegramConfig $config.telegram) {
+            $telegramMissingMessage = "channels.telegram is not initialized in live config yet. Re-run bootstrap to apply Telegram setup."
+        }
+        else {
+            $telegramMissingMessage = "Telegram setup incomplete: channels.telegram is not initialized because telegram.botToken or telegram.tokenFile is still missing from toolkit config."
+        }
+    }
+    elseif ($config.telegram) {
+        $telegramMissingMessage = "Telegram is not enabled in toolkit config."
+    }
+
+    $telegramConfig = Invoke-LoggedConfigLookup -Label "Telegram channel config" -Document $liveConfig -Path "channels.telegram" -UnavailableMessage "Could not read live host config for Telegram verification." -MissingMessage $telegramMissingMessage
 }
 $audioConfig = New-SkippedExternalResult
 $audioBackendProbe = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("voice")) {
-    $audioConfig = Invoke-LoggedExternal -Label "Voice-notes config" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "config", "get", "tools.media.audio") -AllowFailure -SuccessSummary "Collected voice-note config." -FailureSummary "Could not collect voice-note config."
+    $audioConfig = Invoke-LoggedConfigLookup -Label "Voice-notes config" -Document $liveConfig -Path "tools.media.audio" -UnavailableMessage "Could not read live host config for voice-note verification."
     $audioBackendProbe = Invoke-LoggedExternal -Label "Voice-note backend probe" -FilePath "docker" -Arguments @(
         "exec", "openclaw-openclaw-gateway-1",
         "sh", "-lc",
@@ -670,7 +1106,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             $multiAgentVerification += "FAIL: Could not read live host config at $hostConfigPath"
         }
         else {
-        $authReadyProviders = Get-AuthReadyProvidersFromLiveConfig -LiveConfig $liveConfig
+        $authReadyProviders = @(Get-AuthReadyProvidersFromLiveConfig -LiveConfig $liveConfig)
         $expectedAgentIds = @()
         if ($config.multiAgent.strongAgent -and $config.multiAgent.strongAgent.id) {
             $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.strongAgent.id)
@@ -695,6 +1131,11 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         }
         if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled -and $config.multiAgent.remoteCoderAgent.id) {
             $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.remoteCoderAgent.id)
+        }
+        foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
+            if ($extraAgent.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$extraAgent.id)) {
+                $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$extraAgent.id)
+            }
         }
 
         $actualAgents = @($liveConfig.agents.list)
@@ -730,53 +1171,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        $expectedModelRefs = @()
-        if ($config.multiAgent.strongAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$config.multiAgent.strongAgent.modelRef)
-        }
-        foreach ($candidateRef in @($config.multiAgent.strongAgent.candidateModelRefs)) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$candidateRef)
-        }
-        if ($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
-            if ($config.multiAgent.researchAgent.modelRef) {
-                $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$config.multiAgent.researchAgent.modelRef)
-            }
-            foreach ($candidateRef in @($config.multiAgent.researchAgent.candidateModelRefs)) {
-                $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$candidateRef)
-            }
-        }
-        if ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled -and $config.multiAgent.localChatAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localChatAgent -ModelRef ([string]$config.multiAgent.localChatAgent.modelRef))
-        }
-        if ($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled) {
-            if ($config.multiAgent.hostedTelegramAgent.modelRef) {
-                $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$config.multiAgent.hostedTelegramAgent.modelRef)
-            }
-            foreach ($candidateRef in @($config.multiAgent.hostedTelegramAgent.candidateModelRefs)) {
-                $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value ([string]$candidateRef)
-            }
-        }
-        if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled -and $config.multiAgent.localReviewAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localReviewAgent -ModelRef ([string]$config.multiAgent.localReviewAgent.modelRef))
-        }
-        if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled -and $config.multiAgent.localCoderAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localCoderAgent -ModelRef ([string]$config.multiAgent.localCoderAgent.modelRef))
-        }
-        if ($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled -and $config.multiAgent.remoteReviewAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$config.multiAgent.remoteReviewAgent.modelRef))
-        }
-        if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled -and $config.multiAgent.remoteCoderAgent.modelRef) {
-            $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$config.multiAgent.remoteCoderAgent.modelRef))
-        }
-        if ($config.ollama -and $config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)) {
-            foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $config)) {
-                foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $config -EndpointKey ([string]$endpoint.key))) {
-                    if ($model.id) {
-                        $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Convert-ToolkitLocalModelIdToRef -Config $config -ModelId ([string]$model.id) -EndpointKey ([string]$endpoint.key))
-                    }
-                }
-            }
-        }
+        $expectedModelRefs = @(Get-ExpectedManagedModelRefs -Config $config -LiveConfig $liveConfig)
 
         $actualModelAllowlist = @()
         if ($liveConfig.agents.defaults.models) {
@@ -1009,13 +1404,23 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 $multiAgentVerification += "FAIL: remoteReviewAgent '$($config.multiAgent.remoteReviewAgent.id)' is missing from agents.list"
             }
             else {
-                $desiredRemoteReviewModel = Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$config.multiAgent.remoteReviewAgent.modelRef)
-                if ($remoteReviewAgent.model.primary -eq $desiredRemoteReviewModel) {
+                $expectedRemoteReviewModels = @()
+                foreach ($candidateRef in @($config.multiAgent.remoteReviewAgent.candidateModelRefs)) {
+                    $expectedRemoteReviewModels = Add-UniqueString -List $expectedRemoteReviewModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$candidateRef))
+                }
+                if ($config.multiAgent.remoteReviewAgent.modelRef) {
+                    $expectedRemoteReviewModels = Add-UniqueString -List $expectedRemoteReviewModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$config.multiAgent.remoteReviewAgent.modelRef))
+                }
+                $desiredRemoteReviewModel = if (@($expectedRemoteReviewModels).Count -gt 0) { [string]$expectedRemoteReviewModels[0] } else { [string]$config.multiAgent.remoteReviewAgent.modelRef }
+                if ($remoteReviewAgent.model.primary -in @($expectedRemoteReviewModels)) {
                     $multiAgentVerification += "PASS: review-remote model is $($remoteReviewAgent.model.primary)"
                 }
-            else {
-                $multiAgentVerification += "FAIL: review-remote model mismatch. Expected $desiredRemoteReviewModel, got $($remoteReviewAgent.model.primary)"
-            }
+                elseif ($remoteReviewAgent.model.primary -like "ollama/*" -and $remoteReviewAgent.model.primary -in $actualModelAllowlist) {
+                    $multiAgentVerification += "PASS: review-remote fell back from $desiredRemoteReviewModel to available local model $($remoteReviewAgent.model.primary)"
+                }
+                else {
+                    $multiAgentVerification += "FAIL: review-remote model mismatch. Expected one of $(@($expectedRemoteReviewModels) -join ', ') or another available ollama/* model, got $($remoteReviewAgent.model.primary)"
+                }
             }
 
             $expectedRemoteReviewSandboxMode = if ($config.multiAgent.remoteReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.remoteReviewAgent.sandboxMode) {
@@ -1055,8 +1460,11 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 if ($remoteCoderAgent.model.primary -in @($expectedRemoteCoderModels)) {
                     $multiAgentVerification += "PASS: coder-remote model is $($remoteCoderAgent.model.primary)"
                 }
+                elseif ($remoteCoderAgent.model.primary -like "ollama/*" -and $remoteCoderAgent.model.primary -in $actualModelAllowlist) {
+                    $multiAgentVerification += "PASS: coder-remote fell back from $desiredRemoteCoderModel to available local model $($remoteCoderAgent.model.primary)"
+                }
                 else {
-                    $multiAgentVerification += "FAIL: coder-remote model mismatch. Expected one of $(@($expectedRemoteCoderModels) -join ', '), got $($remoteCoderAgent.model.primary)"
+                    $multiAgentVerification += "FAIL: coder-remote model mismatch. Expected one of $(@($expectedRemoteCoderModels) -join ', ') or another available ollama/* model, got $($remoteCoderAgent.model.primary)"
                 }
             }
 
@@ -1171,7 +1579,12 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             $routeTrustedTelegramDms = [bool]$config.multiAgent.localChatAgent.routeTrustedTelegramDms
         }
 
+        $liveTelegramConfig = Resolve-OpenClawConfigDocumentPathValue -Document $liveConfig -Path "channels.telegram"
         if ($telegramRouteTargetAgentId) {
+            if ($null -eq $liveTelegramConfig -or -not [bool]$liveTelegramConfig.enabled) {
+                $multiAgentVerification += "INFO: Telegram routing checks skipped because channels.telegram is not enabled in live config"
+            }
+            else {
             if ($routeTrustedTelegramGroups) {
                 foreach ($group in @($config.telegram.groups)) {
                     $groupId = [string]$group.id
@@ -1201,14 +1614,19 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                     }
                 }
             }
+            }
         }
 
         if ($config.telegram -and $config.telegram.execApprovals) {
-            $liveTelegramExecApprovals = $liveConfig.channels.telegram.execApprovals
-            if ($null -eq $liveTelegramExecApprovals) {
-                $multiAgentVerification += "FAIL: Telegram exec approvals are not configured in live config"
+            if ($null -eq $liveTelegramConfig -or -not [bool]$liveTelegramConfig.enabled) {
+                $multiAgentVerification += "INFO: Telegram exec approval checks skipped because channels.telegram is not enabled in live config"
             }
             else {
+                $liveTelegramExecApprovals = $liveTelegramConfig.execApprovals
+                if ($null -eq $liveTelegramExecApprovals) {
+                    $multiAgentVerification += "FAIL: Telegram exec approvals are not configured in live config"
+                }
+                else {
                 if ([bool]$liveTelegramExecApprovals.enabled -eq [bool]$config.telegram.execApprovals.enabled) {
                     $multiAgentVerification += "PASS: Telegram exec approvals enabled state matches managed config"
                 }
@@ -1232,6 +1650,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
                 else {
                     $multiAgentVerification += "FAIL: Telegram exec approval target mismatch. Expected $expectedTelegramTarget, got $actualTelegramTarget"
+                }
                 }
             }
         }
@@ -1266,6 +1685,12 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                     @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled); AgentId = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.id } else { "review-remote" } },
                     @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled); AgentId = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.id } else { "coder-remote" } }
                 )
+                foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$extraAgent.id) -and
+                        (Test-ConfiguredAgentUsesSharedWorkspace -MultiConfig $config.multiAgent -AgentConfig $extraAgent)) {
+                        $overlayChecks += @{ Name = [string]$extraAgent.id; Enabled = $true; AgentId = [string]$extraAgent.id }
+                    }
+                }
 
                 foreach ($overlayCheck in $overlayChecks) {
                     if (-not $overlayCheck.Enabled) {
@@ -1280,6 +1705,29 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                         $multiAgentVerification += "FAIL: Agent bootstrap overlay AGENTS.md is missing for $($overlayCheck.Name) at $overlayAgentsPath"
                     }
                 }
+
+                $privateWorkspaceChecks = @()
+                foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
+                    if ([string]::IsNullOrWhiteSpace([string]$extraAgent.id) -or
+                        (Test-ConfiguredAgentUsesSharedWorkspace -MultiConfig $config.multiAgent -AgentConfig $extraAgent)) {
+                        continue
+                    }
+
+                    $privateWorkspaceChecks += @{
+                        Name      = [string]$extraAgent.id
+                        Workspace = if ($extraAgent.workspace) { [string]$extraAgent.workspace } else { $null }
+                    }
+                }
+
+                foreach ($workspaceCheck in $privateWorkspaceChecks) {
+                    $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspaceCheck.Workspace)) "AGENTS.md"
+                    if (Test-Path $agentsFilePath) {
+                        $multiAgentVerification += "PASS: Managed AGENTS.md exists for $($workspaceCheck.Name) at $agentsFilePath"
+                    }
+                    else {
+                        $multiAgentVerification += "FAIL: Managed AGENTS.md is missing for $($workspaceCheck.Name) at $agentsFilePath"
+                    }
+                }
             }
             else {
                 $workspaceChecks = @(
@@ -1292,6 +1740,13 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                     @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled); Workspace = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.workspace } else { $null } },
                     @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled); Workspace = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.workspace } else { $null } }
                 )
+                foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
+                    $workspaceChecks += @{
+                        Name      = if ($extraAgent.id) { [string]$extraAgent.id } else { "extra-agent" }
+                        Enabled   = $true
+                        Workspace = if ($extraAgent.workspace) { [string]$extraAgent.workspace } else { $null }
+                    }
+                }
 
                 foreach ($workspaceCheck in $workspaceChecks) {
                     if (-not $workspaceCheck.Enabled) {
@@ -1369,7 +1824,10 @@ $reportLines = New-Object System.Collections.Generic.List[string]
 [void]$reportLines.Add("Requested checks: $(@($script:RequestedChecks) -join ', ')")
 
 if (Test-CheckRequested -Names @("health")) { Add-ReportSection -Lines $reportLines -Title "Health" -Content $health.Output }
-if (Test-CheckRequested -Names @("docker")) { Add-ReportSection -Lines $reportLines -Title "Docker PS" -Content $dockerPs.Output }
+if (Test-CheckRequested -Names @("docker")) {
+    Add-ReportSection -Lines $reportLines -Title "Docker PS" -Content $dockerPs.Output
+    Add-ReportSection -Lines $reportLines -Title "Managed Images" -Content $managedImages.Output
+}
 if (Test-CheckRequested -Names @("tailscale")) {
     Add-ReportSection -Lines $reportLines -Title "Tailscale Serve" -Content $serveStatus.Output
     Add-ReportSection -Lines $reportLines -Title "Tailscale Funnel" -Content $funnelStatus.Output
@@ -1408,6 +1866,7 @@ Write-Host ""
 Write-Host "==> Verification summary" -ForegroundColor Cyan
 Write-Detail "Requested checks: $(@($script:RequestedChecks) -join ', ')"
 if (Test-CheckRequested -Names @("health")) { Write-Detail "Health exit code: $($health.ExitCode)" }
+if (Test-CheckRequested -Names @("docker")) { Write-Detail "Managed images: $(if ($managedImages.ExitCode -eq 0) { 'PASS' } else { 'INFO/INCOMPLETE' })" }
 if (Test-CheckRequested -Names @("voice")) { Write-Detail "Voice smoke test: $(Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null)" }
 if (Test-CheckRequested -Names @("local-model")) {
     Write-Detail "Local model smoke test: $(Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured)"

@@ -583,6 +583,9 @@ if (-not (Get-Command "pwsh" -ErrorAction SilentlyContinue)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+if (-not $PSBoundParameters.ContainsKey("HeadroomMiB")) {
+    $HeadroomMiB = Get-ToolkitOllamaVramHeadroomMiB -Config $config
+}
 $InputKinds = @(Normalize-InputKinds -Values $InputKinds)
 $endpoint = Get-ToolkitOllamaEndpoint -Config $config -EndpointKey $EndpointKey
 if ($null -eq $endpoint) {

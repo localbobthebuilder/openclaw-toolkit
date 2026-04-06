@@ -100,10 +100,13 @@
   "clearRedundantDangerousNodeDenyCommands": true,
   "telegram": {
     "enabled": true,
+    "botToken": "",
+    "tokenFile": "",
     "dmPolicy": "allowlist",
     "allowFrom": [
       "8674459047"
     ],
+    "groupAllowFrom": [],
     "execApprovals": {
       "enabled": true,
       "approvers": [
@@ -163,7 +166,9 @@
   "ollama": {
     "enabled": true,
     "setAsDefaultModel": false,
-    "clearFallbacks": true
+    "clearFallbacks": true,
+    "pullVramBudgetFraction": 0.7,
+    "vramHeadroomMiB": 1536
   },
   "modelCatalog": [
     {

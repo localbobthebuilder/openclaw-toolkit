@@ -1,12 +1,20 @@
 [CmdletBinding()]
 param(
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
+    [string]$ConfigPath,
     [string]$AgentId = "chat-local",
     [string]$WorkspaceHostPath = (Join-Path $env:USERPROFILE ".openclaw\\workspace-chat-local"),
     [int]$TimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ConfigPath) {
+    $ConfigPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "openclaw-bootstrap.config.json"
+}
+
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-ProgressLine {
     param(
@@ -72,7 +80,7 @@ function Test-ContainerRunning {
 function Stop-OllamaModelFromRef {
     param([string]$ModelRef)
 
-    if ([string]::IsNullOrWhiteSpace($ModelRef) -or $ModelRef -notlike "ollama/*") {
+    if ([string]::IsNullOrWhiteSpace($ModelRef) -or $ModelRef -notmatch '^[^/]+/.+$') {
         return
     }
 
@@ -82,7 +90,44 @@ function Stop-OllamaModelFromRef {
         return
     }
 
-    $modelId = $ModelRef.Substring("ollama/".Length)
+    $providerId, $modelId = $ModelRef -split '/', 2
+    if ([string]::IsNullOrWhiteSpace($modelId)) {
+        return
+    }
+
+    if ($null -eq $script:BootstrapConfig) {
+        if ($providerId -ne "ollama") {
+            return
+        }
+    }
+    else {
+        $endpoint = Get-ToolkitOllamaEndpointByProviderId -Config $script:BootstrapConfig -ProviderId $providerId
+        if ($null -eq $endpoint) {
+            return
+        }
+        $oldHost = $env:OLLAMA_HOST
+        try {
+            $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint
+            Write-ProgressLine "Stopping Ollama model $modelId to free GPU memory" Gray
+            $stopResult = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("stop", $modelId) -AllowFailure
+        }
+        finally {
+            if ($null -eq $oldHost) {
+                Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:OLLAMA_HOST = $oldHost
+            }
+        }
+        if ($stopResult.ExitCode -eq 0) {
+            Write-ProgressLine "Ollama model $modelId stopped" Green
+        }
+        else {
+            Write-ProgressLine "Ollama stop for $modelId returned exit code $($stopResult.ExitCode)" Yellow
+        }
+        return
+    }
+
     Write-ProgressLine "Stopping Ollama model $modelId to free GPU memory" Gray
     $stopResult = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("stop", $modelId) -AllowFailure
     if ($stopResult.ExitCode -eq 0) {
@@ -90,6 +135,96 @@ function Stop-OllamaModelFromRef {
     }
     else {
         Write-ProgressLine "Ollama stop for $modelId returned exit code $($stopResult.ExitCode)" Yellow
+    }
+}
+
+function Add-UniqueString {
+    param(
+        [string[]]$List = @(),
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return @($List)
+    }
+
+    if ($Value -notin @($List)) {
+        return @(@($List) + $Value)
+    }
+
+    return @($List)
+}
+
+function Get-AgentModelCandidateRefs {
+    param(
+        [Parameter(Mandatory = $true)]$LiveConfig,
+        [Parameter(Mandatory = $true)][string]$AgentId
+    )
+
+    $refs = @()
+    $agent = @($LiveConfig.agents.list) | Where-Object { $_.id -eq $AgentId } | Select-Object -First 1
+    if ($agent -and $agent.model) {
+        if ($agent.model.primary) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$agent.model.primary)
+        }
+        foreach ($fallbackRef in @($agent.model.fallbacks)) {
+            $refs = Add-UniqueString -List $refs -Value ([string]$fallbackRef)
+        }
+    }
+
+    return @($refs)
+}
+
+function Get-AgentSmokeModelPlan {
+    param(
+        [Parameter(Mandatory = $true)]$BootstrapConfig,
+        [Parameter(Mandatory = $true)]$LiveConfig,
+        [Parameter(Mandatory = $true)][string]$AgentId
+    )
+
+    $candidateRefs = @(Get-AgentModelCandidateRefs -LiveConfig $LiveConfig -AgentId $AgentId)
+    if (@($candidateRefs).Count -eq 0) {
+        return [pscustomobject]@{
+            status           = "pass"
+            modelOverrideRef = $null
+            detail           = ""
+        }
+    }
+
+    $primaryRef = [string]$candidateRefs[0]
+    $unusableReasons = @()
+    foreach ($candidateRef in @($candidateRefs)) {
+        if ($candidateRef -notlike "ollama*/*") {
+            return [pscustomobject]@{
+                status           = "pass"
+                modelOverrideRef = $null
+                detail           = ""
+            }
+        }
+
+        $status = Get-ToolkitLocalModelRefRuntimeStatus -Config $BootstrapConfig -ModelRef ([string]$candidateRef)
+        if ($status.usable) {
+            return [pscustomobject]@{
+                status           = "pass"
+                modelOverrideRef = if ([string]$candidateRef -ne $primaryRef) { [string]$candidateRef } else { $null }
+                detail           = if ([string]$candidateRef -ne $primaryRef) { "Switching smoke session from $primaryRef to usable fallback $candidateRef." } else { "" }
+            }
+        }
+
+        if ($status.isLocal -and -not [string]::IsNullOrWhiteSpace([string]$status.reason)) {
+            $unusableReasons = Add-UniqueString -List $unusableReasons -Value ([string]$status.reason)
+        }
+    }
+
+    return [pscustomobject]@{
+        status           = "skip"
+        modelOverrideRef = $null
+        detail           = if (@($unusableReasons).Count -gt 0) {
+            "No endpoint-defined local runtime candidate currently fits for $AgentId. $(@($unusableReasons) -join ' ')"
+        }
+        else {
+            "No endpoint-defined runtime candidate currently fits for $AgentId."
+        }
     }
 }
 
@@ -101,6 +236,15 @@ if (-not (Test-ContainerRunning -Name $ContainerName)) {
     throw "Container '$ContainerName' is not running."
 }
 
+$ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$script:BootstrapConfig = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+$script:BootstrapConfig = Resolve-PortableConfigPaths -Config $script:BootstrapConfig -BaseDir (Split-Path -Parent $ConfigPath)
+$hostConfigPath = Join-Path (Get-HostConfigDir -Config $script:BootstrapConfig) "openclaw.json"
+if (-not (Test-Path $hostConfigPath)) {
+    throw "Live OpenClaw config not found at $hostConfigPath"
+}
+$liveConfig = Get-Content -Raw $hostConfigPath | ConvertFrom-Json -Depth 50
+
 if (-not (Test-Path $WorkspaceHostPath)) {
     throw "Workspace host path does not exist: $WorkspaceHostPath"
 }
@@ -110,12 +254,23 @@ $sessionId = "smoke-$probeId"
 $probeFileName = "$probeId.txt"
 $probePath = Join-Path $WorkspaceHostPath $probeFileName
 $runtimeModelRef = ""
+$modelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $script:BootstrapConfig -LiveConfig $liveConfig -AgentId $AgentId
 
 Write-ProgressLine "Using agent $AgentId in session $sessionId" Cyan
 Write-ProgressLine "Workspace host path: $WorkspaceHostPath" Cyan
 
 if (Test-Path $probePath) {
     Remove-Item -LiteralPath $probePath -Recurse -Force
+}
+
+if ($modelPlan.status -eq "skip") {
+    @(
+        "Chat workspace write smoke test skipped."
+        "Agent: $AgentId"
+        $modelPlan.detail
+        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='skip';agentId=$AgentId;runtime='';category='fit';detail=$modelPlan.detail}) -Compress)"
+    ) | Write-Output
+    exit 0
 }
 
 try {
@@ -130,6 +285,20 @@ try {
         "--timeout", "60",
         "--json"
     ) -AllowFailure
+
+    if ($modelPlan.modelOverrideRef) {
+        Write-ProgressLine $modelPlan.detail DarkGray
+        $null = Invoke-External -FilePath "docker" -Arguments @(
+            "exec", $ContainerName,
+            "node", "dist/index.js",
+            "agent",
+            "--agent", $AgentId,
+            "--session-id", $sessionId,
+            "--message", "/model $($modelPlan.modelOverrideRef)",
+            "--timeout", "60",
+            "--json"
+        )
+    }
 
     $instruction = "Use the write tool to create a file named $probeFileName in your current workspace with exactly this content: smoke-ok. Then reply with only the absolute path to that file and nothing else."
     Write-ProgressLine "Prompting agent to create a file in its workspace" Gray
@@ -174,7 +343,19 @@ try {
         "Sandboxed: $sandboxed"
         "Created and removed: $probePath"
         "Reply: $payloadText"
+        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='pass';agentId=$AgentId;runtime=$runtimeModelRef;category='';detail='Chat workspace write smoke test passed.'}) -Compress)"
     ) | Write-Output
+}
+catch {
+    $message = ($_ | Out-String).Trim()
+    @(
+        "Chat workspace write smoke test failed."
+        "Agent: $AgentId"
+        "Runtime provider/model: $runtimeModelRef"
+        $message
+        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='fail';agentId=$AgentId;runtime=$runtimeModelRef;category='task';detail=$message}) -Compress)"
+    ) | Write-Output
+    throw
 }
 finally {
     if (Test-Path $probePath) {

@@ -13,6 +13,9 @@ if (-not $ConfigPath) {
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-toolkit-logging.ps1")
+
+Enable-ToolkitTimestampedOutput
 
 function Write-Step {
     param([string]$Message)

@@ -154,6 +154,131 @@ function Invoke-OpenClawCli {
     return Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Arguments $Arguments) -AllowFailure:$AllowFailure -TimeoutSeconds $TimeoutSeconds
 }
 
+function Get-ManagedDockerImageTags {
+    param($BootstrapConfig)
+
+    $tags = New-Object System.Collections.Generic.List[string]
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    $gatewayImageTag = if ($null -ne $BootstrapConfig -and
+        $BootstrapConfig.PSObject.Properties.Name -contains "sandbox" -and
+        $null -ne $BootstrapConfig.sandbox -and
+        $BootstrapConfig.sandbox.PSObject.Properties.Name -contains "gatewayImageTag" -and
+        -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.sandbox.gatewayImageTag)) {
+        [string]$BootstrapConfig.sandbox.gatewayImageTag
+    } else {
+        "openclaw:local"
+    }
+    if ($seen.Add($gatewayImageTag)) {
+        $tags.Add($gatewayImageTag)
+    }
+
+    $sandboxBaseImage = if ($null -ne $BootstrapConfig -and
+        $BootstrapConfig.PSObject.Properties.Name -contains "sandbox" -and
+        $null -ne $BootstrapConfig.sandbox -and
+        $BootstrapConfig.sandbox.PSObject.Properties.Name -contains "sandboxBaseImage" -and
+        -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.sandbox.sandboxBaseImage)) {
+        [string]$BootstrapConfig.sandbox.sandboxBaseImage
+    } else {
+        "openclaw-sandbox:bookworm-slim"
+    }
+    if ($seen.Add($sandboxBaseImage)) {
+        $tags.Add($sandboxBaseImage)
+    }
+
+    $sandboxImage = if ($null -ne $BootstrapConfig -and
+        $BootstrapConfig.PSObject.Properties.Name -contains "sandbox" -and
+        $null -ne $BootstrapConfig.sandbox -and
+        $BootstrapConfig.sandbox.PSObject.Properties.Name -contains "sandboxImage" -and
+        -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.sandbox.sandboxImage)) {
+        [string]$BootstrapConfig.sandbox.sandboxImage
+    } else {
+        "openclaw-sandbox-common:bookworm-slim"
+    }
+    if ($seen.Add($sandboxImage)) {
+        $tags.Add($sandboxImage)
+    }
+
+    $voiceNotesEnabled = $true
+    $voiceNotesMode = "local-whisper"
+    $voiceGatewayImageTag = "openclaw:local-voice"
+    if ($null -ne $BootstrapConfig -and $BootstrapConfig.PSObject.Properties.Name -contains "voiceNotes" -and $null -ne $BootstrapConfig.voiceNotes) {
+        if ($BootstrapConfig.voiceNotes.PSObject.Properties.Name -contains "enabled") {
+            $voiceNotesEnabled = [bool]$BootstrapConfig.voiceNotes.enabled
+        }
+        if ($BootstrapConfig.voiceNotes.PSObject.Properties.Name -contains "mode" -and -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.voiceNotes.mode)) {
+            $voiceNotesMode = [string]$BootstrapConfig.voiceNotes.mode
+        }
+        if ($BootstrapConfig.voiceNotes.PSObject.Properties.Name -contains "gatewayImageTag" -and -not [string]::IsNullOrWhiteSpace([string]$BootstrapConfig.voiceNotes.gatewayImageTag)) {
+            $voiceGatewayImageTag = [string]$BootstrapConfig.voiceNotes.gatewayImageTag
+        }
+    }
+
+    if ($voiceNotesEnabled -and $voiceNotesMode -eq "local-whisper" -and $seen.Add($voiceGatewayImageTag)) {
+        $tags.Add($voiceGatewayImageTag)
+    }
+
+    return $tags.ToArray()
+}
+
+function Get-ManagedDockerImageStatus {
+    param(
+        $BootstrapConfig,
+        [bool]$DockerInstalled,
+        [bool]$DockerReady,
+        [bool]$BootstrapReady
+    )
+
+    $expectedTags = @(Get-ManagedDockerImageTags -BootstrapConfig $BootstrapConfig)
+    $presentTags = New-Object System.Collections.Generic.List[string]
+    $missingTags = New-Object System.Collections.Generic.List[string]
+    $state = "ready"
+
+    if (-not $DockerInstalled) {
+        $state = "not installed"
+        foreach ($tag in $expectedTags) {
+            $missingTags.Add($tag)
+        }
+    }
+    elseif (-not $DockerReady) {
+        $state = "not ready"
+        foreach ($tag in $expectedTags) {
+            $missingTags.Add($tag)
+        }
+    }
+    elseif (-not $BootstrapReady) {
+        $state = "bootstrap not run yet"
+        foreach ($tag in $expectedTags) {
+            $missingTags.Add($tag)
+        }
+    }
+    else {
+        foreach ($tag in $expectedTags) {
+            $probe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", $tag) -AllowFailure -TimeoutSeconds 5
+            if ($probe.ExitCode -eq 0) {
+                $presentTags.Add($tag)
+            }
+            else {
+                $missingTags.Add($tag)
+            }
+        }
+
+        if ($missingTags.Count -gt 0) {
+            $state = "bootstrap not complete yet"
+        }
+    }
+
+    return [pscustomobject]@{
+        State         = $state
+        ExpectedTags  = $expectedTags
+        PresentTags   = $presentTags.ToArray()
+        MissingTags   = $missingTags.ToArray()
+        ExpectedCount = $expectedTags.Count
+        PresentCount  = $presentTags.Count
+        Complete      = ($expectedTags.Count -eq 0 -or $missingTags.Count -eq 0)
+    }
+}
+
 function Get-AuthProfilesSnapshot {
     param([string]$ContainerName = "openclaw-openclaw-gateway-1")
 
@@ -257,6 +382,82 @@ function Read-JsonFile {
     catch {
         return $null
     }
+}
+
+function Resolve-ConfigDocumentPathValue {
+    param(
+        [Parameter(Mandatory = $true)]$Document,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $current = $Document
+    foreach ($segment in @($Path -split '\.')) {
+        if ($null -eq $current) {
+            return $null
+        }
+
+        if ($current -is [System.Collections.IList] -and $segment -match '^\d+$') {
+            $index = [int]$segment
+            if ($index -lt 0 -or $index -ge $current.Count) {
+                return $null
+            }
+            $current = $current[$index]
+            continue
+        }
+
+        if (-not ($current.PSObject.Properties.Name -contains $segment)) {
+            return $null
+        }
+
+        $current = $current.$segment
+    }
+
+    return $current
+}
+
+function Test-TelegramCredentialConfigured {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return $false
+    }
+
+    foreach ($propertyName in @("botToken", "tokenFile")) {
+        if ($TelegramConfig.PSObject.Properties.Name -contains $propertyName) {
+            $value = [string]$TelegramConfig.$propertyName
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return $true
+            }
+        }
+    }
+
+    if ($TelegramConfig.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramConfig.accounts) {
+        foreach ($accountProperty in @($TelegramConfig.accounts.PSObject.Properties)) {
+            if (Test-TelegramCredentialConfigured -TelegramConfig $accountProperty.Value) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Get-TelegramGroupCount {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig -or -not ($TelegramConfig.PSObject.Properties.Name -contains "groups") -or $null -eq $TelegramConfig.groups) {
+        return 0
+    }
+
+    if ($TelegramConfig.groups -is [System.Collections.IDictionary]) {
+        return @($TelegramConfig.groups.Keys).Count
+    }
+
+    if ($TelegramConfig.groups.PSObject -and @($TelegramConfig.groups.PSObject.Properties).Count -gt 0) {
+        return @($TelegramConfig.groups.PSObject.Properties).Count
+    }
+
+    return @($TelegramConfig.groups).Count
 }
 
 function Test-TextForStringPattern {
@@ -564,6 +765,7 @@ if ($dockerEngineReady) {
 }
 $serve  = Invoke-External -FilePath "tailscale" -Arguments @("serve", "status") -AllowFailure
 $bootstrapReady = Test-Path $RepoPath
+$managedImages = Get-ManagedDockerImageStatus -BootstrapConfig $bootstrapConfig -DockerInstalled:$dockerInstalled -DockerReady:$dockerEngineReady -BootstrapReady:$bootstrapReady
 $gatewayContainerName = "openclaw-openclaw-gateway-1"
 $openClawVersion = Invoke-OpenClawCli -Arguments @("--version") -AllowFailure -TimeoutSeconds 5 -ContainerName $gatewayContainerName -DockerInstalled:$dockerInstalled -DockerReady:$dockerEngineReady -BootstrapReady:$bootstrapReady
 $ollamaVersion = Invoke-External -FilePath "ollama" -Arguments @("--version") -AllowFailure -TimeoutSeconds 5
@@ -580,6 +782,8 @@ $bootstrapConfigText = if (Test-Path $configFile) { Get-Content $configFile -Raw
 $hostOpenClawConfigPath = Get-HostOpenClawConfigPath -BootstrapConfig $bootstrapConfig
 $hostOpenClawConfigText = if (Test-Path $hostOpenClawConfigPath) { Get-Content $hostOpenClawConfigPath -Raw } else { "" }
 $hostOpenClawConfig = Read-JsonFile -Path $hostOpenClawConfigPath
+$liveTelegramConfig = if ($null -ne $hostOpenClawConfig) { Resolve-ConfigDocumentPathValue -Document $hostOpenClawConfig -Path "channels.telegram" } else { $null }
+$bootstrapTelegramConfig = if ($null -ne $bootstrapConfig -and $bootstrapConfig.PSObject.Properties.Name -contains "telegram") { $bootstrapConfig.telegram } else { $null }
 $ollamaCloudIntent = Get-OllamaCloudIntent `
     -BootstrapConfigText $bootstrapConfigText `
     -HostConfigText $hostOpenClawConfigText `
@@ -675,6 +879,70 @@ if (-not $dockerInstalled) {
 }
 
 Write-Host ""
+Write-Host "[Telegram]" -ForegroundColor Cyan
+$telegramWanted = $null -ne $bootstrapTelegramConfig -and [bool]$bootstrapTelegramConfig.enabled
+$telegramLiveEnabled = $null -ne $liveTelegramConfig -and [bool]$liveTelegramConfig.enabled
+$bootstrapTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $bootstrapTelegramConfig
+$liveTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $liveTelegramConfig
+if (-not $telegramWanted -and -not $telegramLiveEnabled) {
+    Write-Host "Telegram: not enabled yet" -ForegroundColor Yellow
+    Write-Host "Enable Telegram in the toolkit config, add a bot token or token file, then rerun bootstrap."
+    Write-Host "Run: .\run-openclaw.cmd onboard"
+}
+elseif (-not $bootstrapReady) {
+    Write-Host "Telegram: bootstrap not run yet" -ForegroundColor Yellow
+    Write-Host "Run: .\run-openclaw.cmd bootstrap"
+}
+elseif (-not $telegramLiveEnabled) {
+    if (-not ($bootstrapTelegramHasCredentials -or $liveTelegramHasCredentials)) {
+        Write-Host "Telegram: setup incomplete (bot token or token file missing)" -ForegroundColor Yellow
+        Write-Host "Configure telegram.botToken or telegram.tokenFile in the toolkit config before bootstrap initializes channels.telegram."
+        Write-Host "Run: .\run-openclaw.cmd onboard"
+    }
+    else {
+        Write-Host "Telegram: not initialized in live config yet" -ForegroundColor Yellow
+        Write-Host "Credentials exist, but channels.telegram is not enabled in live OpenClaw config yet."
+        Write-Host "Run: .\run-openclaw.cmd bootstrap"
+    }
+}
+else {
+    if ($liveTelegramHasCredentials) {
+        Write-Host "Telegram: configured" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Telegram: enabled but missing bot token or token file" -ForegroundColor Yellow
+    }
+
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "dmPolicy" -and $liveTelegramConfig.dmPolicy) {
+        Write-Host "DM policy: $([string]$liveTelegramConfig.dmPolicy)"
+    }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "allowFrom") {
+        Write-Host "Allowed DM senders: $(@($liveTelegramConfig.allowFrom).Count)"
+    }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "groupPolicy" -and $liveTelegramConfig.groupPolicy) {
+        Write-Host "Group policy: $([string]$liveTelegramConfig.groupPolicy)"
+    }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "groupAllowFrom") {
+        Write-Host "Allowed group senders: $(@($liveTelegramConfig.groupAllowFrom).Count)"
+    }
+    Write-Host "Configured groups: $(Get-TelegramGroupCount -TelegramConfig $liveTelegramConfig)"
+
+    $liveExecApprovals = if ($liveTelegramConfig.PSObject.Properties.Name -contains "execApprovals") { $liveTelegramConfig.execApprovals } else { $null }
+    if ($null -ne $liveExecApprovals) {
+        $approvalStatus = if ($liveExecApprovals.PSObject.Properties.Name -contains "enabled") { [string]$liveExecApprovals.enabled } else { "auto" }
+        Write-Host "Exec approvals: $approvalStatus"
+        if ($liveExecApprovals.PSObject.Properties.Name -contains "approvers") {
+            Write-Host "Exec approvers: $(@($liveExecApprovals.approvers).Count)"
+        }
+        if ($liveExecApprovals.PSObject.Properties.Name -contains "target" -and $liveExecApprovals.target) {
+            Write-Host "Exec target: $([string]$liveExecApprovals.target)"
+        }
+    }
+
+    Write-Host "Run: .\run-openclaw.cmd telegram-ids"
+}
+
+Write-Host ""
 Write-Host "[Compose]" -ForegroundColor Cyan
 if (-not $dockerInstalled) {
     Write-Host "Compose: not installed"
@@ -696,6 +964,30 @@ if (-not $dockerInstalled) {
     Write-Host "Containers: bootstrap not run yet"
 } elseif ($containers.Output) {
     Write-Host $containers.Output
+}
+
+Write-Host ""
+Write-Host "[Managed Images]" -ForegroundColor Cyan
+if ($managedImages.State -eq "not installed") {
+    Write-Host "Managed images: not installed"
+}
+elseif ($managedImages.State -eq "not ready") {
+    Write-Host "Managed images: not ready"
+}
+elseif ($managedImages.State -eq "bootstrap not run yet") {
+    Write-Host "Managed images: bootstrap not run yet"
+}
+elseif ($managedImages.Complete) {
+    Write-Host ("Managed images: ready ({0}/{1} present)" -f $managedImages.PresentCount, $managedImages.ExpectedCount) -ForegroundColor Green
+}
+else {
+    Write-Host ("Managed images: bootstrap not complete yet ({0}/{1} present)" -f $managedImages.PresentCount, $managedImages.ExpectedCount) -ForegroundColor Yellow
+}
+if ($managedImages.PresentTags.Count -gt 0) {
+    Write-Host ("Present: " + ($managedImages.PresentTags -join ", "))
+}
+if ($managedImages.MissingTags.Count -gt 0) {
+    Write-Host ("Missing: " + ($managedImages.MissingTags -join ", "))
 }
 
 Write-Host ""

@@ -15,6 +15,11 @@ if (-not $ConfigPath) {
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-upstream-patches.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-gateway-cli-startup.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-openclaw-config.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-toolkit-logging.ps1")
+
+Enable-ToolkitTimestampedOutput
+Initialize-ToolkitOpenClawConfigBatch
 
 $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -181,7 +186,7 @@ function Get-DockerImageLabelValue {
     )
 
     $format = "{{ index .Config.Labels `"$LabelName`" }}"
-    $probe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", "--format", $format, $ImageTag) -AllowFailure
+    $probe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", "--format", $format, $ImageTag) -AllowFailure -Quiet
     if ($probe.ExitCode -ne 0) {
         return ""
     }
@@ -192,6 +197,13 @@ function Get-DockerImageLabelValue {
     }
 
     return $value
+}
+
+function Test-DockerImagePresent {
+    param([Parameter(Mandatory = $true)][string]$ImageTag)
+
+    $probe = Invoke-External -FilePath "docker" -Arguments @("image", "inspect", $ImageTag) -AllowFailure -Quiet
+    return $probe.ExitCode -eq 0
 }
 
 function Backup-File {
@@ -550,22 +562,34 @@ function Ensure-GatewayImageSupportsSandbox {
     }
 
     $sourceVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
-    $imageVersion = Get-OpenClawImageVersion -ImageTag ([string]$Config.sandbox.gatewayImageTag)
     $patchFingerprint = Get-ManagedUpstreamPatchFingerprint -Patches $managedUpstreamPatches
-    $imagePatchFingerprint = Get-DockerImageLabelValue -ImageTag ([string]$Config.sandbox.gatewayImageTag) -LabelName "io.openclaw.toolkit.upstream-patches-sha"
+    $gatewayImageTag = [string]$Config.sandbox.gatewayImageTag
+    $imagePresent = Test-DockerImagePresent -ImageTag $gatewayImageTag
+    $imageVersion = $null
+    $imagePatchFingerprint = ""
+    $needsRebuild = -not $imagePresent
 
-    $dockerProbe = Invoke-External -FilePath "docker" -Arguments @(
-        "run", "--rm", "--entrypoint", "sh", $Config.sandbox.gatewayImageTag,
-        "-lc", "docker --version"
-    ) -AllowFailure
+    if (-not $imagePresent) {
+        Write-Host "Gateway image $gatewayImageTag is not present locally yet. Building it now." -ForegroundColor Yellow
+    }
+    else {
+        $imageVersion = Get-OpenClawImageVersion -ImageTag $gatewayImageTag
+        $imagePatchFingerprint = Get-DockerImageLabelValue -ImageTag $gatewayImageTag -LabelName "io.openclaw.toolkit.upstream-patches-sha"
 
-    $needsRebuild = $dockerProbe.ExitCode -ne 0
+        $dockerProbe = Invoke-External -FilePath "docker" -Arguments @(
+            "run", "--rm", "--entrypoint", "sh", $gatewayImageTag,
+            "-lc", "docker --version"
+        ) -AllowFailure
+
+        $needsRebuild = $dockerProbe.ExitCode -ne 0
+    }
+
     if (-not $needsRebuild -and $sourceVersion -and $imageVersion -and $sourceVersion -ne $imageVersion) {
-        Write-WarnLine "Gateway image $($Config.sandbox.gatewayImageTag) is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
+        Write-WarnLine "Gateway image $gatewayImageTag is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
         $needsRebuild = $true
     }
     if (-not $needsRebuild -and $patchFingerprint -ne $imagePatchFingerprint) {
-        Write-WarnLine "Gateway image $($Config.sandbox.gatewayImageTag) is missing the current managed patch fingerprint. Rebuilding."
+        Write-WarnLine "Gateway image $gatewayImageTag is missing the current managed patch fingerprint. Rebuilding."
         $needsRebuild = $true
     }
 
@@ -715,16 +739,27 @@ function Ensure-LocalWhisperGatewayImage {
     }
 
     $sourceVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
-    $imageVersion = Get-OpenClawImageVersion -ImageTag $targetImage
     $patchFingerprint = Get-ManagedUpstreamPatchFingerprint -Patches $managedUpstreamPatches
-    $imagePatchFingerprint = Get-DockerImageLabelValue -ImageTag $targetImage -LabelName "io.openclaw.toolkit.upstream-patches-sha"
+    $imagePresent = Test-DockerImagePresent -ImageTag $targetImage
+    $imageVersion = $null
+    $imagePatchFingerprint = ""
+    $needsRebuild = -not $imagePresent
 
-    $probe = Invoke-External -FilePath "docker" -Arguments @(
-        "run", "--rm", "--entrypoint", "sh", $targetImage,
-        "-lc", "whisper --help >/dev/null 2>&1 && ffmpeg -version >/dev/null 2>&1"
-    ) -AllowFailure
+    if (-not $imagePresent) {
+        Write-Host "Gateway image $targetImage is not present locally yet. Building it now." -ForegroundColor Yellow
+    }
+    else {
+        $imageVersion = Get-OpenClawImageVersion -ImageTag $targetImage
+        $imagePatchFingerprint = Get-DockerImageLabelValue -ImageTag $targetImage -LabelName "io.openclaw.toolkit.upstream-patches-sha"
 
-    $needsRebuild = $probe.ExitCode -ne 0
+        $probe = Invoke-External -FilePath "docker" -Arguments @(
+            "run", "--rm", "--entrypoint", "sh", $targetImage,
+            "-lc", "whisper --help >/dev/null 2>&1 && ffmpeg -version >/dev/null 2>&1"
+        ) -AllowFailure
+
+        $needsRebuild = $probe.ExitCode -ne 0
+    }
+
     if (-not $needsRebuild -and $sourceVersion -and $imageVersion -and $sourceVersion -ne $imageVersion) {
         Write-WarnLine "Gateway image $targetImage is on OpenClaw $imageVersion but repo is $sourceVersion. Rebuilding."
         $needsRebuild = $true
@@ -882,11 +917,12 @@ function Ensure-TailscaleServe {
         return
     }
 
-    $statusJson = Invoke-External -FilePath "tailscale" -Arguments @("status", "--json")
-    $status = $statusJson.Output | ConvertFrom-Json
-    $nodeId = $status.Self.ID
+    $nodeId = Get-TailscaleSelfNodeId
     if (-not $nodeId) {
-        throw "Could not determine Tailscale node id for Serve enablement."
+        Write-WarnLine "Tailscale Serve could not be enabled automatically, and the local Tailscale node id could not be determined."
+        Write-Host "Enable Serve in the Tailscale client or admin console, then rerun bootstrap or run:" -ForegroundColor Yellow
+        Write-Host "  tailscale serve --bg $($Config.tailscale.proxyTarget)" -ForegroundColor DarkGray
+        return
     }
 
     $enableUrl = "https://login.tailscale.com/f/serve?node=$nodeId"
@@ -902,6 +938,32 @@ function Ensure-TailscaleServe {
     }
 
     Write-Host "Tailscale Serve configured after manual approval." -ForegroundColor Green
+}
+
+function Get-TailscaleSelfNodeId {
+    $statusJson = Invoke-External -FilePath "tailscale" -Arguments @("status", "--json", "--peers=false") -AllowFailure -Quiet
+    if ($statusJson.ExitCode -ne 0 -or -not $statusJson.Output) {
+        return $null
+    }
+
+    try {
+        $status = $statusJson.Output | ConvertFrom-Json -Depth 20
+    }
+    catch {
+        return $null
+    }
+
+    $nodeId = if ($status.PSObject.Properties.Name -contains "Self" -and $null -ne $status.Self) {
+        [string]$status.Self.ID
+    }
+    else {
+        ""
+    }
+    if ([string]::IsNullOrWhiteSpace($nodeId)) {
+        return $null
+    }
+
+    return $nodeId
 }
 
 function Invoke-InteractiveDockerSetup {
@@ -987,34 +1049,104 @@ function Set-OpenClawConfigJson {
         [switch]$AsArray
     )
 
-    if (($AsArray -or $Value -is [System.Array]) -and @($Value).Count -eq 0) {
-        $json = "[]"
-    }
-    else {
-        if ($AsArray -or $Value -is [System.Array]) {
-            $json = @($Value) | ConvertTo-Json -AsArray -Depth 50 -Compress
-        }
-        else {
-            $json = $Value | ConvertTo-Json -Depth 50 -Compress
-        }
-    }
-
-    $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "set", $Path, $json, "--strict-json"))
+    Add-ToolkitOpenClawConfigSetOperation -Path $Path -Value $Value -AsArray:$AsArray
 }
 
 function Remove-OpenClawConfigValue {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "unset", $Path)) -AllowFailure
+    Add-ToolkitOpenClawConfigUnsetOperation -Path $Path
 }
 
 function Set-OpenClawConfigValue {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Value
+        [Parameter(Mandatory = $true)]$Value
     )
 
-    $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "set", $Path, $Value))
+    Add-ToolkitOpenClawConfigSetOperation -Path $Path -Value $Value
+}
+
+function Get-OpenClawConfigDocument {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $configFile = Join-Path (Get-HostConfigDir -Config $Config) "openclaw.json"
+    if (-not (Test-Path $configFile)) {
+        return $null
+    }
+
+    try {
+        $raw = (Get-Content -Raw $configFile).Trim()
+        if (-not $raw) {
+            return $null
+        }
+
+        try {
+            return $raw | ConvertFrom-Json -Depth 50
+        }
+        catch {
+            $repaired = ($raw -replace '(?:\\r\\n|\\n|\\r)+$', '').Trim()
+            if (-not $repaired) {
+                return $null
+            }
+
+            return $repaired | ConvertFrom-Json -Depth 50
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Resolve-OpenClawConfigDocumentPathValue {
+    param(
+        [Parameter(Mandatory = $true)]$Document,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $current = $Document
+    foreach ($segment in @($Path -split '\.')) {
+        if ($null -eq $current) {
+            return $null
+        }
+
+        if ($current -is [System.Collections.IList] -and $segment -match '^\d+$') {
+            $index = [int]$segment
+            if ($index -lt 0 -or $index -ge $current.Count) {
+                return $null
+            }
+            $current = $current[$index]
+            continue
+        }
+
+        if ($current -is [System.Collections.IDictionary]) {
+            if (-not $current.Contains($segment)) {
+                return $null
+            }
+            $current = $current[$segment]
+            continue
+        }
+
+        if ($current.PSObject.Properties.Name -notcontains $segment) {
+            return $null
+        }
+        $current = $current.$segment
+    }
+
+    return $current
+}
+
+function Flush-OpenClawConfigChanges {
+    if (-not (Test-ToolkitOpenClawConfigBatchPending)) {
+        return
+    }
+
+    Write-InfoLine "Writing batched OpenClaw config changes..."
+    $result = Invoke-ToolkitOpenClawConfigBatch -InvokeExternal ${function:Invoke-External} -ContainerName "openclaw-openclaw-gateway-1"
+    if ($result.ExitCode -ne 0) {
+        $detail = if ($result.Output) { "`n$($result.Output)" } else { "" }
+        throw "Failed to write batched OpenClaw config changes.$detail"
+    }
 }
 
 function Ensure-InitialGatewayConfig {
@@ -1057,6 +1189,126 @@ function Ensure-InitialGatewayConfig {
     Write-Host "Initial gateway config seeded." -ForegroundColor Green
 }
 
+function Repair-HostGatewayConfig {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $configFile = Join-Path (Get-HostConfigDir -Config $Config) "openclaw.json"
+    if (-not (Test-Path $configFile)) {
+        return
+    }
+
+    try {
+        $raw = Get-Content -Raw $configFile
+    }
+    catch {
+        Write-WarnLine "Could not read existing gateway config for repair: $configFile"
+        return
+    }
+
+    $trimmed = ($raw ?? "").Trim()
+    if (-not $trimmed) {
+        return
+    }
+
+    $repairedTail = ($trimmed -replace '(?:\\r\\n|\\n|\\r)+$','').Trim()
+
+    try {
+        $document = $repairedTail | ConvertFrom-Json -Depth 100
+    }
+    catch {
+        Write-WarnLine "Existing gateway config is not valid JSON, so managed repairs were skipped: $configFile"
+        return
+    }
+
+    $changed = $repairedTail -ne $trimmed
+
+    function Convert-StringBooleanAtPath {
+        param(
+            [Parameter(Mandatory = $true)]$Document,
+            [Parameter(Mandatory = $true)][string]$Path
+        )
+
+        $segments = @($Path -split '\.')
+        $current = $Document
+        for ($i = 0; $i -lt ($segments.Count - 1); $i++) {
+            $segment = $segments[$i]
+            if ($null -eq $current) {
+                return $false
+            }
+
+            if ($current -is [System.Collections.IDictionary]) {
+                if (-not $current.Contains($segment)) {
+                    return $false
+                }
+                $current = $current[$segment]
+                continue
+            }
+
+            if ($current.PSObject.Properties.Name -notcontains $segment) {
+                return $false
+            }
+            $current = $current.$segment
+        }
+
+        if ($null -eq $current) {
+            return $false
+        }
+
+        $leaf = $segments[-1]
+        $value = $null
+        $hasLeaf = $false
+        if ($current -is [System.Collections.IDictionary]) {
+            if ($current.Contains($leaf)) {
+                $value = $current[$leaf]
+                $hasLeaf = $true
+            }
+        }
+        elseif ($current.PSObject.Properties.Name -contains $leaf) {
+            $value = $current.$leaf
+            $hasLeaf = $true
+        }
+
+        if (-not $hasLeaf -or -not ($value -is [string]) -or $value -notmatch '^(?i:true|false)$') {
+            return $false
+        }
+
+        $normalized = [bool]::Parse($value)
+        if ($current -is [System.Collections.IDictionary]) {
+            $current[$leaf] = $normalized
+        }
+        else {
+            $current.$leaf = $normalized
+        }
+
+        return $true
+    }
+
+    foreach ($booleanPath in @(
+            "gateway.controlUi.allowInsecureAuth",
+            "tools.fs.workspaceOnly",
+            "tools.exec.applyPatch.workspaceOnly",
+            "tools.media.audio.enabled"
+        )) {
+        if (Convert-StringBooleanAtPath -Document $document -Path $booleanPath) {
+            $changed = $true
+        }
+    }
+
+    if ($document.PSObject.Properties.Name -contains "toolkit") {
+        $document.PSObject.Properties.Remove("toolkit")
+        $changed = $true
+    }
+
+    if (-not $changed) {
+        return
+    }
+
+    Backup-File -Path $configFile
+    $json = $document | ConvertTo-Json -Depth 100
+    Set-Content -Path $configFile -Value ($json + [Environment]::NewLine) -Encoding UTF8
+    Write-Host "Repaired existing gateway config before startup." -ForegroundColor Green
+}
+
 function Add-UniqueString {
     param(
         [string[]]$List = @(),
@@ -1094,10 +1346,8 @@ function Ensure-ControlUiAllowedOrigins {
 
     # Clear the break-glass flag that was seeded for the very first gateway start;
     # proper allowedOrigins are now set so it is no longer needed.
-    $result = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "unset", "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback")) -AllowFailure
-    if ($result.ExitCode -eq 0) {
-        Write-Host "Cleared dangerouslyAllowHostHeaderOriginFallback (proper origins are now configured)." -ForegroundColor Green
-    }
+    Remove-OpenClawConfigValue -Path "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback"
+    Write-Host "Queued removal of dangerouslyAllowHostHeaderOriginFallback (proper origins are now configured)." -ForegroundColor Green
 }
 
 function Get-ManagedModelRefs {
@@ -1547,6 +1797,18 @@ function Ensure-OllamaState {
     }
 
     foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        $endpointReachable = Test-ToolkitOllamaEndpointReachable -Endpoint $endpoint -TimeoutSeconds 5
+        if (-not $endpointReachable) {
+            Write-WarnLine "Skipping Ollama endpoint '$($endpoint.key)' because it is not reachable right now."
+            $state.EndpointStates[$endpoint.key] = [ordered]@{
+                endpoint      = $endpoint
+                tags          = @()
+                availableRefs = @()
+                reachable     = $false
+            }
+            continue
+        }
+
         foreach ($desiredModelId in @(Get-ToolkitEndpointDesiredModelIds -Config $Config -EndpointKey ([string]$endpoint.key))) {
             if (-not [string]::IsNullOrWhiteSpace([string]$desiredModelId)) {
                 $requestKey = "$([string]$endpoint.key)::$([string]$desiredModelId)"
@@ -1563,9 +1825,11 @@ function Ensure-OllamaState {
         $availableIds = @($tags | ForEach-Object { [string]$_.model })
 
         if ($endpoint.autoPullMissingModels) {
-            $vramBudgetMiB = Get-EndpointVramBudgetMiB -Endpoint $endpoint
+            $pullBudgetFraction = Get-ToolkitOllamaPullVramBudgetFraction -Config $Config
+            $pullBudgetPercent = [int][math]::Round($pullBudgetFraction * 100)
+            $vramBudgetMiB = Get-ToolkitEndpointVramBudgetMiB -Endpoint $endpoint -Config $Config
             if ($null -ne $vramBudgetMiB) {
-                Write-Host "INFO: VRAM pull budget for endpoint '$($endpoint.key)': $vramBudgetMiB MiB (70% of GPU total)" -ForegroundColor Cyan
+                Write-Host "INFO: VRAM pull budget for endpoint '$($endpoint.key)': $vramBudgetMiB MiB ($pullBudgetPercent% of GPU total)" -ForegroundColor Cyan
             } else {
                 Write-Host "INFO: No GPU telemetry for endpoint '$($endpoint.key)'; VRAM size check skipped" -ForegroundColor DarkGray
             }
@@ -1591,7 +1855,8 @@ function Ensure-OllamaState {
                     }
 
                     if ($null -ne $estimateMiB -and $estimateMiB -gt $vramBudgetMiB) {
-                        Write-WarnLine "Skipping pull of '$($request.modelId)' on endpoint '$($endpoint.key)': $estimateMiB MiB exceeds VRAM budget of $vramBudgetMiB MiB (70% of $([int]($vramBudgetMiB / 0.70)) MiB total). Add a smaller model or upgrade GPU."
+                        $gpuTotalMiB = [int][math]::Round($vramBudgetMiB / $pullBudgetFraction)
+                        Write-WarnLine "Skipping pull of '$($request.modelId)' on endpoint '$($endpoint.key)': $estimateMiB MiB exceeds VRAM budget of $vramBudgetMiB MiB ($pullBudgetPercent% of $gpuTotalMiB MiB total). Add a smaller model or lower model size."
                         continue
                     }
                 }
@@ -1648,6 +1913,7 @@ function Ensure-OllamaState {
             endpoint      = $endpoint
             tags          = @($tags)
             availableRefs = @($availableRefs)
+            reachable     = $true
         }
         $state.ProviderEntries[$endpoint.providerId] = [ordered]@{
             baseUrl = Get-ToolkitOllamaProviderBaseUrl -Endpoint $endpoint
@@ -1677,27 +1943,55 @@ function Ensure-OllamaState {
 }
 
 function Get-AuthReadyHostedProviders {
-    $result = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", "openclaw-openclaw-gateway-1",
-        "node", "dist/index.js",
-        "models", "status", "--json"
-    ) -AllowFailure
+    if ($script:ToolkitHostedAuthReadyProvidersLoaded) {
+        return @($script:ToolkitHostedAuthReadyProviders)
+    }
 
     $providers = @()
-    if ($result.ExitCode -eq 0 -and $result.Output) {
-        try {
-            $parsed = $result.Output | ConvertFrom-Json -Depth 50
-            foreach ($providerEntry in @($parsed.auth.providers)) {
-                if ($providerEntry.provider -and $providerEntry.provider -ne "ollama" -and $providerEntry.effective.kind -and $providerEntry.effective.kind -ne "missing") {
-                    $providers = Add-UniqueString -List $providers -Value ([string]$providerEntry.provider)
-                }
+    $liveConfig = Get-OpenClawConfigDocument -Config $config
+    if ($null -ne $liveConfig -and
+        $liveConfig.PSObject.Properties.Name -contains "auth" -and
+        $null -ne $liveConfig.auth -and
+        $liveConfig.auth.PSObject.Properties.Name -contains "profiles" -and
+        $null -ne $liveConfig.auth.profiles) {
+        foreach ($profile in @($liveConfig.auth.profiles.PSObject.Properties.Value)) {
+            if ($profile -and $profile.provider -and [string]$profile.provider -ne "ollama") {
+                $providers = Add-UniqueString -List $providers -Value ([string]$profile.provider)
             }
-        }
-        catch {
         }
     }
 
-    return @($providers)
+    $script:ToolkitHostedAuthReadyProviders = @($providers)
+    $script:ToolkitHostedAuthReadyProvidersLoaded = $true
+    return @($script:ToolkitHostedAuthReadyProviders)
+}
+
+function Resolve-UsableLocalModelCandidate {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [string[]]$CandidateRefs = @(),
+        [string[]]$AvailableOllamaRefs = @()
+    )
+
+    $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+    foreach ($candidateRef in @($CandidateRefs)) {
+        $candidateRefText = [string]$candidateRef
+        if ([string]::IsNullOrWhiteSpace($candidateRefText)) {
+            continue
+        }
+        if (-not (Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRefText) -and -not $candidateRefText.StartsWith("ollama/")) {
+            continue
+        }
+
+        $resolvedLocalRef = Resolve-OllamaModelRef -DesiredRef $candidateRefText -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose -EndpointKey $endpointKey
+        if (-not [string]::IsNullOrWhiteSpace($resolvedLocalRef) -and $resolvedLocalRef -in @($AvailableOllamaRefs)) {
+            return $resolvedLocalRef
+        }
+    }
+
+    return $null
 }
 
 function Get-PreferredLocalFallbackRef {
@@ -1813,10 +2107,9 @@ function Resolve-AgentPreferredModelRef {
         }
 
         if ($AgentConfig.PSObject.Properties.Name -contains "allowLocalFallback" -and [bool]$AgentConfig.allowLocalFallback) {
-            foreach ($candidateRef in @($candidateRefs)) {
-                if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRef) -or $candidateRef -like "ollama/*") {
-                    return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig))
-                }
+            $resolvedLocalCandidate = Resolve-UsableLocalModelCandidate -Config $Config -AgentConfig $AgentConfig -Purpose $Purpose -CandidateRefs $candidateRefs -AvailableOllamaRefs $AvailableOllamaRefs
+            if (-not [string]::IsNullOrWhiteSpace($resolvedLocalCandidate)) {
+                return $resolvedLocalCandidate
             }
             $localFallbackRef = Get-PreferredLocalFallbackRef -Config $Config -AvailableOllamaRefs $AvailableOllamaRefs
             if ($localFallbackRef) {
@@ -1835,10 +2128,9 @@ function Resolve-AgentPreferredModelRef {
     }
 
     if ($modelSource -eq "local") {
-        foreach ($candidateRef in @($candidateRefs)) {
-            if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRef) -or $candidateRef -like "ollama/*") {
-                return (Resolve-OllamaModelRef -DesiredRef $candidateRef -AvailableRefs $AvailableOllamaRefs -Config $Config -Purpose $Purpose -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig))
-            }
+        $resolvedLocalCandidate = Resolve-UsableLocalModelCandidate -Config $Config -AgentConfig $AgentConfig -Purpose $Purpose -CandidateRefs $candidateRefs -AvailableOllamaRefs $AvailableOllamaRefs
+        if (-not [string]::IsNullOrWhiteSpace($resolvedLocalCandidate)) {
+            return $resolvedLocalCandidate
         }
 
         return $null
@@ -1854,49 +2146,23 @@ function Resolve-AgentPreferredModelRef {
 }
 
 function Get-OpenClawConfigJsonValue {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
 
-    $result = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", "openclaw-openclaw-gateway-1",
-        "node", "dist/index.js",
-        "config", "get", $Path
-    ) -AllowFailure
-
-    if ($result.ExitCode -ne 0) {
+    $document = Get-OpenClawConfigDocument -Config $Config
+    if ($null -eq $document) {
         return $null
     }
 
-    $raw = $result.Output.Trim()
-    if (-not $raw) {
-        return $null
-    }
-
-    try {
-        return $raw | ConvertFrom-Json
-    }
-    catch {
-        return $null
-    }
+    return Resolve-OpenClawConfigDocumentPathValue -Document $document -Path $Path
 }
 
 function Unset-OpenClawConfigPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $result = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", "openclaw-openclaw-gateway-1",
-        "node", "dist/index.js",
-        "config", "unset", $Path
-    ) -AllowFailure
-
-    if ($result.ExitCode -eq 0) {
-        return
-    }
-
-    if ($result.Output -match "Config path not found") {
-        return
-    }
-
-    throw "Failed to unset config path '$Path'.`n$($result.Output)"
+    Remove-OpenClawConfigValue -Path $Path
 }
 
 function Clear-RedundantNodeDenyCommands {
@@ -1906,7 +2172,7 @@ function Clear-RedundantNodeDenyCommands {
         return
     }
 
-    $nodesConfig = Get-OpenClawConfigJsonValue -Path "gateway.nodes"
+    $nodesConfig = Get-OpenClawConfigJsonValue -Config $Config -Path "gateway.nodes"
     if ($null -eq $nodesConfig) {
         return
     }
@@ -1950,17 +2216,109 @@ function Clear-RedundantNodeDenyCommands {
 function Configure-TelegramSurface {
     param([Parameter(Mandatory = $true)]$Config)
 
-    if ($null -eq $Config.telegram -or -not $Config.telegram.enabled) {
+    function Test-TelegramCredentialConfigured {
+        param($TelegramDocument)
+
+        if ($null -eq $TelegramDocument) {
+            return $false
+        }
+
+        foreach ($propertyName in @("botToken", "tokenFile")) {
+            if ($TelegramDocument.PSObject.Properties.Name -contains $propertyName) {
+                $value = [string]$TelegramDocument.$propertyName
+                if (-not [string]::IsNullOrWhiteSpace($value)) {
+                    return $true
+                }
+            }
+        }
+
+        if ($TelegramDocument.PSObject.Properties.Name -contains "accounts" -and $null -ne $TelegramDocument.accounts) {
+            foreach ($accountProperty in @($TelegramDocument.accounts.PSObject.Properties)) {
+                if (Test-TelegramCredentialConfigured -TelegramDocument $accountProperty.Value) {
+                    return $true
+                }
+            }
+        }
+
+        return $false
+    }
+
+    if ($null -eq $Config.telegram) {
         return
     }
 
-    $telegramConfig = Get-OpenClawConfigJsonValue -Path "channels.telegram"
+    $telegramConfig = Get-OpenClawConfigJsonValue -Config $Config -Path "channels.telegram"
+
+    if (-not $Config.telegram.enabled) {
+        if ($null -ne $telegramConfig -and [bool]$telegramConfig.enabled) {
+            Set-OpenClawConfigValue -Path "channels.telegram.enabled" -Value $false
+            Write-Host "Disabled Telegram channel because toolkit Telegram support is turned off." -ForegroundColor Yellow
+        }
+        return
+    }
+
+    $bootstrapBotToken = if ($Config.telegram.PSObject.Properties.Name -contains "botToken") { [string]$Config.telegram.botToken } else { "" }
+    $bootstrapTokenFile = if ($Config.telegram.PSObject.Properties.Name -contains "tokenFile") { [string]$Config.telegram.tokenFile } else { "" }
+    $bootstrapHasBotToken = -not [string]::IsNullOrWhiteSpace($bootstrapBotToken)
+    $bootstrapHasTokenFile = -not [string]::IsNullOrWhiteSpace($bootstrapTokenFile)
+
+    $liveHasBotToken = $false
+    $liveHasTokenFile = $false
+    if ($null -ne $telegramConfig) {
+        if ($telegramConfig.PSObject.Properties.Name -contains "botToken") {
+            $liveHasBotToken = -not [string]::IsNullOrWhiteSpace([string]$telegramConfig.botToken)
+        }
+        if ($telegramConfig.PSObject.Properties.Name -contains "tokenFile") {
+            $liveHasTokenFile = -not [string]::IsNullOrWhiteSpace([string]$telegramConfig.tokenFile)
+        }
+    }
+    $liveHasAnyCredentials = Test-TelegramCredentialConfigured -TelegramDocument $telegramConfig
+
     if ($null -eq $telegramConfig) {
-        return
+        if (-not ($bootstrapHasBotToken -or $bootstrapHasTokenFile -or $liveHasAnyCredentials)) {
+            Write-WarnLine "Telegram is enabled in toolkit config but no botToken or tokenFile is configured yet. Skipping live Telegram initialization until setup is completed."
+            return
+        }
+
+        Set-OpenClawConfigJson -Path "channels.telegram" -Value ([ordered]@{ enabled = $true })
+        $telegramConfig = [pscustomobject]@{ enabled = $true }
+        Write-Host "Initialized Telegram channel config in live OpenClaw settings." -ForegroundColor Green
+    }
+    else {
+        Set-OpenClawConfigValue -Path "channels.telegram.enabled" -Value $true
     }
 
-    if (-not $telegramConfig.enabled) {
-        return
+    if ($bootstrapHasBotToken) {
+        Set-OpenClawConfigValue -Path "channels.telegram.botToken" -Value $bootstrapBotToken
+        Unset-OpenClawConfigPath -Path "channels.telegram.tokenFile"
+    }
+    elseif ($bootstrapHasTokenFile) {
+        Set-OpenClawConfigValue -Path "channels.telegram.tokenFile" -Value $bootstrapTokenFile
+        Unset-OpenClawConfigPath -Path "channels.telegram.botToken"
+    }
+    elseif (-not $liveHasAnyCredentials) {
+        Write-WarnLine "Telegram channel exists but no botToken or tokenFile is configured yet. Telegram will stay unavailable until credentials are added."
+    }
+
+    if ($Config.telegram.defaultAccount) {
+        Set-OpenClawConfigValue -Path "channels.telegram.defaultAccount" -Value ([string]$Config.telegram.defaultAccount)
+    }
+
+    if ($Config.telegram.webhookUrl) {
+        Set-OpenClawConfigValue -Path "channels.telegram.webhookUrl" -Value ([string]$Config.telegram.webhookUrl)
+    }
+    if ($Config.telegram.webhookSecret) {
+        Set-OpenClawConfigValue -Path "channels.telegram.webhookSecret" -Value ([string]$Config.telegram.webhookSecret)
+    }
+    if ($Config.telegram.webhookPath) {
+        Set-OpenClawConfigValue -Path "channels.telegram.webhookPath" -Value ([string]$Config.telegram.webhookPath)
+    }
+    if ($Config.telegram.webhookHost) {
+        Set-OpenClawConfigValue -Path "channels.telegram.webhookHost" -Value ([string]$Config.telegram.webhookHost)
+    }
+
+    if ($Config.telegram.linkPreview -ne $null) {
+        Set-OpenClawConfigValue -Path "channels.telegram.linkPreview" -Value ([bool]$Config.telegram.linkPreview)
     }
 
     if ($Config.telegram.dmPolicy) {
@@ -1973,6 +2331,18 @@ function Configure-TelegramSurface {
 
     if ($Config.telegram.groupPolicy) {
         Set-OpenClawConfigValue -Path "channels.telegram.groupPolicy" -Value $Config.telegram.groupPolicy
+    }
+
+    if ($null -ne $Config.telegram.groupAllowFrom) {
+        Set-OpenClawConfigJson -Path "channels.telegram.groupAllowFrom" -Value @($Config.telegram.groupAllowFrom) -AsArray
+    }
+
+    if ($null -ne $Config.telegram.requireMention) {
+        Set-OpenClawConfigValue -Path "channels.telegram.requireMention" -Value ([bool]$Config.telegram.requireMention)
+    }
+
+    if ($Config.telegram.defaultTo) {
+        Set-OpenClawConfigValue -Path "channels.telegram.defaultTo" -Value ([string]$Config.telegram.defaultTo)
     }
 
     if ($Config.telegram.execApprovals) {
@@ -2010,6 +2380,15 @@ function Configure-TelegramSurface {
             if ($null -ne $group.allowFrom) {
                 $groupEntry.allowFrom = @($group.allowFrom)
             }
+            if ($group.groupPolicy) {
+                $groupEntry.groupPolicy = [string]$group.groupPolicy
+            }
+            if ($null -ne $group.enabled) {
+                $groupEntry.enabled = [bool]$group.enabled
+            }
+            if ($group.agentId) {
+                $groupEntry.agentId = [string]$group.agentId
+            }
             $groupsMap[$group.id] = $groupEntry
         }
 
@@ -2021,7 +2400,7 @@ function Configure-TelegramSurface {
         Unset-OpenClawConfigPath -Path "channels.telegram.groups"
     }
 
-    Write-Host "Applied trusted Telegram allowlist configuration." -ForegroundColor Green
+    Write-Host "Applied Telegram channel configuration." -ForegroundColor Green
 }
 
 function Configure-VoiceNotes {
@@ -2032,7 +2411,7 @@ function Configure-VoiceNotes {
     }
 
     if (-not $Config.voiceNotes.enabled) {
-        Set-OpenClawConfigValue -Path "tools.media.audio.enabled" -Value "false"
+        Set-OpenClawConfigValue -Path "tools.media.audio.enabled" -Value $false
         Write-Host "Voice-note transcription disabled by bootstrap config."
         return
     }
@@ -2231,6 +2610,7 @@ if ($config.sandbox.enabled) {
 Ensure-LocalWhisperGatewayImage -Config $config
 
 Ensure-InitialGatewayConfig -Config $config
+Repair-HostGatewayConfig -Config $config
 
 Write-Step "Starting the OpenClaw gateway container"
     Push-Location $config.repoPath
@@ -2263,7 +2643,7 @@ if ($_envToken) {
 }
 
 if ($config.disableInsecureControlUiAuth) {
-Set-OpenClawConfigValue -Path "gateway.controlUi.allowInsecureAuth" -Value "false"
+Set-OpenClawConfigValue -Path "gateway.controlUi.allowInsecureAuth" -Value $false
 }
 Ensure-ControlUiAllowedOrigins -Config $config
 
@@ -2340,6 +2720,7 @@ if ($config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)
             Set-OpenClawConfigJson -Path "agents.defaults.model.fallbacks" -Value @()
         }
         if ($config.ollama.setAsDefaultModel -and @($ollamaState.AvailableRefs).Count -gt 0) {
+            Flush-OpenClawConfigChanges
             $defaultModelId = [string]$ollamaState.AvailableRefs[0]
             $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("models", "set", $defaultModelId))
         }
@@ -2355,16 +2736,17 @@ if ($config.sandbox.enabled) {
     Set-OpenClawConfigValue -Path "agents.defaults.sandbox.workspaceAccess" -Value $config.sandbox.workspaceAccess
     Set-OpenClawConfigValue -Path "agents.defaults.sandbox.docker.image" -Value $config.sandbox.sandboxImage
     if ($config.sandbox.toolsFsWorkspaceOnly) {
-        Set-OpenClawConfigValue -Path "tools.fs.workspaceOnly" -Value "true"
+        Set-OpenClawConfigValue -Path "tools.fs.workspaceOnly" -Value $true
     }
     if ($config.sandbox.applyPatchWorkspaceOnly) {
-        Set-OpenClawConfigValue -Path "tools.exec.applyPatch.workspaceOnly" -Value "true"
+        Set-OpenClawConfigValue -Path "tools.exec.applyPatch.workspaceOnly" -Value $true
     }
 }
 
 Clear-RedundantNodeDenyCommands -Config $config
 Configure-TelegramSurface -Config $config
 Configure-VoiceNotes -Config $config
+Flush-OpenClawConfigChanges
 & (Join-Path (Split-Path -Parent $PSCommandPath) "configure-agent-layout.ps1") -ConfigPath $ConfigPath -NoRestart -StrongModelRef $resolvedStrongModelRef -ResearchModelRef $resolvedResearchModelRef -LocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -HostedTelegramModelRef $resolvedHostedTelegramModelRef -LocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -LocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -RemoteReviewModelRef $ollamaState.ResolvedRemoteReviewModelRef -RemoteCoderModelRef $ollamaState.ResolvedRemoteCoderModelRef
 
 Write-Step "Restarting gateway after config changes"

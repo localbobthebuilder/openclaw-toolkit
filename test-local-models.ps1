@@ -23,6 +23,7 @@ if (-not $ConfigFilePath) {
     $ConfigFilePath = Join-Path $_hostConfigDir "openclaw.json"
 }
 
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-ProgressLine {
@@ -124,6 +125,209 @@ function Get-ErrorCategory {
     return "task"
 }
 
+function Add-UniqueString {
+    param(
+        [string[]]$List = @(),
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return @($List)
+    }
+
+    if ($Value -notin @($List)) {
+        return @(@($List) + $Value)
+    }
+
+    return @($List)
+}
+
+function Get-LiveAgentLocalModelCandidateRefs {
+    param(
+        $LiveConfig,
+        [string]$AgentId
+    )
+
+    $refs = @()
+    $agentConfig = @($LiveConfig.agents.list) | Where-Object { $_.id -eq $AgentId } | Select-Object -First 1
+    if ($agentConfig -and $agentConfig.model) {
+        if ($agentConfig.model.primary) {
+            $primaryRef = [string]$agentConfig.model.primary
+            if ($primaryRef -like "ollama*/*") {
+                $refs = Add-UniqueString -List $refs -Value $primaryRef
+            }
+        }
+
+        foreach ($fallbackRef in @($agentConfig.model.fallbacks)) {
+            $fallbackText = [string]$fallbackRef
+            if ($fallbackText -like "ollama*/*") {
+                $refs = Add-UniqueString -List $refs -Value $fallbackText
+            }
+        }
+    }
+
+    return @($refs)
+}
+
+function Get-BootstrapManagedAgentConfigById {
+    param(
+        $BootstrapConfig,
+        [string]$AgentId
+    )
+
+    if ($null -eq $BootstrapConfig -or $null -eq $BootstrapConfig.multiAgent) {
+        return $null
+    }
+
+    $agentConfigs = @(
+        $BootstrapConfig.multiAgent.strongAgent,
+        $BootstrapConfig.multiAgent.researchAgent,
+        $BootstrapConfig.multiAgent.localChatAgent,
+        $BootstrapConfig.multiAgent.hostedTelegramAgent,
+        $BootstrapConfig.multiAgent.localReviewAgent,
+        $BootstrapConfig.multiAgent.localCoderAgent,
+        $BootstrapConfig.multiAgent.remoteReviewAgent,
+        $BootstrapConfig.multiAgent.remoteCoderAgent
+    ) + @($BootstrapConfig.multiAgent.extraAgents)
+
+    foreach ($agentConfig in @($agentConfigs)) {
+        if ($null -eq $agentConfig) {
+            continue
+        }
+
+        if ($agentConfig.PSObject.Properties.Name -contains "id" -and [string]$agentConfig.id -eq $AgentId) {
+            return $agentConfig
+        }
+    }
+
+    return $null
+}
+
+function Get-PreferredLocalSmokeCandidateRefs {
+    param(
+        $LiveConfig,
+        $BootstrapConfig,
+        [Parameter(Mandatory = $true)]$ProviderEntries,
+        [string]$AgentId
+    )
+
+    $refs = @()
+    foreach ($modelRef in @(Get-LiveAgentLocalModelCandidateRefs -LiveConfig $LiveConfig -AgentId $AgentId)) {
+        $refs = Add-UniqueString -List $refs -Value $modelRef
+    }
+
+    if ($null -ne $BootstrapConfig) {
+        $endpointKey = $null
+        $bootstrapAgentConfig = Get-BootstrapManagedAgentConfigById -BootstrapConfig $BootstrapConfig -AgentId $AgentId
+        if ($null -ne $bootstrapAgentConfig -and
+            $bootstrapAgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
+            -not [string]::IsNullOrWhiteSpace([string]$bootstrapAgentConfig.endpointKey)) {
+            $endpointKey = [string]$bootstrapAgentConfig.endpointKey
+        }
+        elseif (@($refs).Count -gt 0) {
+            $providerId = ([string]$refs[0] -split '/', 2)[0]
+            $endpoint = Get-ToolkitOllamaEndpointByProviderId -Config $BootstrapConfig -ProviderId $providerId
+            if ($null -ne $endpoint) {
+                $endpointKey = [string]$endpoint.key
+            }
+        }
+        elseif ($null -ne (Get-ToolkitDefaultOllamaEndpoint -Config $BootstrapConfig)) {
+            $endpointKey = [string](Get-ToolkitDefaultOllamaEndpoint -Config $BootstrapConfig).key
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($endpointKey)) {
+            $endpointModels = @(
+                foreach ($entry in @(Get-ToolkitEndpointModelCatalog -Config $BootstrapConfig -EndpointKey $endpointKey)) {
+                    if ($entry -and $entry.id) {
+                        [pscustomobject]@{
+                            endpointKey = $endpointKey
+                            id          = [string]$entry.id
+                            input       = @($entry.input)
+                        }
+                    }
+                }
+            )
+            foreach ($entry in @($endpointModels | Where-Object { $_.id -match 'flash|mini|small' })) {
+                $refs = Add-UniqueString -List $refs -Value (Convert-ToolkitLocalModelIdToRef -Config $BootstrapConfig -ModelId ([string]$entry.id) -EndpointKey $endpointKey)
+            }
+            foreach ($entry in @($endpointModels | Where-Object { @($_.input) -contains "text" })) {
+                $refs = Add-UniqueString -List $refs -Value (Convert-ToolkitLocalModelIdToRef -Config $BootstrapConfig -ModelId ([string]$entry.id) -EndpointKey $endpointKey)
+            }
+            foreach ($entry in @($endpointModels)) {
+                $refs = Add-UniqueString -List $refs -Value (Convert-ToolkitLocalModelIdToRef -Config $BootstrapConfig -ModelId ([string]$entry.id) -EndpointKey $endpointKey)
+            }
+            return @($refs)
+        }
+    }
+
+    foreach ($entry in @($ProviderEntries | Where-Object { $_.id -match 'flash|mini|small' })) {
+        $refs = Add-UniqueString -List $refs -Value ("$($entry.providerId)/$($entry.id)")
+    }
+    foreach ($entry in @($ProviderEntries | Where-Object { @($_.input) -contains "text" })) {
+        $refs = Add-UniqueString -List $refs -Value ("$($entry.providerId)/$($entry.id)")
+    }
+    foreach ($entry in @($ProviderEntries)) {
+        $refs = Add-UniqueString -List $refs -Value ("$($entry.providerId)/$($entry.id)")
+    }
+
+    return @($refs)
+}
+
+function Resolve-UsableLocalSmokeModel {
+    param(
+        $BootstrapConfig,
+        $LiveConfig,
+        [Parameter(Mandatory = $true)]$ProviderEntries,
+        [string]$AgentId
+    )
+
+    $candidateRefs = @(Get-PreferredLocalSmokeCandidateRefs -LiveConfig $LiveConfig -BootstrapConfig $BootstrapConfig -ProviderEntries $ProviderEntries -AgentId $AgentId)
+    if (@($candidateRefs).Count -eq 0) {
+        return [pscustomobject]@{
+            status   = "skip"
+            modelRef = ""
+            detail   = "No configured Ollama models."
+        }
+    }
+
+    if ($null -eq $BootstrapConfig) {
+        return [pscustomobject]@{
+            status   = "pass"
+            modelRef = [string]$candidateRefs[0]
+            detail   = "Bootstrap config unavailable, using the first configured local candidate."
+        }
+    }
+
+    $skipReasons = @()
+    foreach ($candidateRef in @($candidateRefs)) {
+        $status = Get-ToolkitLocalModelRefRuntimeStatus -Config $BootstrapConfig -ModelRef $candidateRef
+        if ($status.usable) {
+            return [pscustomobject]@{
+                status   = "pass"
+                modelRef = [string]$candidateRef
+                detail   = if ($status.reason) { [string]$status.reason } else { "" }
+            }
+        }
+
+        if ($status.isLocal -and -not [string]::IsNullOrWhiteSpace([string]$status.reason)) {
+            $skipReasons = Add-UniqueString -List $skipReasons -Value ([string]$status.reason)
+        }
+    }
+
+    $detail = if (@($skipReasons).Count -gt 0) {
+        "No configured local-model smoke candidate is usable right now. $(@($skipReasons) -join ' ')"
+    }
+    else {
+        "No configured local-model smoke candidate is usable right now."
+    }
+
+    return [pscustomobject]@{
+        status   = "skip"
+        modelRef = ""
+        detail   = $detail
+    }
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker is required for the local model smoke test."
 }
@@ -134,6 +338,17 @@ if (-not (Test-ContainerRunning -Name $ContainerName)) {
 
 if (-not (Test-Path $ConfigFilePath)) {
     throw "OpenClaw config not found at $ConfigFilePath"
+}
+
+$bootstrapConfig = $null
+if (Test-Path $_configFile) {
+    try {
+        $bootstrapConfig = Get-Content -Raw $_configFile | ConvertFrom-Json
+        $bootstrapConfig = Resolve-PortableConfigPaths -Config $bootstrapConfig -BaseDir $_scriptDir
+    }
+    catch {
+        $bootstrapConfig = $null
+    }
 }
 
 $cfg = Get-Content -Raw $ConfigFilePath | ConvertFrom-Json
@@ -170,32 +385,22 @@ if ($ollamaEntries.Count -eq 0) {
     exit 0
 }
 
-$agentConfig = @($cfg.agents.list) | Where-Object { $_.id -eq $AgentId } | Select-Object -First 1
-$preferred = $null
-if ($agentConfig -and $agentConfig.model -and $agentConfig.model.primary) {
-    $primaryRef = [string]$agentConfig.model.primary
-    if ($primaryRef -match '^[^/]+/.+$') {
-        $providerId, $agentModelId = $primaryRef -split '/', 2
-        if ($providerId -like "ollama*") {
-            $preferred = $ollamaEntries | Where-Object { $_.providerId -eq $providerId -and $_.id -eq $agentModelId } | Select-Object -First 1
-        }
+$modelPlan = Resolve-UsableLocalSmokeModel -BootstrapConfig $bootstrapConfig -LiveConfig $cfg -ProviderEntries $ollamaEntries -AgentId $AgentId
+if ($modelPlan.status -eq "skip") {
+    $skipResult = [pscustomobject]@{
+        status   = "skip"
+        agentId  = $AgentId
+        modelRef = ""
+        category = "fit"
+        detail   = [string]$modelPlan.detail
     }
-}
-if ($null -eq $preferred) {
-    $preferred = $ollamaEntries | Where-Object { $_.id -match 'flash|mini|small' } | Select-Object -First 1
-}
-if ($null -eq $preferred) {
-    $preferred = $ollamaEntries | Where-Object { @($_.input) -contains "text" } | Select-Object -First 1
-}
-if ($null -eq $preferred) {
-    $preferred = $ollamaEntries | Select-Object -First 1
+    Write-Output "Local model smoke test skipped: $($modelPlan.detail)"
+    Write-Output "__SMOKE_JSON__: $(ConvertTo-Json $skipResult -Compress)"
+    exit 0
 }
 
-if ($null -eq $preferred -or -not $preferred.id) {
-    throw "Could not resolve any Ollama model candidate from $ConfigFilePath."
-}
-
-$targetModelRef = "$($preferred.providerId)/$($preferred.id)"
+$targetModelRef = [string]$modelPlan.modelRef
+$targetModelId = Get-ToolkitModelIdFromRef -ModelRef $targetModelRef
 $sessionId = "smoke-localmodel-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 Write-ProgressLine "Using container $ContainerName" Cyan
 Write-ProgressLine "Agent $AgentId will target $targetModelRef" Cyan
@@ -274,5 +479,5 @@ catch {
     throw
 }
 finally {
-    Stop-OllamaModel -ModelId ([string]$preferred.id)
+    Stop-OllamaModel -ModelId $targetModelId
 }

@@ -293,6 +293,29 @@ function Get-ToolkitOllamaEndpoint {
     return $null
 }
 
+function Get-ToolkitOllamaEndpointByProviderId {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$ProviderId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ProviderId)) {
+        return $null
+    }
+
+    if ($ProviderId -eq "ollama") {
+        return (Get-ToolkitDefaultOllamaEndpoint -Config $Config)
+    }
+
+    foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        if ([string]$endpoint.providerId -eq $ProviderId) {
+            return $endpoint
+        }
+    }
+
+    return $null
+}
+
 function Get-ToolkitOllamaProviderIds {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -323,6 +346,83 @@ function Get-ToolkitOllamaProviderBaseUrl {
     param([Parameter(Mandatory = $true)]$Endpoint)
 
     return [string]$Endpoint.baseUrl
+}
+
+function Get-ToolkitOllamaPullVramBudgetFraction {
+    param($Config)
+
+    $fraction = 0.70
+    if ($null -ne $Config -and
+        $Config.PSObject.Properties.Name -contains "ollama" -and
+        $null -ne $Config.ollama -and
+        $Config.ollama.PSObject.Properties.Name -contains "pullVramBudgetFraction" -and
+        $Config.ollama.pullVramBudgetFraction -ne $null) {
+        try {
+            $parsed = [double]$Config.ollama.pullVramBudgetFraction
+            if ($parsed -gt 0 -and $parsed -le 1) {
+                $fraction = $parsed
+            }
+        }
+        catch {
+        }
+    }
+
+    return $fraction
+}
+
+function Get-ToolkitOllamaVramHeadroomMiB {
+    param($Config)
+
+    $headroomMiB = 1536
+    if ($null -ne $Config -and
+        $Config.PSObject.Properties.Name -contains "ollama" -and
+        $null -ne $Config.ollama -and
+        $Config.ollama.PSObject.Properties.Name -contains "vramHeadroomMiB" -and
+        $Config.ollama.vramHeadroomMiB -ne $null) {
+        try {
+            $parsed = [double]$Config.ollama.vramHeadroomMiB
+            if ($parsed -ge 0) {
+                $headroomMiB = [int][math]::Round($parsed)
+            }
+        }
+        catch {
+        }
+    }
+
+    return $headroomMiB
+}
+
+function Test-ToolkitOllamaEndpointReachable {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [int]$TimeoutSeconds = 5
+    )
+
+    if ($null -eq $script:ToolkitOllamaEndpointReachableCache) {
+        $script:ToolkitOllamaEndpointReachableCache = @{}
+    }
+
+    $endpointKey = if ($Endpoint.PSObject.Properties.Name -contains "key" -and $Endpoint.key) {
+        [string]$Endpoint.key
+    }
+    else {
+        (Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint)
+    }
+    $cacheKey = "$endpointKey|$TimeoutSeconds"
+    if ($script:ToolkitOllamaEndpointReachableCache.ContainsKey($cacheKey)) {
+        return [bool]$script:ToolkitOllamaEndpointReachableCache[$cacheKey]
+    }
+
+    $probeUrl = (Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint).TrimEnd("/") + "/api/version"
+    try {
+        $null = Invoke-RestMethod -Uri $probeUrl -Method Get -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+        $script:ToolkitOllamaEndpointReachableCache[$cacheKey] = $true
+        return $true
+    }
+    catch {
+        $script:ToolkitOllamaEndpointReachableCache[$cacheKey] = $false
+        return $false
+    }
 }
 
 function Get-ToolkitModelIdFromRef {
@@ -580,6 +680,13 @@ function Get-ToolkitEffectiveLocalModelEntry {
 function Get-ToolkitOllamaRegistryModelSizeMiB {
     param([Parameter(Mandatory = $true)][string]$ModelId)
 
+    if ($null -eq $script:ToolkitOllamaRegistrySizeCache) {
+        $script:ToolkitOllamaRegistrySizeCache = @{}
+    }
+    if ($script:ToolkitOllamaRegistrySizeCache.ContainsKey($ModelId)) {
+        return $script:ToolkitOllamaRegistrySizeCache[$ModelId]
+    }
+
     $parts = $ModelId -split ':', 2
     $modelName = $parts[0]
     $tag = if ($parts.Count -eq 2 -and $parts[1]) { $parts[1] } else { "latest" }
@@ -599,20 +706,28 @@ function Get-ToolkitOllamaRegistryModelSizeMiB {
         } -TimeoutSec 10 -ErrorAction Stop
         $totalBytes = ($response.layers | Measure-Object -Property size -Sum).Sum
         if ($totalBytes -gt 0) {
-            return [int][math]::Ceiling($totalBytes / 1MB)
+            $cachedSize = [int][math]::Ceiling($totalBytes / 1MB)
+            $script:ToolkitOllamaRegistrySizeCache[$ModelId] = $cachedSize
+            return $cachedSize
         }
     }
     catch {
     }
 
+    $script:ToolkitOllamaRegistrySizeCache[$ModelId] = $null
     return $null
 }
 
 function Get-ToolkitEndpointVramBudgetMiB {
     param(
         [Parameter(Mandatory = $true)]$Endpoint,
+        $Config,
         [double]$ThresholdFraction = 0.70
     )
+
+    if ($null -ne $Config) {
+        $ThresholdFraction = Get-ToolkitOllamaPullVramBudgetFraction -Config $Config
+    }
 
     $telemetry = if ($Endpoint.PSObject.Properties.Name -contains "telemetry") { $Endpoint.telemetry } else { $null }
     $kind = if ($telemetry -and $telemetry.PSObject.Properties.Name -contains "kind" -and $telemetry.kind) {
@@ -667,4 +782,74 @@ function Get-ToolkitLocalModelPullEstimateMiB {
     }
 
     return $null
+}
+
+function Get-ToolkitLocalModelRefRuntimeStatus {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$ModelRef
+    )
+
+    $result = [ordered]@{
+        modelRef     = [string]$ModelRef
+        isLocal      = $false
+        usable       = $true
+        reason       = ""
+        endpointKey  = $null
+        providerId   = $null
+        modelId      = $null
+        estimateMiB  = $null
+        budgetMiB    = $null
+        reachability = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ModelRef)) {
+        $result.usable = $false
+        $result.reason = "Model ref is empty."
+        return [pscustomobject]$result
+    }
+
+    $providerId, $modelId = ([string]$ModelRef -split "/", 2)
+    $result.providerId = $providerId
+    $result.modelId = $modelId
+
+    if (-not (Test-IsToolkitLocalModelRef -Config $Config -ModelRef $ModelRef) -and $providerId -ne "ollama") {
+        return [pscustomobject]$result
+    }
+
+    $result.isLocal = $true
+    $endpoint = Get-ToolkitOllamaEndpointByProviderId -Config $Config -ProviderId $providerId
+    if ($null -eq $endpoint) {
+        $result.usable = $false
+        $result.reason = "No Ollama endpoint is configured for provider '$providerId'."
+        return [pscustomobject]$result
+    }
+
+    $result.endpointKey = [string]$endpoint.key
+    $reachable = Test-ToolkitOllamaEndpointReachable -Endpoint $endpoint -TimeoutSeconds 5
+    $result.reachability = $reachable
+    if (-not $reachable) {
+        $result.usable = $false
+        $result.reason = "Endpoint '$($endpoint.key)' is not reachable."
+        return [pscustomobject]$result
+    }
+
+    $budgetMiB = Get-ToolkitEndpointVramBudgetMiB -Endpoint $endpoint -Config $Config
+    if ($null -eq $budgetMiB -or $budgetMiB -le 0) {
+        return [pscustomobject]$result
+    }
+
+    $result.budgetMiB = [int]$budgetMiB
+    $estimateMiB = Get-ToolkitLocalModelPullEstimateMiB -Config $Config -ModelId $modelId -EndpointKey ([string]$endpoint.key)
+    if ($null -eq $estimateMiB -or $estimateMiB -le 0) {
+        return [pscustomobject]$result
+    }
+
+    $result.estimateMiB = [int]$estimateMiB
+    if ($estimateMiB -gt $budgetMiB) {
+        $result.usable = $false
+        $result.reason = "Model '$ModelRef' is estimated at $estimateMiB MiB, above the endpoint budget of $budgetMiB MiB."
+    }
+
+    return [pscustomobject]$result
 }
