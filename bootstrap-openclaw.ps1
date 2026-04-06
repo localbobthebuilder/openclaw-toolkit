@@ -14,6 +14,7 @@ if (-not $ConfigPath) {
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-upstream-patches.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-gateway-cli-startup.ps1")
 
 $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -365,6 +366,39 @@ function Ensure-SandboxComposeSupport {
     }
 }
 
+function Ensure-OpenClawCliStartupComposeSupport {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComposePath
+    )
+
+    $compileCachePath = Get-ToolkitGatewayNodeCompileCachePath
+    $raw = Get-Content -Raw $ComposePath
+    $updated = $raw
+
+    $updated = [regex]::Replace($updated, '(?m)^\s*OPENCLAW_NO_RESPAWN:\s*\$\{OPENCLAW_NO_RESPAWN:-1\}\s*\r?\n?', '')
+    $updated = [regex]::Replace($updated, '(?m)^\s*NODE_COMPILE_CACHE:\s*\$\{NODE_COMPILE_CACHE:-[^}]+\}\s*\r?\n?', '')
+
+    $managedLines = @(
+        '      OPENCLAW_NO_RESPAWN: ${OPENCLAW_NO_RESPAWN:-1}',
+        ('      NODE_COMPILE_CACHE: ${NODE_COMPILE_CACHE:-' + $compileCachePath + '}')
+    ) -join [Environment]::NewLine
+
+    $updated = [regex]::Replace(
+        $updated,
+        '(?m)^(\s*TERM:\s*xterm-256color\s*)$',
+        '$1' + [Environment]::NewLine + $managedLines
+    )
+
+    if ($updated -ne $raw) {
+        Backup-File -Path $ComposePath
+        Set-Content -Path $ComposePath -Value $updated -Encoding UTF8
+        Write-Host "Updated docker-compose for faster gateway CLI startup." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Docker Compose already includes gateway CLI startup optimization."
+    }
+}
+
 function Ensure-GatewayImageSupportsSandbox {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -441,6 +475,33 @@ function Set-EnvVarValue {
         Backup-File -Path $Path
         Set-Content -Path $Path -Value $updated -Encoding UTF8
         Write-Host "Updated $Name in $(Split-Path -Leaf $Path)." -ForegroundColor Green
+    }
+}
+
+function Ensure-OpenClawCliStartupEnv {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_NO_RESPAWN" -Value (Get-ToolkitGatewayOpenClawNoRespawnValue)
+    Set-EnvVarValue -Path $Config.envFilePath -Name "NODE_COMPILE_CACHE" -Value (Get-ToolkitGatewayNodeCompileCachePath)
+}
+
+function Ensure-GatewayCliCompileCacheDirectory {
+    param(
+        [string]$ContainerName = "openclaw-openclaw-gateway-1"
+    )
+
+    $cachePath = Get-ToolkitGatewayNodeCompileCachePath
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "exec", $ContainerName,
+        "sh", "-lc",
+        "mkdir -p '$cachePath'"
+    ) -AllowFailure
+
+    if ($result.ExitCode -eq 0) {
+        Write-Host "Ensured gateway CLI compile cache directory: $cachePath" -ForegroundColor Green
+    }
+    else {
+        Write-WarnLine "Could not prepare gateway CLI compile cache directory at $cachePath."
     }
 }
 
@@ -743,21 +804,13 @@ function Set-OpenClawConfigJson {
         }
     }
 
-    $null = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", "openclaw-openclaw-gateway-1",
-        "node", "dist/index.js",
-        "config", "set", $Path, $json, "--strict-json"
-    )
+    $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "set", $Path, $json, "--strict-json"))
 }
 
 function Remove-OpenClawConfigValue {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $null = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", "openclaw-openclaw-gateway-1",
-        "node", "dist/index.js",
-        "config", "unset", $Path
-    ) -AllowFailure
+    $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "unset", $Path)) -AllowFailure
 }
 
 function Set-OpenClawConfigValue {
@@ -766,11 +819,7 @@ function Set-OpenClawConfigValue {
         [Parameter(Mandatory = $true)][string]$Value
     )
 
-    $null = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", "openclaw-openclaw-gateway-1",
-        "node", "dist/index.js",
-        "config", "set", $Path, $Value
-    )
+    $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "set", $Path, $Value))
 }
 
 function Ensure-InitialGatewayConfig {
@@ -850,7 +899,7 @@ function Ensure-ControlUiAllowedOrigins {
 
     # Clear the break-glass flag that was seeded for the very first gateway start;
     # proper allowedOrigins are now set so it is no longer needed.
-    $result = Invoke-External -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "config", "unset", "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback") -AllowFailure
+    $result = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("config", "unset", "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback")) -AllowFailure
     if ($result.ExitCode -eq 0) {
         Write-Host "Cleared dangerouslyAllowHostHeaderOriginFallback (proper origins are now configured)." -ForegroundColor Green
     }
@@ -1962,6 +2011,7 @@ if (-not (Test-Path $config.composeFilePath)) {
 }
 
 Ensure-EnvFile -Config $config
+Ensure-OpenClawCliStartupEnv -Config $config
 
 $hostConfigJson = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 if (-not (Test-Path $hostConfigJson)) {
@@ -1972,6 +2022,9 @@ Write-Step "Locking Docker host exposure to localhost"
 if ($config.requireLocalhostPublishedPorts) {
     Ensure-LocalhostDockerPorts -ComposePath $config.composeFilePath
 }
+
+Write-Step "Optimizing gateway CLI startup"
+Ensure-OpenClawCliStartupComposeSupport -ComposePath $config.composeFilePath
 
 if ($config.sandbox.enabled) {
     Write-Step "Enabling Docker Desktop sandbox runtime support"
@@ -1995,6 +2048,7 @@ Write-Step "Starting the OpenClaw gateway container"
 
 Write-Step "Waiting for gateway health"
 Wait-ForGateway -HealthUrl $config.verification.healthUrl
+Ensure-GatewayCliCompileCacheDirectory
 
 Write-Step "Applying security configuration"
 Set-OpenClawConfigValue -Path "gateway.bind" -Value $config.gatewayBind
@@ -2092,11 +2146,7 @@ if ($config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)
         }
         if ($config.ollama.setAsDefaultModel -and @($ollamaState.AvailableRefs).Count -gt 0) {
             $defaultModelId = [string]$ollamaState.AvailableRefs[0]
-            $null = Invoke-External -FilePath "docker" -Arguments @(
-                "exec", "openclaw-openclaw-gateway-1",
-                "node", "dist/index.js",
-                "models", "set", $defaultModelId
-            )
+            $null = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("models", "set", $defaultModelId))
         }
     }
     else {

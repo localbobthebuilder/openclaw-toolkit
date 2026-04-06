@@ -14,6 +14,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "shared-interactive-window.ps1")
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
 if (-not $SkipRelaunch) {
     $launchArgs = @()
@@ -84,7 +85,7 @@ function Invoke-External {
 function Get-JsonFromDockerCommand {
     param([string[]]$Arguments)
 
-    $result = Invoke-External -FilePath "docker" -Arguments $Arguments -AllowFailure
+    $result = Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Arguments $Arguments) -AllowFailure
     if ($result.ExitCode -ne 0 -or -not $result.Output) {
         return $null
     }
@@ -108,7 +109,7 @@ Write-Host "OpenClaw stores Gemini auth inside its own gateway auth profiles." -
 Write-Host "This helper uses the official Google Gemini API-key provider, not the unofficial Gemini CLI OAuth path." -ForegroundColor Yellow
 Write-Host "You will be prompted for your Gemini API key." -ForegroundColor Yellow
 
-& docker exec -it $ContainerName node dist/index.js models auth login --provider $Provider --method api-key --set-default
+& docker @(Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("models", "auth", "login", "--provider", $Provider, "--method", "api-key", "--set-default"))
 if ($LASTEXITCODE -ne 0) {
     throw "Gemini auth login did not complete successfully."
 }
@@ -122,11 +123,7 @@ if (-not $SkipBootstrap) {
 }
 
 Write-Step "Checking Gemini provider readiness"
-$modelsStatus = Get-JsonFromDockerCommand -Arguments @(
-    "exec", $ContainerName,
-    "node", "dist/index.js",
-    "models", "status", "--json"
-)
+$modelsStatus = Get-JsonFromDockerCommand -Arguments @("models", "status", "--json")
 if ($null -eq $modelsStatus) {
     throw "Could not read OpenClaw model status after Gemini auth."
 }
@@ -137,11 +134,7 @@ if ($null -eq $googleProvider -or $googleProvider.status -eq "missing") {
 }
 
 Write-Step "Checking research agent wiring"
-$agentsList = Get-JsonFromDockerCommand -Arguments @(
-    "exec", $ContainerName,
-    "node", "dist/index.js",
-    "config", "get", "agents.list"
-)
+$agentsList = Get-JsonFromDockerCommand -Arguments @("config", "get", "agents.list")
 if ($null -eq $agentsList) {
     throw "Could not read agents.list after Gemini auth."
 }

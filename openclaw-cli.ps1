@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
 function Invoke-External {
     param(
@@ -81,7 +82,7 @@ try {
         throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') start"
     }
 
-    $result = Invoke-External -FilePath $dockerCommand.Source -Arguments (@("exec", $ContainerName, "openclaw") + $Arguments) -AllowFailure
+    $result = Invoke-External -FilePath $dockerCommand.Source -Arguments (Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Arguments $Arguments) -AllowFailure
     if ($result.Output) {
         Write-Host $result.Output
     }

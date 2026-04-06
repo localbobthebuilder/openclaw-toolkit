@@ -13,6 +13,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "shared-interactive-window.ps1")
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
 if (-not $SkipRelaunch) {
     $launchArgs = @()
@@ -90,7 +91,7 @@ Write-Host "This runs OpenClaw's built-in GitHub Copilot provider login inside t
 Write-Host "That is separate from any host Copilot CLI login or Windows Credential Manager state." -ForegroundColor Yellow
 Write-Host "Keep this terminal window open until the OpenClaw device flow finishes." -ForegroundColor Yellow
 
-& docker exec -it $ContainerName node dist/index.js models auth login-github-copilot --yes
+& docker @(Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("models", "auth", "login-github-copilot", "--yes"))
 if ($LASTEXITCODE -ne 0) {
     throw "GitHub Copilot auth login did not complete successfully."
 }

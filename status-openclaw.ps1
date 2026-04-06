@@ -16,6 +16,7 @@ $configFile = [System.IO.Path]::Combine($PSScriptRoot, "openclaw-bootstrap.confi
 $composeFilePath = $null
 . ([System.IO.Path]::Combine($PSScriptRoot, "shared-ollama-endpoints.ps1"))
 . ([System.IO.Path]::Combine($PSScriptRoot, "shared-ollama-cloud-auth.ps1"))
+. ([System.IO.Path]::Combine($PSScriptRoot, "shared-gateway-cli-startup.ps1"))
 $bootstrapConfig = $null
 if (Test-Path $configFile) {
     . ([System.IO.Path]::Combine($PSScriptRoot, "shared-config-paths.ps1"))
@@ -150,7 +151,7 @@ function Invoke-OpenClawCli {
         }
     }
 
-    return Invoke-External -FilePath "docker" -Arguments (@("exec", $ContainerName, "openclaw") + $Arguments) -AllowFailure:$AllowFailure -TimeoutSeconds $TimeoutSeconds
+    return Invoke-External -FilePath "docker" -Arguments (Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Arguments $Arguments) -AllowFailure:$AllowFailure -TimeoutSeconds $TimeoutSeconds
 }
 
 function Get-AuthProfilesSnapshot {

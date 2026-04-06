@@ -4,8 +4,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
-$json = docker exec openclaw-openclaw-gateway-1 openclaw channels logs --json --channel telegram --lines $Lines
+$json = & docker @(Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName "openclaw-openclaw-gateway-1" -Arguments @("channels", "logs", "--json", "--channel", "telegram", "--lines", [string]$Lines))
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to read Telegram channel logs from the gateway."
 }
@@ -27,7 +28,7 @@ foreach ($line in @($payload.lines)) {
         }
     }
 
-    if ($message -match 'Group migrated: "(?<title>[^"]+)" (?<old>-?\d+) → (?<new>-?\d+)') {
+    if ($message -match 'Group migrated: "(?<title>[^"]+)" (?<old>-?\d+)\s+\S+\s+(?<new>-?\d+)') {
         $groupRows += [pscustomobject]@{
             Time       = $line.time
             Title      = $Matches.title

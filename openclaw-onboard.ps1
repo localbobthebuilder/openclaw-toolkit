@@ -2,9 +2,7 @@
 param(
     [string]$ConfigPath,
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
-    [switch]$SkipRelaunch,
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$Arguments
+    [switch]$SkipRelaunch
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,12 +12,12 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "shared-interactive-window.ps1")
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
 if (-not $SkipRelaunch) {
     $launchArgs = @()
     if ($ConfigPath) { $launchArgs += @("-ConfigPath", $ConfigPath) }
     if ($ContainerName) { $launchArgs += @("-ContainerName", $ContainerName) }
-    if ($Arguments) { $launchArgs += $Arguments }
     $launchArgs += "-SkipRelaunch"
 
     $launched = Restart-InInteractiveWindowIfNeeded `
@@ -98,7 +96,7 @@ Write-Step "Launching OpenClaw onboarding"
 Write-Host "Complete the interactive onboarding choices in this window." -ForegroundColor Yellow
 Write-Host "When it finishes, return to the toolkit dashboard and refresh status." -ForegroundColor Yellow
 
-& $dockerCommand.Source exec -it $ContainerName openclaw onboard @Arguments
+& $dockerCommand.Source @(Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("onboard"))
 if ($LASTEXITCODE -ne 0) {
     throw "OpenClaw onboarding did not complete successfully."
 }

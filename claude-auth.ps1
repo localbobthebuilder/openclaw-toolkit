@@ -15,6 +15,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "shared-interactive-window.ps1")
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
 if (-not $SkipRelaunch) {
     $launchArgs = @()
@@ -92,7 +93,7 @@ if ($Method -eq "cli") {
     Write-Step "Starting Anthropic Claude CLI auth flow"
     Write-Host "This reuses Claude CLI-style auth for the Anthropic provider through OpenClaw." -ForegroundColor Yellow
     Write-Host "Use this only if you explicitly want the Claude CLI path." -ForegroundColor Yellow
-    & docker exec -it $ContainerName node dist/index.js models auth login --provider anthropic --method cli --set-default
+    & docker @(Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("models", "auth", "login", "--provider", "anthropic", "--method", "cli", "--set-default"))
     if ($LASTEXITCODE -ne 0) {
         throw "Anthropic CLI auth login did not complete successfully."
     }
@@ -101,7 +102,7 @@ elseif ($Method -eq "api-key") {
     Write-Step "Starting Anthropic API-key auth flow"
     Write-Host "Recommended path: enter an Anthropic Console API key." -ForegroundColor Yellow
     Write-Host "This keeps Claude auth on the supported API-key path inside OpenClaw's own auth profiles." -ForegroundColor Yellow
-    & docker exec -it $ContainerName node dist/index.js models auth login --provider anthropic --method api-key --set-default
+    & docker @(Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("models", "auth", "login", "--provider", "anthropic", "--method", "api-key", "--set-default"))
     if ($LASTEXITCODE -ne 0) {
         throw "Anthropic API-key auth did not complete successfully."
     }
@@ -110,7 +111,7 @@ else {
     Write-Step "Starting Anthropic setup-token paste flow"
     Write-Host "Legacy path: paste a Claude setup-token into OpenClaw." -ForegroundColor Yellow
     Write-Host "Prefer -Method api-key unless you intentionally need this older flow." -ForegroundColor Yellow
-    & docker exec -it $ContainerName node dist/index.js models auth paste-token --provider anthropic
+    & docker @(Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("models", "auth", "paste-token", "--provider", "anthropic"))
     if ($LASTEXITCODE -ne 0) {
         throw "Anthropic setup-token paste did not complete successfully."
     }

@@ -13,6 +13,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "shared-interactive-window.ps1")
+. (Join-Path (Split-Path -Parent $PSCommandPath) "shared-gateway-cli-startup.ps1")
 
 if (-not $SkipRelaunch) {
     $launchArgs = @()
@@ -89,7 +90,7 @@ Write-Step "Starting interactive OpenAI Codex auth flow"
 Write-Host "This runs OpenClaw's own OpenAI Codex OAuth login inside the gateway container." -ForegroundColor Yellow
 Write-Host "That is separate from any host-browser or host-CLI login state." -ForegroundColor Yellow
 
-& docker exec -it $ContainerName node dist/index.js models auth login --provider openai-codex --set-default
+& docker @(Get-ToolkitGatewayNodeDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("models", "auth", "login", "--provider", "openai-codex", "--set-default"))
 if ($LASTEXITCODE -ne 0) {
     throw "OpenAI Codex auth login did not complete successfully."
 }
