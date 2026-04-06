@@ -2493,6 +2493,27 @@ function Configure-ToolPolicy {
     Write-Host "Configured managed tool policy baseline." -ForegroundColor Green
 }
 
+function Configure-SkillPolicy {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $enableAllSkills = $true
+    if ($Config.PSObject.Properties.Name -contains "skills" -and
+        $null -ne $Config.skills -and
+        $Config.skills.PSObject.Properties.Name -contains "enableAll" -and
+        $null -ne $Config.skills.enableAll) {
+        $enableAllSkills = [bool]$Config.skills.enableAll
+    }
+
+    if ($enableAllSkills) {
+        Unset-OpenClawConfigPath -Path "agents.defaults.skills"
+        Write-Host "Configured skill access policy: all skills enabled by default." -ForegroundColor Green
+        return
+    }
+
+    Set-OpenClawConfigJson -Path "agents.defaults.skills" -Value @() -AsArray
+    Write-Host "Configured skill access policy: all skills disabled by default." -ForegroundColor Green
+}
+
 function Sync-ManagedHookDirectory {
     param(
         [Parameter(Mandatory = $true)][string]$SourceDir,
@@ -2648,6 +2669,7 @@ Set-OpenClawConfigValue -Path "gateway.controlUi.allowInsecureAuth" -Value $fals
 Ensure-ControlUiAllowedOrigins -Config $config
 
 Configure-ToolPolicy -Config $config
+Configure-SkillPolicy -Config $config
 Ensure-AgentBootstrapOverlayHook -Config $config
 
 Set-OpenClawConfigValue -Path "models.mode" -Value "merge"

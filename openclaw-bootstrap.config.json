@@ -66,6 +66,9 @@
       "gateway"
     ]
   },
+  "skills": {
+    "enableAll": true
+  },
   "contextManagement": {
     "compaction": {
       "mode": "safeguard",

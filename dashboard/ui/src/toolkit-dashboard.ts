@@ -704,6 +704,13 @@ export class ToolkitDashboard extends LitElement {
             </label>
         </div>
         <div class="form-group">
+            <label class="toggle-switch">
+                <input type="checkbox" ?checked=${this.config.skills.enableAll} @change=${(e: any) => { this.config.skills.enableAll = e.target.checked; this.requestUpdate(); }}>
+                Enable All Skills
+            </label>
+            <div class="help-text">Recommended. When off, bootstrap disables skills for the default agent and toolkit-managed agents.</div>
+        </div>
+        <div class="form-group">
           <label>Auto-Pull VRAM Budget (%)</label>
           <input
             type="number"
@@ -897,6 +904,10 @@ export class ToolkitDashboard extends LitElement {
     const clone = JSON.parse(JSON.stringify(config));
     if (!clone) return clone;
     if (!clone.ollama) clone.ollama = {};
+    if (!clone.skills || typeof clone.skills !== 'object') clone.skills = {};
+    if (typeof clone.skills.enableAll !== 'boolean') {
+      clone.skills.enableAll = clone.skills.enableAll === false || clone.skills.enableAll === 'false' ? false : true;
+    }
     if (typeof clone.ollama.pullVramBudgetFraction !== 'number' || !Number.isFinite(clone.ollama.pullVramBudgetFraction) || clone.ollama.pullVramBudgetFraction <= 0 || clone.ollama.pullVramBudgetFraction > 1) {
       const parsedBudget = Number(clone.ollama.pullVramBudgetFraction);
       clone.ollama.pullVramBudgetFraction = Number.isFinite(parsedBudget) && parsedBudget > 0 && parsedBudget <= 1 ? parsedBudget : 0.7;

@@ -482,7 +482,8 @@ function New-AgentEntry {
         [bool]$IsDefault = $false,
         $Tools,
         $Sandbox,
-        $Subagents
+        $Subagents,
+        [string[]]$Skills
     )
 
     $entry = [ordered]@{
@@ -516,6 +517,13 @@ function New-AgentEntry {
     }
     if ($null -ne $Subagents) {
         $entry.subagents = $Subagents
+    }
+    if ($null -ne $Skills) {
+        $entry.skills = @(
+            $Skills |
+                ForEach-Object { [string]$_ } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
     }
 
     return $entry
@@ -553,6 +561,20 @@ function Get-AgentSubagentPolicy {
     }
 
     return $entry
+}
+
+function Get-AgentSkillsOverride {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "skills" -and
+        $null -ne $Config.skills -and
+        $Config.skills.PSObject.Properties.Name -contains "enableAll" -and
+        $null -ne $Config.skills.enableAll -and
+        -not [bool]$Config.skills.enableAll) {
+        return @()
+    }
+
+    return $null
 }
 
 function Get-SharedWorkspacePath {
@@ -965,8 +987,9 @@ function Add-DesiredAgentFromConfig {
     $toolsOverride = Get-ToolProfileOverride -Config $Config -AgentConfig $AgentConfig
     $sandboxOverride = Get-AgentSandboxOverride -AgentConfig $AgentConfig
     $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
+    $skillsOverride = Get-AgentSkillsOverride -Config $Config
 
-    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy
+    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy -Skills $skillsOverride
     return @(@($DesiredAgents) + $entry)
 }
 
@@ -992,7 +1015,8 @@ function Merge-AgentEntry {
         "model",
         "tools",
         "sandbox",
-        "subagents"
+        "subagents",
+        "skills"
     )
     foreach ($prop in $managedOptionalProps) {
         if (($Existing.PSObject.Properties.Name -contains $prop) -and -not ($Desired.Keys -contains $prop)) {
@@ -1706,7 +1730,8 @@ $managedOptionalAgentProps = @(
     "model",
     "tools",
     "sandbox",
-    "subagents"
+    "subagents",
+    "skills"
 )
 
 for ($index = 0; $index -lt @($desiredAgents).Count; $index++) {
