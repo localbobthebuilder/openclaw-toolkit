@@ -557,7 +557,8 @@ export class ToolkitDashboard extends LitElement {
       <header>
         <div style="display: flex; gap: 10px;">
           <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
-          <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
+          <div class="tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</div>
+          <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Ollama Endpoints</div>
           <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
           <div class="tab ${this.configSection === 'roles' ? 'active' : ''}" @click=${() => this.configSection = 'roles'}>Role Policies</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
@@ -576,6 +577,7 @@ export class ToolkitDashboard extends LitElement {
   renderConfigSection() {
     switch (this.configSection) {
       case 'general': return this.renderGeneralConfig();
+      case 'sandbox': return this.renderSandboxConfig();
       case 'endpoints': return this.renderEndpointsConfig();
       case 'models': return this.renderModelsConfig();
       case 'roles': return this.renderRolesConfig();
@@ -607,6 +609,92 @@ export class ToolkitDashboard extends LitElement {
                 <input type="checkbox" ?checked=${this.config.ollama.enabled} @change=${(e: any) => { this.config.ollama.enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Ollama Local Models Support
             </label>
+        </div>
+      </div>
+    `;
+  }
+
+  renderSandboxConfig() {
+    return html`
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><h3>Sandbox Defaults</h3></div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${this.config.sandbox.enabled} @change=${(e: any) => { this.config.sandbox.enabled = e.target.checked; this.requestUpdate(); }}>
+              Enable sandbox support
+            </label>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label>Mode</label>
+              <select @change=${(e: any) => { this.config.sandbox.mode = e.target.value; this.requestUpdate(); }}>
+                <option value="off" ?selected=${this.config.sandbox.mode === 'off'}>off</option>
+                <option value="all" ?selected=${this.config.sandbox.mode === 'all'}>all</option>
+                <option value="workspace-write" ?selected=${this.config.sandbox.mode === 'workspace-write'}>workspace-write</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Scope</label>
+              <select @change=${(e: any) => { this.config.sandbox.scope = e.target.value; this.requestUpdate(); }}>
+                <option value="session" ?selected=${this.config.sandbox.scope === 'session'}>session</option>
+                <option value="task" ?selected=${this.config.sandbox.scope === 'task'}>task</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Workspace Access</label>
+            <select @change=${(e: any) => { this.config.sandbox.workspaceAccess = e.target.value; this.requestUpdate(); }}>
+              <option value="ro" ?selected=${this.config.sandbox.workspaceAccess === 'ro'}>read-only</option>
+              <option value="rw" ?selected=${this.config.sandbox.workspaceAccess === 'rw'}>read-write</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${this.config.sandbox.toolsFsWorkspaceOnly} @change=${(e: any) => { this.config.sandbox.toolsFsWorkspaceOnly = e.target.checked; this.requestUpdate(); }}>
+              Limit filesystem tools to workspace only
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${this.config.sandbox.applyPatchWorkspaceOnly} @change=${(e: any) => { this.config.sandbox.applyPatchWorkspaceOnly = e.target.checked; this.requestUpdate(); }}>
+              Limit apply_patch to workspace only
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Sandbox Images and Docker Socket</h3></div>
+          <div class="form-group">
+            <label>Docker Socket Source</label>
+            <input type="text" .value=${this.config.sandbox.dockerSocketSource || ''} @input=${(e: any) => { this.config.sandbox.dockerSocketSource = e.target.value; this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Docker Socket Target</label>
+            <input type="text" .value=${this.config.sandbox.dockerSocketTarget || ''} @input=${(e: any) => { this.config.sandbox.dockerSocketTarget = e.target.value; this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Docker Socket Group</label>
+            <input type="text" .value=${this.config.sandbox.dockerSocketGroup || ''} @input=${(e: any) => { this.config.sandbox.dockerSocketGroup = e.target.value; this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${this.config.sandbox.buildGatewayImageWithDockerCli} @change=${(e: any) => { this.config.sandbox.buildGatewayImageWithDockerCli = e.target.checked; this.requestUpdate(); }}>
+              Build gateway image with Docker CLI
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Gateway Image Tag</label>
+            <input type="text" .value=${this.config.sandbox.gatewayImageTag || ''} @input=${(e: any) => { this.config.sandbox.gatewayImageTag = e.target.value; this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Sandbox Base Image</label>
+            <input type="text" .value=${this.config.sandbox.sandboxBaseImage || ''} @input=${(e: any) => { this.config.sandbox.sandboxBaseImage = e.target.value; this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Sandbox Image</label>
+            <input type="text" .value=${this.config.sandbox.sandboxImage || ''} @input=${(e: any) => { this.config.sandbox.sandboxImage = e.target.value; this.requestUpdate(); }}>
+          </div>
         </div>
       </div>
     `;
@@ -749,10 +837,10 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <div class="card">
         <div class="card-header">
-          <h3>Endpoints (Compute Resources)</h3>
+          <h3>Ollama Endpoints</h3>
           <button class="btn btn-ghost" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines running Ollama. Each machine has specific hardware-tuned models.</p>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">These endpoints are Ollama runtimes. Each machine has its own local model catalog and optional hosted model pool.</p>
         ${repeat(this.config.ollama.endpoints, (ep: any) => ep.key, (ep: any, idx) => html`
           <div class="item-row">
             <div class="item-info">
@@ -997,6 +1085,7 @@ export class ToolkitDashboard extends LitElement {
     const builtInAgents = Object.keys(this.config.multiAgent)
       .filter(k => k.endsWith('Agent'))
       .map(k => ({ key: k, ...this.config.multiAgent[k] }));
+    const sharedWorkspace = this.config.multiAgent.sharedWorkspace || (this.config.multiAgent.sharedWorkspace = { enabled: false });
 
     return html`
       <div class="card">
@@ -1012,6 +1101,55 @@ export class ToolkitDashboard extends LitElement {
             </label>
         </div>
 
+        <div class="grid-2" style="margin-bottom: 25px;">
+            <div class="card" style="margin-bottom: 0;">
+                <div class="card-header"><h3>Workspace Collaboration</h3></div>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${sharedWorkspace.enabled} @change=${(e: any) => { sharedWorkspace.enabled = e.target.checked; this.requestUpdate(); }}>
+                        Enable shared workspace
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Shared Workspace Path</label>
+                    <input type="text" .value=${sharedWorkspace.path || ''} @input=${(e: any) => { sharedWorkspace.path = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                    <label>Shared Workspace Role Policy</label>
+                    <select @change=${(e: any) => {
+                        const value = e.target.value;
+                        if (value) {
+                            sharedWorkspace.rolePolicyKey = value;
+                        } else {
+                            delete sharedWorkspace.rolePolicyKey;
+                        }
+                        this.requestUpdate();
+                    }}>
+                        <option value="">Default sharedWorkspace policy</option>
+                        ${Object.keys(this.config.multiAgent.rolePolicies || {}).map((role: string) => html`
+                            <option value=${role} ?selected=${sharedWorkspace.rolePolicyKey === role}>${role}</option>
+                        `)}
+                    </select>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom: 0;">
+                <div class="card-header"><h3>Managed Agent Wiring</h3></div>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${this.config.multiAgent.enableAgentToAgent} @change=${(e: any) => { this.config.multiAgent.enableAgentToAgent = e.target.checked; this.requestUpdate(); }}>
+                        Enable agent-to-agent tool
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${this.config.multiAgent.manageWorkspaceAgentsMd} @change=${(e: any) => { this.config.multiAgent.manageWorkspaceAgentsMd = e.target.checked; this.requestUpdate(); }}>
+                        Manage AGENTS.md files in workspaces
+                    </label>
+                </div>
+            </div>
+        </div>
+
         <h4 style="color: #666; margin-bottom: 10px;">Built-in Roles</h4>
         ${builtInAgents.map(agent => html`
           <div class="item-row" style="${!agent.enabled && agent.key !== 'strongAgent' ? 'opacity: 0.5;' : ''}">
@@ -1021,7 +1159,7 @@ export class ToolkitDashboard extends LitElement {
                 ${agent.key === 'strongAgent' ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
                 ${!agent.enabled && agent.key !== 'strongAgent' ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
               </span>
-              <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef}</span>
+              <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef} | Workspace: ${agent.workspaceMode || (sharedWorkspace.enabled ? 'shared' : 'private')} | Sandbox: ${agent.sandboxMode || 'default'}</span>
             </div>
             <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
           </div>
@@ -1033,7 +1171,7 @@ export class ToolkitDashboard extends LitElement {
                 <div class="item-row">
                     <div class="item-info">
                         <span class="item-title">${agent.name}</span>
-                        <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef}</span>
+                        <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef} | Workspace: ${agent.workspaceMode || (sharedWorkspace.enabled ? 'shared' : 'private')} | Sandbox: ${agent.sandboxMode || 'default'}</span>
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary" @click=${() => this.editingAgentKey = `extra:${idx}`}>Configure</button>
@@ -1062,6 +1200,8 @@ export class ToolkitDashboard extends LitElement {
 
     const endpoints = (this.config.ollama.endpoints || []).map((e: any) => e.key);
     const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
+    const subagents = agent.subagents || (agent.subagents = {});
+    const effectiveWorkspaceMode = agent.workspaceMode || (this.config.multiAgent.sharedWorkspace?.enabled ? 'shared' : 'private');
     
     const selectedEndpoint = this.config.ollama.endpoints.find((e: any) => e.key === agent.endpointKey);
     const availableTunedModels = selectedEndpoint ? this.getEndpointModels(selectedEndpoint).map((mo: any) => mo.id) : [];
@@ -1100,6 +1240,52 @@ export class ToolkitDashboard extends LitElement {
                     </select>
                 </div>
             </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Workspace Mode</label>
+                    <select @change=${(e: any) => { agent.workspaceMode = e.target.value; this.requestUpdate(); }}>
+                        <option value="shared" ?selected=${effectiveWorkspaceMode === 'shared'}>shared</option>
+                        <option value="private" ?selected=${effectiveWorkspaceMode === 'private'}>private</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Sandbox Mode Override</label>
+                    <input type="text" .value=${agent.sandboxMode || ''} placeholder="off, workspace-write, all, ..." @input=${(e: any) => {
+                        const value = e.target.value.trim();
+                        if (value) {
+                            agent.sandboxMode = value;
+                        } else {
+                            delete agent.sandboxMode;
+                        }
+                        this.requestUpdate();
+                    }}>
+                </div>
+            </div>
+
+            ${effectiveWorkspaceMode === 'private' ? html`
+                <div class="form-group">
+                    <label>Private Workspace Path</label>
+                    <input type="text" .value=${agent.workspace || ''} placeholder="/home/node/.openclaw/workspace-${agent.id}" @input=${(e: any) => {
+                        const value = e.target.value.trim();
+                        if (value) {
+                            agent.workspace = value;
+                        } else {
+                            delete agent.workspace;
+                        }
+                        this.requestUpdate();
+                    }}>
+                </div>
+            ` : ''}
+
+            ${effectiveWorkspaceMode === 'private' && this.config.multiAgent.sharedWorkspace?.enabled ? html`
+            <div class="form-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" ?checked=${!!agent.sharedWorkspaceAccess} @change=${(e: any) => { agent.sharedWorkspaceAccess = e.target.checked; this.requestUpdate(); }}>
+                    Allow private workspace agent to access the shared workspace
+                </label>
+            </div>
+            ` : ''}
 
             ${agent.modelSource === 'local' ? html`
                 <div class="grid-2">
@@ -1145,6 +1331,37 @@ export class ToolkitDashboard extends LitElement {
                     </div>
                 ` : ''}
             `}
+
+            <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
+                <div class="card-header"><h3>Subagents</h3></div>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${subagents.enabled !== false} @change=${(e: any) => {
+                            if (e.target.checked) {
+                                delete subagents.enabled;
+                            } else {
+                                subagents.enabled = false;
+                            }
+                            this.requestUpdate();
+                        }}>
+                        Enable spawning subagents from this agent
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${!!subagents.requireAgentId} @change=${(e: any) => { subagents.requireAgentId = e.target.checked; this.requestUpdate(); }}>
+                        Require explicit agent ID when spawning subagents
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Allowed Agent IDs (comma separated, leave blank for toolkit defaults)</label>
+                    <input type="text" .value=${(subagents.allowAgents || []).join(', ')} @input=${(e: any) => {
+                        const value = e.target.value.trim();
+                        subagents.allowAgents = value ? value.split(',').map((item: string) => item.trim()).filter(Boolean) : [];
+                        this.requestUpdate();
+                    }}>
+                </div>
+            </div>
 
             <div class="form-group">
                 <label>Candidate Models</label>
@@ -1255,8 +1472,15 @@ export class ToolkitDashboard extends LitElement {
           name: 'New Custom Agent',
           rolePolicyKey: 'codingDelegate',
           modelSource: 'local',
+          workspaceMode: 'private',
+          sharedWorkspaceAccess: false,
+          sandboxMode: 'off',
           modelRef: 'ollama/qwen2.5-coder:3b',
-          candidateModelRefs: []
+          candidateModelRefs: [],
+          subagents: {
+              requireAgentId: true,
+              allowAgents: []
+          }
       };
       this.config.multiAgent.extraAgents.push(newAgent);
       this.editingAgentKey = `extra:${this.config.multiAgent.extraAgents.length - 1}`;

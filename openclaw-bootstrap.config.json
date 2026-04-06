@@ -628,7 +628,27 @@
         "ollama/qwen2.5:7b"
       ]
     },
-    "extraAgents": [],
+    "extraAgents": [
+      {
+        "enabled": true,
+        "id": "notes-helper",
+        "name": "Notes Helper",
+        "rolePolicyKey": "research",
+        "modelSource": "hosted",
+        "workspaceMode": "private",
+        "sharedWorkspaceAccess": true,
+        "workspace": "/home/node/.openclaw/workspace-notes-helper",
+        "sandboxMode": "off",
+        "subagents": {
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "candidateModelRefs": [
+          "google/gemini-3.1-flash-lite-preview"
+        ]
+      }
+    ],
     "rolePolicies": {
       "sharedWorkspace": [
         "# AGENTS.md - Shared Project Workspace",

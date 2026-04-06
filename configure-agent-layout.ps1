@@ -28,6 +28,11 @@ function Write-Step {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+function Write-WarnLine {
+    param([string]$Message)
+    Write-Host "WARNING: $Message" -ForegroundColor Yellow
+}
+
 function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -109,13 +114,10 @@ function Remove-OpenClawConfigJson {
     ) -AllowFailure
 }
 
-function Get-OpenClawConfigJsonValue {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
+function Get-OpenClawConfigDocument {
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
-        "config", "get", $Path
+        "cat", "/home/node/.openclaw/openclaw.json"
     ) -AllowFailure
 
     if ($result.ExitCode -ne 0) {
@@ -133,6 +135,43 @@ function Get-OpenClawConfigJsonValue {
     catch {
         return $null
     }
+}
+
+function Get-OpenClawConfigJsonValue {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $document = Get-OpenClawConfigDocument
+    if ($null -eq $document) {
+        return $null
+    }
+
+    $current = $document
+    foreach ($segment in @($Path -split '\.')) {
+        if ($null -eq $current) {
+            return $null
+        }
+
+        if ($current -is [System.Collections.IList] -and $segment -match '^\d+$') {
+            $index = [int]$segment
+            if ($index -lt 0 -or $index -ge $current.Count) {
+                return $null
+            }
+            $current = $current[$index]
+            continue
+        }
+
+        if (-not ($current.PSObject.Properties.Name -contains $segment)) {
+            return $null
+        }
+
+        $current = $current.$segment
+    }
+
+    if ($null -eq $current) {
+        return $null
+    }
+
+    return $current
 }
 
 function Add-UniqueString {
@@ -1046,7 +1085,32 @@ function Resolve-OllamaModelRef {
     }
 
     $desiredModelId = Get-ToolkitModelIdFromRef -ModelRef $DesiredRef
-    $pulled = Try-PullOllamaModel -Endpoint $endpoint -ModelId $desiredModelId
+    $shouldAttemptPull = $true
+    if ($null -eq $endpoint) {
+        $shouldAttemptPull = $false
+    }
+    elseif ($endpoint.PSObject.Properties.Name -contains "autoPullMissingModels" -and
+        -not [bool]$endpoint.autoPullMissingModels) {
+        $shouldAttemptPull = $false
+        Write-WarnLine "Skipping pull of '$desiredModelId' on endpoint '$($endpoint.key)' because autoPullMissingModels is disabled."
+    }
+
+    if ($shouldAttemptPull -and $null -ne $endpoint) {
+        $vramBudgetMiB = Get-ToolkitEndpointVramBudgetMiB -Endpoint $endpoint
+        if ($null -ne $vramBudgetMiB) {
+            $estimateMiB = Get-ToolkitLocalModelPullEstimateMiB -Config $Config -ModelId $desiredModelId -EndpointKey $EndpointKey
+            if ($null -ne $estimateMiB -and $estimateMiB -gt $vramBudgetMiB) {
+                $gpuTotalMiB = [int][math]::Round($vramBudgetMiB / 0.70)
+                Write-WarnLine "Skipping pull of '$desiredModelId' on endpoint '$($endpoint.key)': $estimateMiB MiB exceeds VRAM budget of $vramBudgetMiB MiB (70% of $gpuTotalMiB MiB total)."
+                $shouldAttemptPull = $false
+            }
+        }
+    }
+
+    $pulled = $false
+    if ($shouldAttemptPull) {
+        $pulled = Try-PullOllamaModel -Endpoint $endpoint -ModelId $desiredModelId
+    }
     if ($pulled) {
         $availableRefs = Get-OllamaAvailableModelRefs -Config $Config
         if ($desiredResolvedRef -in $availableRefs) {

@@ -428,3 +428,95 @@ function Get-ToolkitEffectiveLocalModelEntry {
 
     return (Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId)
 }
+
+function Get-ToolkitOllamaRegistryModelSizeMiB {
+    param([Parameter(Mandatory = $true)][string]$ModelId)
+
+    $parts = $ModelId -split ':', 2
+    $modelName = $parts[0]
+    $tag = if ($parts.Count -eq 2 -and $parts[1]) { $parts[1] } else { "latest" }
+
+    if ($modelName -match '/') {
+        $ns, $name = $modelName -split '/', 2
+    }
+    else {
+        $ns = "library"
+        $name = $modelName
+    }
+
+    $url = "https://registry.ollama.ai/v2/$ns/$name/manifests/$tag"
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Get -Headers @{
+            Accept = "application/vnd.docker.distribution.manifest.v2+json"
+        } -TimeoutSec 10 -ErrorAction Stop
+        $totalBytes = ($response.layers | Measure-Object -Property size -Sum).Sum
+        if ($totalBytes -gt 0) {
+            return [int][math]::Ceiling($totalBytes / 1MB)
+        }
+    }
+    catch {
+    }
+
+    return $null
+}
+
+function Get-ToolkitEndpointVramBudgetMiB {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [double]$ThresholdFraction = 0.70
+    )
+
+    $telemetry = if ($Endpoint.PSObject.Properties.Name -contains "telemetry") { $Endpoint.telemetry } else { $null }
+    $kind = if ($telemetry -and $telemetry.PSObject.Properties.Name -contains "kind" -and $telemetry.kind) {
+        ([string]$telemetry.kind).ToLowerInvariant()
+    }
+    else {
+        "local-nvidia-smi"
+    }
+
+    $totalMiB = $null
+    switch ($kind) {
+        "local-nvidia-smi" {
+            $raw = & nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
+            if ($raw) {
+                $parsed = 0
+                if ([int]::TryParse((@($raw)[0]).Trim(), [ref]$parsed) -and $parsed -gt 0) {
+                    $totalMiB = $parsed
+                }
+            }
+        }
+        "static-gpu-total" {
+            if ($telemetry.PSObject.Properties.Name -contains "gpuTotalMiB" -and $telemetry.gpuTotalMiB) {
+                $totalMiB = [int]$telemetry.gpuTotalMiB
+            }
+        }
+    }
+
+    if ($null -eq $totalMiB -or $totalMiB -le 0) {
+        return $null
+    }
+
+    return [int]($totalMiB * $ThresholdFraction)
+}
+
+function Get-ToolkitLocalModelPullEstimateMiB {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ModelId,
+        [string]$EndpointKey
+    )
+
+    $registryMiB = Get-ToolkitOllamaRegistryModelSizeMiB -ModelId $ModelId
+    if ($null -ne $registryMiB) {
+        return $registryMiB
+    }
+
+    $catalogEntry = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
+    if ($null -ne $catalogEntry -and
+        $catalogEntry.PSObject.Properties.Name -contains "vramEstimateMiB" -and
+        $catalogEntry.vramEstimateMiB) {
+        return [int]$catalogEntry.vramEstimateMiB
+    }
+
+    return $null
+}
