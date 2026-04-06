@@ -245,7 +245,7 @@ export class ToolkitDashboard extends LitElement {
 
   async saveConfig() {
     try {
-      this.syncAllAgentSelections();
+      this.syncAllAgentModelSources();
       this.config = this.sanitizeConfigModelNames(this.config);
       const res = await fetch(this.getBaseUrl() + '/api/config', {
         method: 'POST',
@@ -841,6 +841,57 @@ export class ToolkitDashboard extends LitElement {
     return [];
   }
 
+  getDefaultEndpoint() {
+    const endpoints = this.getConfigEndpoints();
+    return endpoints.find((endpoint: any) => !!endpoint?.default) || endpoints[0] || null;
+  }
+
+  getEndpointsForModelRef(modelRef: string | undefined) {
+    if (typeof modelRef !== 'string' || modelRef.length === 0) {
+      return [];
+    }
+
+    return this.getConfigEndpoints().filter((endpoint: any) =>
+      this.getEndpointModelOptions(endpoint).some((option: any) => option.ref === modelRef)
+    );
+  }
+
+  resolveAgentEndpoint(agent: any) {
+    const endpoints = this.getConfigEndpoints();
+    if (typeof agent?.endpointKey === 'string' && agent.endpointKey.length > 0) {
+      const explicitEndpoint = endpoints.find((endpoint: any) => endpoint.key === agent.endpointKey);
+      if (explicitEndpoint) {
+        return explicitEndpoint;
+      }
+    }
+
+    const refsToCheck: string[] = [];
+    if (typeof agent?.modelRef === 'string' && agent.modelRef.length > 0) {
+      refsToCheck.push(agent.modelRef);
+    }
+    if (Array.isArray(agent?.candidateModelRefs)) {
+      for (const ref of agent.candidateModelRefs) {
+        if (typeof ref === 'string' && ref.length > 0 && !refsToCheck.includes(ref)) {
+          refsToCheck.push(ref);
+        }
+      }
+    }
+
+    const defaultEndpoint = this.getDefaultEndpoint();
+    for (const ref of refsToCheck) {
+      const matches = this.getEndpointsForModelRef(ref);
+      if (matches.length === 0) {
+        continue;
+      }
+      if (defaultEndpoint && matches.some((endpoint: any) => endpoint.key === defaultEndpoint.key)) {
+        return defaultEndpoint;
+      }
+      return matches[0];
+    }
+
+    return null;
+  }
+
   getEndpointOllama(endpoint: any) {
     if (endpoint?.ollama && typeof endpoint.ollama === 'object') {
       return endpoint.ollama;
@@ -1184,15 +1235,26 @@ export class ToolkitDashboard extends LitElement {
   }
 
   syncAgentEndpointModelSelection(agent: any, endpoint: any) {
-    const allowedRefs = new Set(this.getEndpointModelOptions(endpoint).map((option: any) => option.ref));
-    const currentCandidates = Array.isArray(agent?.candidateModelRefs) ? agent.candidateModelRefs : [];
-    agent.candidateModelRefs = currentCandidates.filter((ref: string) => allowedRefs.has(ref));
+    if (!agent) {
+      return;
+    }
 
+    if (!endpoint) {
+      this.syncAgentModelSource(agent);
+      return;
+    }
+
+    const allowedRefs = new Set(this.getEndpointModelOptions(endpoint).map((option: any) => option.ref));
+    if (allowedRefs.size === 0) {
+      this.syncAgentModelSource(agent);
+      return;
+    }
+
+    const currentCandidates = Array.isArray(agent?.candidateModelRefs) ? agent.candidateModelRefs : [];
     if (!allowedRefs.has(agent?.modelRef)) {
-      if (agent.candidateModelRefs.length > 0) {
-        agent.modelRef = agent.candidateModelRefs[0];
-      } else {
-        agent.modelRef = '';
+      const firstCompatibleCandidate = currentCandidates.find((ref: string) => allowedRefs.has(ref));
+      if (firstCompatibleCandidate) {
+        agent.modelRef = firstCompatibleCandidate;
       }
     }
 
@@ -1206,9 +1268,8 @@ export class ToolkitDashboard extends LitElement {
   }
 
   syncAllAgentSelections() {
-    const endpoints = this.getConfigEndpoints();
     for (const { agent } of this.getManagedAgentEntries()) {
-      const endpoint = endpoints.find((entry: any) => entry.key === agent.endpointKey);
+      const endpoint = this.resolveAgentEndpoint(agent);
       this.syncAgentEndpointModelSelection(agent, endpoint);
     }
   }
@@ -1673,15 +1734,16 @@ export class ToolkitDashboard extends LitElement {
     const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
     const subagents = agent.subagents || (agent.subagents = {});
     const effectiveWorkspaceMode = agent.workspaceMode || (this.config.multiAgent.sharedWorkspace?.enabled ? 'shared' : 'private');
-
-    const selectedEndpoint = endpoints.find((e: any) => e.key === agent.endpointKey);
-    if (selectedEndpoint) {
-      this.syncAgentEndpointModelSelection(agent, selectedEndpoint);
-    }
+    const selectedEndpoint = this.resolveAgentEndpoint(agent);
+    const effectiveEndpointKey = (typeof agent.endpointKey === 'string' && agent.endpointKey.length > 0)
+      ? agent.endpointKey
+      : (selectedEndpoint?.key || '');
     const endpointModelOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
     const allowedAgentChoices = this.getAllowedAgentChoices(agent.id);
     const selectedAllowedAgents = Array.isArray(subagents.allowAgents) ? subagents.allowAgents : (subagents.allowAgents = []);
     const candidateModelRefs = Array.isArray(agent.candidateModelRefs) ? agent.candidateModelRefs : (agent.candidateModelRefs = []);
+    const sandboxModeOverride = typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '';
+    const forceSandboxOff = sandboxModeOverride === 'off';
 
     return html`
         <div class="card">
@@ -1717,7 +1779,7 @@ export class ToolkitDashboard extends LitElement {
                         this.requestUpdate();
                     }}>
                         <option value="">Select Endpoint</option>
-                        ${endpoints.map((ep: any) => html`<option value=${ep.key} ?selected=${agent.endpointKey === ep.key}>${ep.key}</option>`)}
+                        ${endpoints.map((ep: any) => html`<option value=${ep.key} ?selected=${effectiveEndpointKey === ep.key}>${ep.key}</option>`)}
                     </select>
                 </div>
             </div>
@@ -1732,15 +1794,21 @@ export class ToolkitDashboard extends LitElement {
                 </div>
                 <div class="form-group">
                     <label>Sandbox Mode Override</label>
-                    <input type="text" .value=${agent.sandboxMode || ''} placeholder="off, workspace-write, all, ..." @input=${(e: any) => {
-                        const value = e.target.value.trim();
-                        if (value) {
-                            agent.sandboxMode = value;
-                        } else {
-                            delete agent.sandboxMode;
-                        }
-                        this.requestUpdate();
-                    }}>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${forceSandboxOff} @change=${(e: any) => {
+                            if (e.target.checked) {
+                                agent.sandboxMode = 'off';
+                            } else {
+                                delete agent.sandboxMode;
+                            }
+                            this.requestUpdate();
+                        }}>
+                        Force sandbox off for this agent
+                    </label>
+                    <div class="help-text">Turn this off to use the global sandbox default instead of an explicit agent override.</div>
+                    ${sandboxModeOverride && sandboxModeOverride !== 'off'
+                      ? html`<div class="help-text" style="color: #ff9800;">This agent currently has custom sandbox mode "${sandboxModeOverride}". Using the toggle will replace that custom mode with the toolkit's off/default behavior.</div>`
+                      : ''}
                 </div>
             </div>
 
