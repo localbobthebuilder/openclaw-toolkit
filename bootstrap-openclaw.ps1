@@ -258,30 +258,161 @@ function Get-HostWorkspaceDir {
     return (Join-Path (Get-HostConfigDir -Config $Config) "workspace")
 }
 
+function Convert-OpenClawReleaseTagToVersion {
+    param([Parameter(Mandatory = $true)][string]$Tag)
+
+    if ($Tag -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+        return $null
+    }
+
+    try {
+        return [version]$Matches.version
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-LatestOpenClawRelease {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $result = Invoke-External -FilePath "git" -Arguments @("ls-remote", "--tags", "--refs", [string]$Config.repoUrl) -AllowFailure -Quiet
+    if ($result.ExitCode -ne 0) {
+        $detail = if ($result.Output) { "`n$($result.Output)" } else { "" }
+        throw "Could not query OpenClaw release tags from $($Config.repoUrl).$detail"
+    }
+
+    $releases = @()
+    foreach ($line in ($result.Output -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        $parts = $line -split "\s+"
+        if ($parts.Count -lt 2) {
+            continue
+        }
+
+        $ref = [string]$parts[1]
+        if ($ref -notmatch '^refs/tags/(?<tag>v\d+\.\d+\.\d+)$') {
+            continue
+        }
+
+        $tag = $Matches.tag
+        $version = Convert-OpenClawReleaseTagToVersion -Tag $tag
+        if ($null -eq $version) {
+            continue
+        }
+
+        $releases += [pscustomobject]@{
+            Tag     = $tag
+            Version = $version
+        }
+    }
+
+    if ($releases.Count -eq 0) {
+        throw "No stable OpenClaw release tags were found at $($Config.repoUrl)."
+    }
+
+    return $releases | Sort-Object Version -Descending | Select-Object -First 1
+}
+
+function Get-CurrentOpenClawReleaseTag {
+    param([Parameter(Mandatory = $true)][string]$RepoPath)
+
+    $result = Invoke-External -FilePath "git" -Arguments @("-C", $RepoPath, "describe", "--tags", "--exact-match", "HEAD") -AllowFailure -Quiet
+    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Output)) {
+        return $null
+    }
+
+    $tag = (($result.Output -split "`r?`n")[0]).Trim()
+    if ($null -eq (Convert-OpenClawReleaseTagToVersion -Tag $tag)) {
+        return $null
+    }
+
+    return $tag
+}
+
+function Test-OpenClawRepoDirty {
+    param([Parameter(Mandatory = $true)][string]$RepoPath)
+
+    $result = Invoke-External -FilePath "git" -Arguments @("-C", $RepoPath, "status", "--porcelain=v1", "--untracked-files=all") -AllowFailure -Quiet
+    if ($result.ExitCode -ne 0) {
+        $detail = if ($result.Output) { "`n$($result.Output)" } else { "" }
+        throw "Could not inspect OpenClaw repo state at $RepoPath.$detail"
+    }
+
+    return -not [string]::IsNullOrWhiteSpace($result.Output)
+}
+
 function Ensure-RepoPresent {
     param([Parameter(Mandatory = $true)]$Config)
 
-    if (Test-Path $Config.repoPath) {
+    $latestRelease = Get-LatestOpenClawRelease -Config $Config
+    $repoExists = Test-Path $Config.repoPath
+    if (-not $repoExists) {
+        $parentDir = Split-Path -Parent $Config.repoPath
+        if (-not (Test-Path $parentDir)) {
+            New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+        }
+
+        Write-Step "Cloning OpenClaw repository at $($latestRelease.Tag)"
+        $cloneArgs = @("clone")
+        if ($Config.repoCloneDepth) {
+            $cloneArgs += @("--depth", [string]$Config.repoCloneDepth)
+        }
+        $cloneArgs += @("--branch", $latestRelease.Tag, [string]$Config.repoUrl, [string]$Config.repoPath)
+        $null = Invoke-External -FilePath "git" -Arguments $cloneArgs
+    }
+    else {
         if (-not (Test-Path (Join-Path $Config.repoPath ".git"))) {
             throw "Repo path exists but is not a git checkout: $($Config.repoPath)"
         }
 
         Write-Host "OpenClaw repo already present at $($Config.repoPath)." -ForegroundColor Green
-        return
+        $originProbe = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "remote", "get-url", "origin") -AllowFailure -Quiet
+        if ($originProbe.ExitCode -eq 0) {
+            $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "remote", "set-url", "origin", [string]$Config.repoUrl)
+        }
+        else {
+            $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "remote", "add", "origin", [string]$Config.repoUrl)
+        }
+
+        $fetchArgs = @("-C", $Config.repoPath, "fetch", "--force", "--tags", "--prune", "origin")
+        if ($Config.repoCloneDepth) {
+            $fetchArgs = @("-C", $Config.repoPath, "fetch", "--force", "--tags", "--prune", "--depth", [string]$Config.repoCloneDepth, "origin")
+        }
+        $null = Invoke-External -FilePath "git" -Arguments $fetchArgs
     }
 
-    $parentDir = Split-Path -Parent $Config.repoPath
-    if (-not (Test-Path $parentDir)) {
-        New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    $currentVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
+    $currentTag = Get-CurrentOpenClawReleaseTag -RepoPath $Config.repoPath
+    $isDirty = Test-OpenClawRepoDirty -RepoPath $Config.repoPath
+    if ($currentTag -ne $latestRelease.Tag -or $isDirty) {
+        if ($currentTag -and $currentTag -ne $latestRelease.Tag) {
+            Write-Host "Updating OpenClaw checkout from $currentTag to $($latestRelease.Tag)." -ForegroundColor Yellow
+        }
+        elseif ($currentVersion) {
+            Write-Host "Syncing existing OpenClaw checkout from package $currentVersion to release $($latestRelease.Tag)." -ForegroundColor Yellow
+        }
+        elseif ($isDirty) {
+            Write-Host "Resetting local OpenClaw changes before syncing to $($latestRelease.Tag)." -ForegroundColor Yellow
+        }
+
+        $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "reset", "--hard")
+        $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "clean", "-fd")
+        $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "checkout", "--detach", "--force", "refs/tags/$($latestRelease.Tag)")
+        $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "reset", "--hard", "refs/tags/$($latestRelease.Tag)")
+        $null = Invoke-External -FilePath "git" -Arguments @("-C", $Config.repoPath, "clean", "-fd")
     }
 
-    Write-Step "Cloning OpenClaw repository"
-    $cloneArgs = @("clone")
-    if ($Config.repoCloneDepth) {
-        $cloneArgs += @("--depth", [string]$Config.repoCloneDepth)
+    $repoVersion = Get-OpenClawRepoVersion -RepoPath $Config.repoPath
+    if ($repoVersion) {
+        Write-Host "Using OpenClaw release $($latestRelease.Tag) (package $repoVersion)." -ForegroundColor Green
     }
-    $cloneArgs += @([string]$Config.repoUrl, [string]$Config.repoPath)
-    $null = Invoke-External -FilePath "git" -Arguments $cloneArgs
+    else {
+        Write-Host "Using OpenClaw release $($latestRelease.Tag)." -ForegroundColor Green
+    }
 }
 
 function Ensure-LocalhostDockerPorts {
