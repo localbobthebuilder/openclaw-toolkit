@@ -591,9 +591,10 @@ function Ensure-SandboxImages {
 function Wait-ForGateway {
     param(
         [Parameter(Mandatory = $true)][string]$HealthUrl,
-        [int]$MaxAttempts = 20
+        [int]$MaxAttempts = 60
     )
 
+    Write-Host "Waiting up to $($MaxAttempts * 3)s for gateway at $HealthUrl (jiti first-run compilation may take 1-2 minutes)..." -ForegroundColor Cyan
     for ($i = 1; $i -le $MaxAttempts; $i++) {
         $result = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $HealthUrl) -AllowFailure
         if ($result.ExitCode -eq 0 -and $result.Output -match '"ok"\s*:\s*true') {
@@ -772,6 +773,46 @@ function Set-OpenClawConfigValue {
     )
 }
 
+function Ensure-InitialGatewayConfig {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $hostConfigDir = Get-HostConfigDir -Config $Config
+    $configFile = Join-Path $hostConfigDir "openclaw.json"
+
+    if (Test-Path $configFile) {
+        Write-Host "Gateway config already exists." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Seeding initial gateway config (required for first-time start)..." -ForegroundColor Cyan
+
+    $imageTag = if ($Config.PSObject.Properties.Name -contains "voiceNotes" -and $Config.voiceNotes -and $Config.voiceNotes.gatewayImageTag) {
+        [string]$Config.voiceNotes.gatewayImageTag
+    } else {
+        [string]$Config.sandbox.gatewayImageTag
+    }
+
+    $dockerConfigDir = Convert-WindowsPathToDockerDesktop -Path $hostConfigDir
+
+    $seedValues = @(
+        @("gateway.mode", "local"),
+        @("gateway.bind", [string]$Config.gatewayBind),
+        @("gateway.auth.mode", "token"),
+        @("gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback", "true")
+    )
+
+    foreach ($kv in $seedValues) {
+        $null = Invoke-External -FilePath "docker" -Arguments @(
+            "run", "--rm",
+            "-v", "${dockerConfigDir}:/home/node/.openclaw",
+            $imageTag,
+            "node", "dist/index.js", "config", "set", $kv[0], $kv[1]
+        )
+    }
+
+    Write-Host "Initial gateway config seeded." -ForegroundColor Green
+}
+
 function Add-UniqueString {
     param(
         [string[]]$List = @(),
@@ -806,6 +847,13 @@ function Ensure-ControlUiAllowedOrigins {
 
     Set-OpenClawConfigJson -Path "gateway.controlUi.allowedOrigins" -Value @($origins) -AsArray
     Write-Host "Configured Control UI allowed origins: $(@($origins) -join ', ')" -ForegroundColor Green
+
+    # Clear the break-glass flag that was seeded for the very first gateway start;
+    # proper allowedOrigins are now set so it is no longer needed.
+    $result = Invoke-External -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "config", "unset", "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback") -AllowFailure
+    if ($result.ExitCode -eq 0) {
+        Write-Host "Cleared dangerouslyAllowHostHeaderOriginFallback (proper origins are now configured)." -ForegroundColor Green
+    }
 }
 
 function Get-ManagedModelRefs {
@@ -1135,6 +1183,67 @@ function Resolve-OllamaModelRef {
     Write-WarnLine "Preferred $Purpose model $desiredResolvedRef is unavailable and no local Ollama fallback is present."
     return $desiredResolvedRef
 }
+
+function Get-OllamaRegistryModelSizeMiB {
+    param([Parameter(Mandatory = $true)][string]$ModelId)
+
+    $parts = $ModelId -split ':', 2
+    $modelName = $parts[0]
+    $tag = if ($parts.Count -eq 2 -and $parts[1]) { $parts[1] } else { "latest" }
+
+    if ($modelName -match '/') {
+        $ns, $name = $modelName -split '/', 2
+    } else {
+        $ns = "library"; $name = $modelName
+    }
+
+    $url = "https://registry.ollama.ai/v2/$ns/$name/manifests/$tag"
+    try {
+        $r = Invoke-RestMethod -Uri $url -Method Get -Headers @{
+            Accept = "application/vnd.docker.distribution.manifest.v2+json"
+        } -TimeoutSec 10 -ErrorAction Stop
+        $totalBytes = ($r.layers | Measure-Object -Property size -Sum).Sum
+        if ($totalBytes -gt 0) {
+            return [int][math]::Ceiling($totalBytes / 1MB)
+        }
+    } catch { }
+    return $null
+}
+
+function Get-EndpointVramBudgetMiB {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [double]$ThresholdFraction = 0.70
+    )
+
+    $telemetry = if ($Endpoint.PSObject.Properties.Name -contains "telemetry") { $Endpoint.telemetry } else { $null }
+    $kind = if ($telemetry -and $telemetry.PSObject.Properties.Name -contains "kind" -and $telemetry.kind) {
+        ([string]$telemetry.kind).ToLowerInvariant()
+    } else {
+        "local-nvidia-smi"
+    }
+
+    $totalMiB = $null
+    switch ($kind) {
+        "local-nvidia-smi" {
+            $raw = & nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
+            if ($raw) {
+                $parsed = 0
+                if ([int]::TryParse((@($raw)[0]).Trim(), [ref]$parsed) -and $parsed -gt 0) {
+                    $totalMiB = $parsed
+                }
+            }
+        }
+        "static-gpu-total" {
+            if ($telemetry.PSObject.Properties.Name -contains "gpuTotalMiB" -and $telemetry.gpuTotalMiB) {
+                $totalMiB = [int]$telemetry.gpuTotalMiB
+            }
+        }
+    }
+
+    if ($null -eq $totalMiB -or $totalMiB -le 0) { return $null }
+    return [int]($totalMiB * $ThresholdFraction)
+}
 
 function Ensure-OllamaState {
     param([Parameter(Mandatory = $true)]$Config)
@@ -1210,9 +1319,37 @@ function Ensure-OllamaState {
         $availableIds = @($tags | ForEach-Object { [string]$_.model })
 
         if ($endpoint.autoPullMissingModels) {
+            $vramBudgetMiB = Get-EndpointVramBudgetMiB -Endpoint $endpoint
+            if ($null -ne $vramBudgetMiB) {
+                Write-Host "INFO: VRAM pull budget for endpoint '$($endpoint.key)': $vramBudgetMiB MiB (70% of GPU total)" -ForegroundColor Cyan
+            } else {
+                Write-Host "INFO: No GPU telemetry for endpoint '$($endpoint.key)'; VRAM size check skipped" -ForegroundColor DarkGray
+            }
+
             foreach ($request in @($referencedLocalModels | Where-Object { $_.endpointKey -eq $endpoint.key })) {
                 if ($request.modelId -in $availableIds) {
                     continue
+                }
+
+                if ($null -ne $vramBudgetMiB) {
+                    $catalogEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $request.modelId
+                    $estimateMiB = $null
+
+                    $registryMiB = Get-OllamaRegistryModelSizeMiB -ModelId $request.modelId
+                    if ($null -ne $registryMiB) {
+                        $estimateMiB = $registryMiB
+                        Write-Host "INFO: Registry reports '$($request.modelId)' as $estimateMiB MiB" -ForegroundColor DarkGray
+                    } elseif ($null -ne $catalogEntry -and
+                              $catalogEntry.PSObject.Properties.Name -contains "vramEstimateMiB" -and
+                              $catalogEntry.vramEstimateMiB) {
+                        $estimateMiB = [int]$catalogEntry.vramEstimateMiB
+                        Write-Host "INFO: Using catalog estimate for '$($request.modelId)': $estimateMiB MiB" -ForegroundColor DarkGray
+                    }
+
+                    if ($null -ne $estimateMiB -and $estimateMiB -gt $vramBudgetMiB) {
+                        Write-WarnLine "Skipping pull of '$($request.modelId)' on endpoint '$($endpoint.key)': $estimateMiB MiB exceeds VRAM budget of $vramBudgetMiB MiB (70% of $([int]($vramBudgetMiB / 0.70)) MiB total). Add a smaller model or upgrade GPU."
+                        continue
+                    }
                 }
 
                 Write-Step "Pulling missing Ollama model $($request.modelId) on endpoint $($endpoint.key)"
@@ -1831,8 +1968,7 @@ Ensure-EnvFile -Config $config
 
 $hostConfigJson = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 if (-not (Test-Path $hostConfigJson)) {
-    Write-WarnLine "Host OpenClaw state is not initialized yet at $hostConfigJson."
-    Write-WarnLine "Bootstrap can still continue, but you may need dashboard sign-in or other first-run onboarding on this machine."
+    Write-Host "No existing gateway config found — will seed initial config before starting gateway." -ForegroundColor Cyan
 }
 
 Write-Step "Locking Docker host exposure to localhost"
@@ -1848,6 +1984,8 @@ if ($config.sandbox.enabled) {
 }
 
 Ensure-LocalWhisperGatewayImage -Config $config
+
+Ensure-InitialGatewayConfig -Config $config
 
 Write-Step "Starting the OpenClaw gateway container"
     Push-Location $config.repoPath
@@ -1865,6 +2003,18 @@ Write-Step "Applying security configuration"
 Set-OpenClawConfigValue -Path "gateway.bind" -Value $config.gatewayBind
 Set-OpenClawConfigValue -Path "gateway.auth.mode" -Value "token"
 Set-OpenClawConfigJson -Path "gateway.auth.rateLimit" -Value $config.gatewayAuthRateLimit
+
+# Sync gateway.auth.token in openclaw.json to match OPENCLAW_GATEWAY_TOKEN from .env.
+# The gateway resolves credentials env-first (OPENCLAW_GATEWAY_TOKEN takes priority over the
+# JSON value), so these must always be identical to avoid token drift on docker restart.
+$_envToken = (Get-Content $config.envFilePath -ErrorAction SilentlyContinue |
+    Where-Object { $_ -match "^OPENCLAW_GATEWAY_TOKEN=(.+)$" }) -replace "^OPENCLAW_GATEWAY_TOKEN=",""
+if ($_envToken) {
+    Set-OpenClawConfigValue -Path "gateway.auth.token" -Value $_envToken
+    Write-Host "Gateway auth token synced from OPENCLAW_GATEWAY_TOKEN." -ForegroundColor Green
+} else {
+    Write-WarnLine "OPENCLAW_GATEWAY_TOKEN not found in .env — cannot sync gateway.auth.token"
+}
 
 if ($config.disableInsecureControlUiAuth) {
 Set-OpenClawConfigValue -Path "gateway.controlUi.allowInsecureAuth" -Value "false"

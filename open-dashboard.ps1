@@ -18,8 +18,21 @@ if (-not $usingPowerShellCore -and $null -ne $pwshCommand) {
     Write-Host "      pwsh -ExecutionPolicy Bypass -File $($MyInvocation.MyCommand.Path)" -ForegroundColor Yellow
 }
 
+# Load bootstrap config portably to get hostConfigDir and gatewayPort
+$_scriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$_configFile  = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+$_gatewayPort = 18789
+$_hostConfigDir = Join-Path $env:USERPROFILE ".openclaw"
+if (Test-Path $_configFile) {
+    . (Join-Path $_scriptDir "shared-config-paths.ps1")
+    $_cfg = Get-Content -Raw $_configFile | ConvertFrom-Json
+    $_cfg = Resolve-PortableConfigPaths -Config $_cfg -BaseDir $_scriptDir
+    if ($_cfg.gatewayPort)  { $_gatewayPort  = [int]$_cfg.gatewayPort }
+    if ($_cfg.hostConfigDir) { $_hostConfigDir = [string]$_cfg.hostConfigDir }
+}
+
 function Get-OpenClawConfigPath {
-    $path = "C:\Users\Deadline\.openclaw\openclaw.json"
+    $path = Join-Path $_hostConfigDir "openclaw.json"
     if (-not (Test-Path $path)) {
         throw "OpenClaw config not found at $path"
     }
@@ -27,12 +40,25 @@ function Get-OpenClawConfigPath {
 }
 
 function Get-GatewayToken {
-    $cfg = Get-Content -Raw (Get-OpenClawConfigPath) | ConvertFrom-Json
+    # Primary: read from openclaw.json (bootstrap always syncs this from OPENCLAW_GATEWAY_TOKEN)
+    $jsonPath = Get-OpenClawConfigPath
+    $cfg = Get-Content -Raw $jsonPath | ConvertFrom-Json
     $token = $cfg.gateway.auth.token
-    if (-not $token) {
-        throw "gateway.auth.token is not set in openclaw.json"
+    if ($token) { return [string]$token }
+
+    # Fallback: read OPENCLAW_GATEWAY_TOKEN directly from the .env file.
+    # The gateway resolves credentials env-first, so this is the authoritative source
+    # when the JSON was not yet synced.
+    if ($_cfg -and $_cfg.envFilePath -and (Test-Path $_cfg.envFilePath)) {
+        $envLine = Get-Content $_cfg.envFilePath -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match "^OPENCLAW_GATEWAY_TOKEN=(.+)$" }
+        if ($envLine) {
+            $envToken = $envLine -replace "^OPENCLAW_GATEWAY_TOKEN=", ""
+            if ($envToken) { return [string]$envToken }
+        }
     }
-    return [string]$token
+
+    throw "Gateway auth token not found. Run bootstrap or set gateway.auth.token in openclaw.json."
 }
 
 function Get-TailscaleServeUrl {
@@ -56,7 +82,7 @@ function Get-TailscaleServeUrl {
 function Resolve-BaseUrl {
     param([string]$Mode)
 
-    $localhost = "http://127.0.0.1:18789"
+    $localhost = "http://127.0.0.1:$_gatewayPort"
     $tailscaleUrl = Get-TailscaleServeUrl
 
     switch ($Mode) {

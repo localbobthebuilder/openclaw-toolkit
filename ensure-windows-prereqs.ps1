@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ConfigPath,
     [switch]$CheckOnly,
@@ -33,7 +33,8 @@ function Invoke-External {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
-        [switch]$AllowFailure
+        [switch]$AllowFailure,
+        [int]$TimeoutSeconds = 0
     )
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -57,11 +58,24 @@ function Invoke-External {
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
     $null = $process.Start()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
 
-    $exitCode = $process.ExitCode
+    if ($TimeoutSeconds -gt 0) {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $exited = $process.WaitForExit($TimeoutSeconds * 1000)
+        if (-not $exited) {
+            try { $process.Kill() } catch {}
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $exitCode = if ($exited) { $process.ExitCode } else { -1 }
+    } else {
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+    }
+
     $text = (($stdout, $stderr) | Where-Object { $_ -and $_.Trim().Length -gt 0 }) -join [Environment]::NewLine
     $text = $text -replace [char]0, ''
 
@@ -170,12 +184,12 @@ function Get-DockerDesktopExePath {
 }
 
 function Test-DockerReady {
-    $result = Invoke-External -FilePath "docker" -Arguments @("info") -AllowFailure
+    $result = Invoke-External -FilePath "docker" -Arguments @("info") -AllowFailure -TimeoutSeconds 10
     return $result.ExitCode -eq 0
 }
 
 function Start-DockerDesktopIfNeeded {
-    param([int]$WaitSeconds = 240)
+    param([int]$WaitSeconds = 45)
 
     if (Test-DockerReady) {
         return $true
@@ -247,15 +261,20 @@ function Start-OllamaIfNeeded {
 function Install-WingetPackage {
     param([Parameter(Mandatory = $true)][string]$PackageId)
 
-    return Invoke-External -FilePath "winget" -Arguments @(
-        "install",
-        "--exact",
-        "--id", $PackageId,
-        "--accept-package-agreements",
-        "--accept-source-agreements",
-        "--silent",
-        "--disable-interactivity"
-    ) -AllowFailure
+    # Use & directly so winget output streams live through this process's stdout
+    & winget install `
+        --exact `
+        --id $PackageId `
+        --accept-package-agreements `
+        --accept-source-agreements `
+        --silent `
+        --disable-interactivity
+
+    return [pscustomobject]@{
+        # 3010 = success but restart required
+        ExitCode = $LASTEXITCODE
+        Output   = ""
+    }
 }
 
 function Install-WslCore {
@@ -325,12 +344,16 @@ $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Pare
 
 $Checks = New-Object System.Collections.Generic.List[object]
 $BlockingIssues = New-Object System.Collections.Generic.List[string]
+$ManualSteps = New-Object System.Collections.Generic.List[string]
 $restartRequired = $false
+$wslJustInstalled = $false
 $autoInstall = -not $CheckOnly
 $isAdmin = Test-IsAdministrator
 $hasWinget = Test-CommandExists "winget"
 $requiresTailscale = [bool]($config.tailscale -and $config.tailscale.enableServe)
 $requiresOllama = [bool]($config.ollama -and $config.ollama.enabled)
+# Track which tools were already present before this run
+$dockerPresentBefore = Test-CommandExists "docker"
 
 if ($ServicesOnly) {
     Write-Step "Checking bootstrap runtime services"
@@ -405,7 +428,7 @@ if ($ServicesOnly) {
         foreach ($issue in $BlockingIssues | Select-Object -Unique) {
             Write-Host "- $issue" -ForegroundColor Yellow
         }
-        throw "Bootstrap runtime services are not ready."
+        exit 1
     }
 
     Write-Host ""
@@ -429,23 +452,30 @@ else {
 
 $wslInfo = Get-WslVersionInfo
 $wslReady = ($wslInfo.DefaultVersion -eq 2) -and (Test-VersionAtLeast -VersionText $wslInfo.VersionText -Minimum ([version]"2.1.5"))
-if (-not $wslReady -and $autoInstall -and $isAdmin -and $virt.Ready) {
-    Write-Step "Installing or updating WSL"
-    $wslInstallOutput = Install-WslCore
-    if ($wslInstallOutput -match '(?i)restart|reboot') {
-        $restartRequired = $true
+if (-not $wslReady -and $autoInstall -and $virt.Ready) {
+    if ($isAdmin) {
+        Write-Step "Installing or updating WSL"
+        $wslInstallOutput = Install-WslCore
+        if ($wslInstallOutput -match '(?i)restart|reboot') {
+            $restartRequired = $true
+        }
+        $wslJustInstalled = $true
+        $wslInfo = Get-WslVersionInfo
+        $wslReady = ($wslInfo.DefaultVersion -eq 2) -and (Test-VersionAtLeast -VersionText $wslInfo.VersionText -Minimum ([version]"2.1.5"))
     }
-    $wslInfo = Get-WslVersionInfo
-    $wslReady = ($wslInfo.DefaultVersion -eq 2) -and (Test-VersionAtLeast -VersionText $wslInfo.VersionText -Minimum ([version]"2.1.5"))
+    else {
+        Write-WarnLine "WSL install requires an elevated (Admin) shell. Skipping auto-install; you can re-run as Administrator or install manually."
+    }
 }
 
 if ($wslReady) {
     Add-Check -Name "WSL 2" -State "PASS" -Detail "WSL $($wslInfo.VersionText), default version $($wslInfo.DefaultVersion)"
 }
 else {
-    $detail = "WSL 2.1.5+ with default version 2 is required. Run 'wsl --install --no-distribution', then 'wsl --set-default-version 2', then reboot if prompted."
+    $detail = "WSL 2.1.5+ with default version 2 is required. Run an elevated PowerShell and run: wsl --install --no-distribution && wsl --set-default-version 2. Reboot if prompted, then rerun prereqs."
     Add-Check -Name "WSL 2" -State "FAIL" -Detail $detail
-    $BlockingIssues.Add($detail)
+    # WSL is a manual/admin step — not a hard blocker of the install phase
+    $ManualSteps.Add($detail)
 }
 
 $featureStates = @(
@@ -467,12 +497,21 @@ foreach ($package in $packageChecks) {
     }
 
     $installed = Test-CommandExists $package.Command
-    if (-not $installed -and $autoInstall -and $hasWinget -and $isAdmin) {
-        Write-Step "Installing $($package.Name)"
+    if (-not $installed -and $autoInstall -and $hasWinget) {
+        Write-Step "Installing $($package.Name) via winget"
+        Write-InfoLine "Downloading and installing $($package.Name) — this may take a few minutes..."
         $installResult = Install-WingetPackage -PackageId $package.WingetId
-        if ($installResult.Output -match '(?i)restart|reboot') {
+        if ($installResult.ExitCode -eq 0 -or $installResult.ExitCode -eq 3010) {
+            Write-Host "INFO: $($package.Name) installation finished." -ForegroundColor DarkGray
+        } else {
+            Write-WarnLine "$($package.Name) winget install exited with code $($installResult.ExitCode)."
+        }
+        # Exit code 3010 = installed successfully but a restart is required
+        if ($installResult.ExitCode -eq 3010) {
             $restartRequired = $true
         }
+        # Refresh PATH so newly installed commands are found in this session
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         $installed = Test-CommandExists $package.Command
     }
 
@@ -483,11 +522,8 @@ foreach ($package in $packageChecks) {
         $detail = if (-not $hasWinget) {
             "$($package.Name) is missing and winget is not available. $($package.Manual)"
         }
-        elseif (-not $isAdmin -and $autoInstall) {
-            "$($package.Name) is missing. Re-run bootstrap from an elevated PowerShell window so it can be installed automatically, or install it manually. $($package.Manual)"
-        }
         else {
-            "$($package.Name) is missing. $($package.Manual)"
+            "$($package.Name) could not be installed automatically. $($package.Manual)"
         }
         Add-Check -Name $package.Name -State "FAIL" -Detail $detail
         $BlockingIssues.Add($detail)
@@ -495,13 +531,29 @@ foreach ($package in $packageChecks) {
 }
 
 if (Test-CommandExists "docker") {
-    if (Start-DockerDesktopIfNeeded) {
+    if (-not $dockerPresentBefore -or -not $wslReady) {
+        # Docker was just installed, or WSL2 isn't ready yet — Docker engine can't start without WSL2
+        $detail = if (-not $dockerPresentBefore) {
+            "Docker Desktop was just installed. First complete the WSL2 step above, then launch Docker Desktop from the Start menu and wait for it to finish initializing. Rerun prereqs when done."
+        } else {
+            "Docker Desktop requires WSL2 to be installed and ready before its engine can start. Complete the WSL2 step above first, then rerun prereqs."
+        }
+        Add-Check -Name "Docker engine" -State "FAIL" -Detail $detail
+        $ManualSteps.Add($detail)
+    }
+    elseif ($wslJustInstalled -or $restartRequired) {
+        # WSL was just installed in this run — Docker engine requires a full reboot before it can use WSL2
+        $detail = "WSL2 was just installed. Reboot your PC, then rerun prereqs to let Docker Desktop start with the new WSL2 backend."
+        Add-Check -Name "Docker engine" -State "FAIL" -Detail $detail
+        $ManualSteps.Add($detail)
+    }
+    elseif (Start-DockerDesktopIfNeeded) {
         Add-Check -Name "Docker engine" -State "PASS" -Detail "Docker engine is ready."
     }
     else {
-        $detail = "Docker Desktop is installed but the Docker engine is not ready. Start Docker Desktop and wait for it to finish initializing."
+        $detail = "Docker Desktop is installed but the Docker engine is not ready. Launch Docker Desktop and wait for it to finish initializing, then rerun prereqs."
         Add-Check -Name "Docker engine" -State "FAIL" -Detail $detail
-        $BlockingIssues.Add($detail)
+        $ManualSteps.Add($detail)
     }
 }
 
@@ -522,9 +574,9 @@ if ($requiresTailscale -and (Test-CommandExists "tailscale")) {
         Add-Check -Name "Tailscale auth" -State "PASS" -Detail "Signed in as $($tailscaleStatus.CurrentTailnet.Name) on $($tailscaleStatus.Self.DNSName.TrimEnd('.'))."
     }
     else {
-        $detail = "Tailscale is installed but not signed in or not running. Open the Tailscale app, sign in, and join this PC to your tailnet before rerunning bootstrap."
+        $detail = "Tailscale is installed but not signed in. Open the Tailscale app in the system tray, sign in, and join this PC to your tailnet. Then rerun prereqs."
         Add-Check -Name "Tailscale auth" -State "FAIL" -Detail $detail
-        $BlockingIssues.Add($detail)
+        $ManualSteps.Add($detail)
     }
 }
 
@@ -540,18 +592,41 @@ foreach ($check in $Checks) {
 }
 
 if ($restartRequired) {
-    $BlockingIssues.Add("A Windows restart is required before bootstrap can continue safely.")
-    Write-WarnLine "A Windows restart is required before bootstrap can continue safely."
+    $ManualSteps.Add("A Windows restart is required to complete the setup. Reboot, then rerun prereqs.")
+    Write-WarnLine "A Windows restart is required to complete the setup."
 }
 
 if ($BlockingIssues.Count -gt 0) {
     Write-Host ""
-    Write-Host "Bootstrap is stopping because some machine prerequisites still need attention:" -ForegroundColor Yellow
+    Write-Host "HARD BLOCKERS — cannot proceed until resolved:" -ForegroundColor Red
     foreach ($issue in $BlockingIssues | Select-Object -Unique) {
-        Write-Host "- $issue" -ForegroundColor Yellow
+        Write-Host "  * $issue" -ForegroundColor Red
     }
-    throw "Windows prerequisites are not fully ready."
 }
 
-Write-Host ""
-Write-Host "All Windows prerequisites are ready." -ForegroundColor Green
+if ($ManualSteps.Count -gt 0) {
+    Write-Host ""
+    Write-Host "MANUAL STEPS NEEDED — complete these, then rerun prereqs:" -ForegroundColor Yellow
+    $step = 1
+    foreach ($item in $ManualSteps | Select-Object -Unique) {
+        Write-Host "  $step. $item" -ForegroundColor Yellow
+        $step++
+    }
+    Write-Host ""
+    Write-Host "Run again after completing the steps above:" -ForegroundColor Cyan
+    Write-Host "  run-openclaw.cmd prereqs" -ForegroundColor Cyan
+}
+
+if ($BlockingIssues.Count -eq 0 -and $ManualSteps.Count -eq 0) {
+    Write-Host ""
+    Write-Host "All Windows prerequisites are ready." -ForegroundColor Green
+}
+
+if ($BlockingIssues.Count -gt 0) {
+    exit 1
+}
+if ($ManualSteps.Count -gt 0) {
+    # Exit with a distinct code so callers can distinguish "needs manual steps"
+    # from a hard failure, but don't throw (no ugly exception output)
+    exit 2
+}

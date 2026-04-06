@@ -1,4 +1,4 @@
-function Resolve-ConfigPathValue {
+﻿function Resolve-ConfigPathValue {
     param(
         [string]$Value,
         [Parameter(Mandatory = $true)][string]$BaseDir

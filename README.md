@@ -17,19 +17,19 @@ Portable PowerShell toolkit for setting up, hardening, operating, verifying, bac
 Use the wrapper command:
 
 ```powershell
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd help
+run-openclaw.cmd help
 ```
 
 Common commands:
 
 ```powershell
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd prereqs
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd bootstrap
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd start
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd status
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify
-D:\openclaw\openclaw-toolkit\run-openclaw.cmd update
+run-openclaw.cmd prereqs
+run-openclaw.cmd bootstrap
+run-openclaw.cmd start
+run-openclaw.cmd status
+run-openclaw.cmd dashboard
+run-openclaw.cmd verify
+run-openclaw.cmd update
 ```
 
 ## Important Notes

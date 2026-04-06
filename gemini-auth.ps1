@@ -82,7 +82,7 @@ function Get-JsonFromDockerCommand {
 Write-Step "Checking gateway container"
 $containerProbe = Invoke-External -FilePath "docker" -Arguments @("ps", "--format", "{{.Names}}") -AllowFailure
 if ($containerProbe.ExitCode -ne 0 -or ($containerProbe.Output -split "`r?`n") -notcontains $ContainerName) {
-    throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with D:\openclaw\openclaw-toolkit\run-openclaw.cmd start"
+    throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') start"
 }
 
 Write-Step "Starting interactive Gemini auth flow"

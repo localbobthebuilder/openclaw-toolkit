@@ -273,7 +273,7 @@ if (-not $dockerReady) {
 else {
     Write-Step "Restarting the OpenClaw gateway"
     $restart = Invoke-External -FilePath "docker" -Arguments @(
-        "compose", "-f", (Join-Path $repoPath "docker-compose.yml"),
+        "compose", "-f", ([string]$bootstrapConfig.composeFilePath),
         "up", "-d", "openclaw-gateway"
     ) -AllowFailure
 

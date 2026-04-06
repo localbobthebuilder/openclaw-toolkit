@@ -1612,7 +1612,7 @@ if (@($managedAgentsFiles).Count -gt 0) {
 if (-not $NoRestart) {
     Write-Step "Restarting gateway for multi-agent changes"
     $null = Invoke-External -FilePath "docker" -Arguments @(
-        "compose", "-f", (Join-Path $config.repoPath "docker-compose.yml"),
+        "compose", "-f", ([string]$config.composeFilePath),
         "restart", "openclaw-gateway"
     )
     Wait-ForGateway

@@ -1,12 +1,27 @@
 [CmdletBinding()]
 param(
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
-    [string]$ConfigFilePath = "C:\Users\Deadline\.openclaw\openclaw.json",
+    [string]$ConfigFilePath,
     [string]$AgentId = "chat-local",
     [int]$TimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
+
+# Derive default config path from bootstrap config so it's portable across machines/users
+$_scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$_configFile = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+if (-not $ConfigFilePath) {
+    $_hostConfigDir = $null
+    if (Test-Path $_configFile) {
+        . (Join-Path $_scriptDir "shared-config-paths.ps1")
+        $_bsCfg = Get-Content -Raw $_configFile | ConvertFrom-Json
+        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_scriptDir
+        if ($_bsCfg.hostConfigDir) { $_hostConfigDir = [string]$_bsCfg.hostConfigDir }
+    }
+    if (-not $_hostConfigDir) { $_hostConfigDir = Join-Path $env:USERPROFILE ".openclaw" }
+    $ConfigFilePath = Join-Path $_hostConfigDir "openclaw.json"
+}
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 

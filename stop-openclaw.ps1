@@ -1,10 +1,23 @@
 [CmdletBinding()]
 param(
-    [string]$RepoPath = "D:\openclaw\openclaw",
+    [string]$RepoPath,
     [switch]$StopDockerDesktop
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolve RepoPath portably from bootstrap config
+$_scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$_configFile = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+if (-not $RepoPath) {
+    if (Test-Path $_configFile) {
+        . (Join-Path $_scriptDir "shared-config-paths.ps1")
+        $_bsCfg = Get-Content -Raw $_configFile | ConvertFrom-Json
+        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_scriptDir
+        if ($_bsCfg.repoPath) { $RepoPath = [string]$_bsCfg.repoPath }
+    }
+    if (-not $RepoPath) { $RepoPath = [System.IO.Path]::GetFullPath((Join-Path $_scriptDir "..\openclaw")) }
+}
 
 function Invoke-External {
     param(

@@ -39,6 +39,7 @@ if /I "%ACTION%"=="dashboard" goto :dashboard
 if /I "%ACTION%"=="phone-dashboard" goto :phone_dashboard
 if /I "%ACTION%"=="toolkit-dashboard" goto :toolkit_dashboard
 if /I "%ACTION%"=="toolkit-dashboard-stop" goto :toolkit_dashboard_stop
+if /I "%ACTION%"=="toolkit-dashboard-rebuild" goto :toolkit_dashboard_rebuild
 if /I "%ACTION%"=="dashboard-repair" goto :dashboard_repair
 if /I "%ACTION%"=="openai-auth" goto :openai_auth
 if /I "%ACTION%"=="gemini-auth" goto :gemini_auth
@@ -107,6 +108,10 @@ goto :eof
 
 :toolkit_dashboard_stop
 call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" stop
+goto :eof
+
+:toolkit_dashboard_rebuild
+call "%SCRIPT_DIR%rebuild-toolkit-dashboard.cmd"
 goto :eof
 
 :dashboard_repair
@@ -226,6 +231,9 @@ echo.
 echo   run-openclaw.cmd toolkit-dashboard
 echo     Start the live toolkit configuration dashboard.
 echo.
+echo   run-openclaw.cmd toolkit-dashboard-rebuild
+echo     Rebuild the toolkit dashboard UI and restart the backend server.
+echo.
 echo   run-openclaw.cmd toolkit-dashboard-stop
 echo     Stop the live toolkit configuration dashboard.
 echo.
@@ -272,7 +280,7 @@ echo   run-openclaw.cmd local-delegate-test
 echo     Diagnose the exact main -^> coder-local spawned local-model path and detect raw fake tool-call output.
 echo.
 echo   run-openclaw.cmd temp-agent-probe
-echo     Create a temporary agent through the live gateway API, materialize one session, and report which files appeared under C:\Users\Deadline\.openclaw.
+echo     Create a temporary agent through the live gateway API, materialize one session, and report which files appeared under %%USERPROFILE%%\.openclaw.
 echo.
 echo   run-openclaw.cmd model-fit
 echo     Probe an Ollama model on a named endpoint, starting at 4k context and increasing until the VRAM headroom rule is hit.
@@ -293,23 +301,23 @@ echo   run-openclaw.cmd stop
 echo     Stop the gateway and remove sandbox worker containers.
 echo.
 echo Examples:
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd start
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd agents
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks voice
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd verify -Checks "local-model agent"
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd compact-storage
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd update -Channel beta
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd update -Ref main
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd agent-smoke
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remote-review-smoke
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd local-delegate-test
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd temp-agent-probe
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -EndpointKey local -AssignTo coder-local
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd stop -StopDockerDesktop
-echo   D:\openclaw\openclaw-toolkit\run-openclaw.cmd dashboard-repair
+echo   %~f0 start
+echo   %~f0 agents
+echo   %~f0 verify -Checks voice
+echo   %~f0 verify -Checks "local-model agent"
+echo   %~f0 compact-storage
+echo   %~f0 update -Channel beta
+echo   %~f0 update -Ref main
+echo   %~f0 model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
+echo   %~f0 agent-smoke
+echo   %~f0 remote-review-smoke
+echo   %~f0 local-delegate-test
+echo   %~f0 temp-agent-probe
+echo   %~f0 add-local-model -Model qwen2.5-coder:32b -Name "Qwen2.5 Coder 32B" -EndpointKey local -AssignTo coder-local
+echo   %~f0 add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
+echo   %~f0 remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData
+echo   %~f0 stop -StopDockerDesktop
+echo   %~f0 dashboard-repair
 exit /b 0
 
 

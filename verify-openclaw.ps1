@@ -822,7 +822,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 $multiAgentVerification += "PASS: Gemini provider auth is ready"
             }
             else {
-                $multiAgentVerification += "INFO: Gemini provider auth is not ready yet. Run D:\openclaw\openclaw-toolkit\run-openclaw.cmd gemini-auth"
+                $multiAgentVerification += "INFO: Gemini provider auth is not ready yet. Run $(Join-Path $PSScriptRoot 'run-openclaw.cmd') gemini-auth"
             }
         }
 

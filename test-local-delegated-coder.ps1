@@ -4,11 +4,29 @@ param(
     [string]$RequesterAgentId = "main",
     [string]$TargetAgentId = "coder-local",
     [string]$LocalModelRef = "ollama/qwen3-coder:30b",
-    [string]$WorkspaceHostPath = "C:\Users\Deadline\.openclaw\workspace",
+    [string]$WorkspaceHostPath,
     [int]$TimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
+
+# Derive default workspace path from bootstrap config so it's portable across machines/users
+$_scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$_configFile = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+if (-not $WorkspaceHostPath) {
+    $_hostConfigDir = $null
+    if (Test-Path $_configFile) {
+        . (Join-Path $_scriptDir "shared-config-paths.ps1")
+        $_bsCfg = Get-Content -Raw $_configFile | ConvertFrom-Json
+        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_scriptDir
+        if ($_bsCfg.hostWorkspaceDir) { $WorkspaceHostPath = [string]$_bsCfg.hostWorkspaceDir }
+        elseif ($_bsCfg.hostConfigDir) { $_hostConfigDir = [string]$_bsCfg.hostConfigDir }
+    }
+    if (-not $WorkspaceHostPath) {
+        if (-not $_hostConfigDir) { $_hostConfigDir = Join-Path $env:USERPROFILE ".openclaw" }
+        $WorkspaceHostPath = Join-Path $_hostConfigDir "workspace"
+    }
+}
 
 function Write-ProgressLine {
     param(
@@ -82,7 +100,8 @@ function Stop-OllamaModelFromRef {
 }
 
 function Get-CoderSessionFiles {
-    $sessionDir = "C:\Users\Deadline\.openclaw\agents\coder-local\sessions"
+    $_hostDir = if ($_hostConfigDir) { $_hostConfigDir } else { Join-Path $env:USERPROFILE ".openclaw" }
+    $sessionDir = Join-Path $_hostDir (Join-Path "agents" (Join-Path $TargetAgentId "sessions"))
     if (-not (Test-Path $sessionDir)) {
         return @()
     }

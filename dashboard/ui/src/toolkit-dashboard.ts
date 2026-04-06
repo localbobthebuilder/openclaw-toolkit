@@ -168,8 +168,29 @@ export class ToolkitDashboard extends LitElement {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.port === '18791' ? '127.0.0.1:18791' : window.location.host;
     this.ws = new WebSocket(`${protocol}//${host}`);
+    this.ws.onopen = () => {
+      // If a command was running when the connection dropped (e.g. dashboard rebuild
+      // killed the server), mark it finished so the UI is no longer locked.
+      if (this.isRunning) {
+        this.isRunning = false;
+        this.logs = [...this.logs, '\n[RECONNECTED] Dashboard server restarted. ✅'];
+        this.fetchConfig();
+        this.fetchStatus();
+      }
+    };
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      if (msg.type === 'server-info') {
+        const key = 'dashboardServerStart';
+        const last = localStorage.getItem(key);
+        localStorage.setItem(key, String(msg.startTime));
+        // Different start-time = server was restarted (e.g. after rebuild).
+        // Reload to pick up the new JS bundle.
+        if (last && last !== String(msg.startTime)) {
+          window.location.reload();
+        }
+        return;
+      }
       if (msg.type === 'stdout' || msg.type === 'stderr') {
         this.logs = [...this.logs, msg.data];
         this.requestUpdate();
@@ -179,10 +200,21 @@ export class ToolkitDashboard extends LitElement {
         }, 0);
       } else if (msg.type === 'exit') {
         this.isRunning = false;
-        this.logs = [...this.logs, `\n[FINISH] Process exited with code ${msg.code}`];
+        const label = msg.code === 0 ? '✅ Completed successfully'
+                    : msg.code === 2 ? '⚠️ Manual steps needed — see above'
+                    : `❌ Exited with code ${msg.code}`;
+        this.logs = [...this.logs, `\n[FINISH] ${label}`];
         this.fetchConfig(); 
         this.fetchStatus();
       }
+    };
+    this.ws.onclose = () => {
+      this.ws = null;
+      // Auto-reconnect after 3s (handles server restart / dashboard rebuild)
+      setTimeout(() => this.connectWS(), 3000);
+    };
+    this.ws.onerror = () => {
+      this.ws?.close();
     };
   }
 
@@ -192,6 +224,11 @@ export class ToolkitDashboard extends LitElement {
     this.logs = [`[START] Running: ${command} ${args.join(' ')}...\n`];
     this.activeTab = 'logs';
     this.ws.send(JSON.stringify({ type: 'run-command', command, args }));
+  }
+
+  cancelCommand() {
+    if (!this.ws || !this.isRunning) return;
+    this.ws.send(JSON.stringify({ type: 'cancel-command' }));
   }
 
   rebootService(service: string) {
@@ -244,6 +281,11 @@ export class ToolkitDashboard extends LitElement {
           <div class="nav-item ${this.activeTab === 'logs' ? 'active' : ''}" @click=${() => this.activeTab = 'logs'}>
             Terminal Logs ${this.isRunning ? html`<span style="color: #00bcd4;">●</span>` : ''}
           </div>
+          ${this.isRunning ? html`
+            <div style="padding: 12px 24px; margin-top: auto;">
+              <button class="btn btn-danger" style="width: 100%;" @click=${() => this.cancelCommand()}>⏹ Cancel</button>
+            </div>
+          ` : ''}
         </aside>
 
         <main>
@@ -292,7 +334,11 @@ export class ToolkitDashboard extends LitElement {
                       .join('\n');
               }
           } catch (e) {
-              if (content.toLowerCase().includes('not installed')) {
+              if (content.toLowerCase().includes('not installed') ||
+                  content.toLowerCase().includes('not enabled') ||
+                  content.toLowerCase().includes('timed out') ||
+                  content.toLowerCase().includes('not cloned yet') ||
+                  content.toLowerCase().includes('bootstrap not run yet')) {
                   status = 'not-installed';
               } else if (content.toLowerCase().includes('not ready') || 
                   content.toLowerCase().includes('failed') || 
@@ -319,21 +365,29 @@ export class ToolkitDashboard extends LitElement {
     const dockerSection = sections.find(s => s.title === 'Docker');
     const ollamaSection = sections.find(s => s.title === 'Ollama');
     const gatewaySection = sections.find(s => s.title === 'Gateway');
+    const wsl2Section = sections.find(s => s.title === 'WSL2');
+    const virtSection = sections.find(s => s.title === 'Virtualization');
+    const bootstrapSection = sections.find(s => s.title === 'Bootstrap');
 
     // If the script crashed and produced no parseable sections, treat as unprovisioned
     const scriptFailed = sections.length === 0 && !!this.statusOutput;
 
     const dockerNotInstalled = scriptFailed || dockerSection?.status === 'not-installed';
     const ollamaNotInstalled = scriptFailed || ollamaSection?.status === 'not-installed';
+    const wsl2NotInstalled = !scriptFailed && (wsl2Section?.status === 'not-installed' || wsl2Section?.status === 'offline');
+    const virtNotReady = !scriptFailed && (virtSection?.status === 'not-installed');
     const dockerNotReady = !scriptFailed && dockerSection?.status === 'offline';
-    const gatewayDown = !scriptFailed && (!gatewaySection || gatewaySection.status === 'offline' || gatewaySection.status === 'not-installed');
+    // Bootstrap is done when the repo has been cloned (repoPath exists)
+    const repoNotCloned = !scriptFailed && (!bootstrapSection || bootstrapSection.status === 'not-installed');
+    const gatewayDown = !scriptFailed && (!gatewaySection || gatewaySection.status === 'offline');
 
-    const isNewInstall = dockerNotInstalled || ollamaNotInstalled;
+    const isNewInstall = dockerNotInstalled || ollamaNotInstalled || wsl2NotInstalled || virtNotReady || repoNotCloned;
     const isServicesDown = !isNewInstall && (dockerNotReady || gatewayDown);
 
-    const prereqsDone = !dockerNotInstalled;
-    const bootstrapDone = prereqsDone && !dockerNotReady && !gatewayDown;
-    const runningOk = bootstrapDone && !isServicesDown;
+    // Step progression
+    const prereqsDone = !dockerNotInstalled && !wsl2NotInstalled && !virtNotReady;
+    const bootstrapDone = prereqsDone && !dockerNotReady && !repoNotCloned;
+    const runningOk = bootstrapDone && !gatewayDown;
 
     return html`
       <header>
@@ -356,13 +410,13 @@ export class ToolkitDashboard extends LitElement {
               </div>
               ${prereqsDone
                 ? html`<span class="step-done-badge">✓ Done</span>`
-                : html`<button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('prereqs')}>Run Prereqs</button>`}
+                : html`<button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('prereqs')}>Install Prerequisites</button>`}
             </div>
             <div class="setup-step ${bootstrapDone ? 'done' : prereqsDone ? 'active' : ''}">
               <div class="step-num">2</div>
               <div class="step-body">
                 <div class="step-title">Bootstrap OpenClaw</div>
-                <div class="step-desc">Clones the OpenClaw repo, builds Docker images, configures agents, and applies all hardening.</div>
+                <div class="step-desc">Clones the OpenClaw repo as a sibling directory, builds Docker images, configures agents, and applies all hardening.</div>
               </div>
               ${bootstrapDone
                 ? html`<span class="step-done-badge">✓ Done</span>`
@@ -399,7 +453,8 @@ export class ToolkitDashboard extends LitElement {
                           <h4>${s.title}</h4>
                           <div style="display: flex; align-items: center; gap: 12px;">
                               ${rebootMap[s.title] && s.status !== 'not-installed'
-                                && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady)) ? html`
+                                && !(s.title === 'Gateway' && (dockerNotInstalled || dockerNotReady))
+                                && !(s.title === 'Docker' && dockerNotInstalled) ? html`
                                   <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;" 
                                           ?disabled=${this.isRunning}
                                           @click=${() => this.rebootService(rebootMap[s.title])}>
@@ -432,6 +487,9 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <header>
         <h2>Process Output</h2>
+        ${this.isRunning ? html`
+          <button class="btn btn-danger" @click=${() => this.cancelCommand()}>⏹ Cancel</button>
+        ` : ''}
       </header>
       <div class="log-container">
         ${this.logs.map(line => html`<div class="log-entry">${line}</div>`)}
@@ -446,7 +504,8 @@ export class ToolkitDashboard extends LitElement {
       { id: 'update', name: 'Update', desc: 'Update OpenClaw repo and rebuild' },
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
       { id: 'start', name: 'Start', desc: 'Launch Docker and OpenClaw' },
-      { id: 'stop', name: 'Stop', desc: 'Stop all services' }
+      { id: 'stop', name: 'Stop', desc: 'Stop all services' },
+      { id: 'toolkit-dashboard-rebuild', name: 'Rebuild Dashboard', desc: 'Rebuild UI and restart the toolkit dashboard server. Page will auto-reconnect.' }
     ];
 
     return html`

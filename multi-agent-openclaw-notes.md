@@ -1,7 +1,7 @@
 # Multi-Agent OpenClaw Notes
 
-This note distills useful ideas from `D:\openclaw\how_to_multi_agent_in_open_claw.txt`
-against the official OpenClaw docs/source in `D:\openclaw\openclaw`.
+This note distills useful ideas from an earlier local reference file
+against the official OpenClaw docs/source in `<repo-dir>`.
 
 ## Confirmed OpenClaw facts
 

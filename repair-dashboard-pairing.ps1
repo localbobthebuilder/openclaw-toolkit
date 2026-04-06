@@ -3,10 +3,101 @@ param(
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
     [switch]$PromptForOtherPending,
     [switch]$OpenDashboard,
-    [int]$PollSeconds = 8
+    [int]$PollSeconds = 30
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolve host config dir from bootstrap config (portable, no hardcoded paths).
+$_scriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$_configFile   = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+$_hostConfigDir = Join-Path $env:USERPROFILE ".openclaw"
+$_gatewayPort = 18789
+if (Test-Path $_configFile) {
+    . (Join-Path $_scriptDir "shared-config-paths.ps1")
+    $_cfg2 = Get-Content -Raw $_configFile | ConvertFrom-Json
+    $_cfg2 = Resolve-PortableConfigPaths -Config $_cfg2 -BaseDir $_scriptDir
+    if ($_cfg2.hostConfigDir) { $_hostConfigDir = [string]$_cfg2.hostConfigDir }
+    if ($_cfg2.gatewayPort)   { $_gatewayPort   = [int]$_cfg2.gatewayPort }
+}
+$_devicesDir = Join-Path $_hostConfigDir "devices"
+$_approverScript = Join-Path $_scriptDir "approve-pairing.mjs"
+
+function Write-LogLine {
+    param(
+        [AllowEmptyString()][string]$Message = "",
+        [string]$Color = "Gray"
+    )
+
+    $stamp = (Get-Date).ToString("HH:mm:ss.fff")
+    if ([string]::IsNullOrEmpty($Message)) {
+        Write-Host "[$stamp]"
+        return
+    }
+
+    Write-Host "[$stamp] $Message" -ForegroundColor $Color
+}
+
+function Write-LogBlock {
+    param(
+        [AllowEmptyString()][string]$Text = "",
+        [string]$Color = "Gray"
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return
+    }
+
+    foreach ($line in ($Text -split "`r?`n")) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            Write-LogLine -Message $line -Color $Color
+        }
+    }
+}
+
+function Get-JsonEntryValues {
+    param(
+        $InputObject,
+        [Parameter(Mandatory = $true)][string]$KeyName
+    )
+
+    if ($null -eq $InputObject) {
+        return @()
+    }
+
+    $values = @($InputObject.PSObject.Properties.Value)
+    if ($values.Count -eq 0 -and $InputObject -is [System.Collections.IEnumerable] -and -not ($InputObject -is [string])) {
+        $values = @($InputObject)
+    }
+
+    return @($values | Where-Object {
+            $null -ne $_ -and
+            $_.PSObject.Properties.Name -contains $KeyName -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.$KeyName)
+        })
+}
+
+# Read paired/pending device data directly from the on-disk JSON files.
+# This is instant (no docker exec) and is safe because the gateway writes atomically.
+function Read-DeviceFiles {
+    $paired  = @()
+    $pending = @()
+    $pairedPath  = Join-Path $_devicesDir "paired.json"
+    $pendingPath = Join-Path $_devicesDir "pending.json"
+    try {
+        if (Test-Path $pairedPath) {
+            $obj = Get-Content -Raw $pairedPath -ErrorAction SilentlyContinue | ConvertFrom-Json
+            if ($obj) { $paired = Get-JsonEntryValues -InputObject $obj -KeyName "deviceId" }
+        }
+    } catch {}
+    try {
+        if (Test-Path $pendingPath) {
+            $obj = Get-Content -Raw $pendingPath -ErrorAction SilentlyContinue | ConvertFrom-Json
+            if ($obj) { $pending = Get-JsonEntryValues -InputObject $obj -KeyName "requestId" }
+        }
+    } catch {}
+    return [pscustomobject]@{ Paired = $paired; Pending = $pending }
+}
 
 function Invoke-External {
     param(
@@ -57,29 +148,6 @@ function Invoke-External {
     }
 }
 
-function Get-DeviceList {
-    Invoke-External -FilePath "docker" -Arguments @(
-        "exec", $ContainerName,
-        "node", "dist/index.js",
-        "devices", "list", "--json"
-    ) -AllowFailure
-}
-
-function Parse-DeviceList {
-    param(
-        [Parameter(Mandatory = $true)][string]$JsonText,
-        [int]$ExitCode = 0
-    )
-    try {
-        return $JsonText | ConvertFrom-Json -Depth 20
-    }
-    catch {
-        if ($ExitCode -ne 0) {
-            throw "Could not parse device list JSON. devices list failed with exit code $ExitCode.`n$JsonText"
-        }
-        throw "Could not parse device list JSON.`n$JsonText"
-    }
-}
 
 $safeScopes = @(
     "operator.admin",
@@ -89,13 +157,29 @@ $safeScopes = @(
     "operator.pairing"
 )
 
+# Resolve the Docker network gateway IP dynamically so this works on any machine.
+# The browser connects from the host; Docker forwards it through the bridge gateway.
+function Get-DockerNetworkGatewayIps {
+    $networkNames = @("openclaw_default", "bridge")
+    $ips = @("172.18.0.1", "172.17.0.1")  # safe fallbacks
+    foreach ($net in $networkNames) {
+        $gateway = & docker network inspect $net --format "{{range .IPAM.Config}}{{.Gateway}}{{end}}" 2>$null
+        if ($gateway -and $gateway.Trim()) {
+            $ips = @($gateway.Trim()) + $ips
+        }
+    }
+    return @($ips | Select-Object -Unique)
+}
+
+$_localGatewayIps = Get-DockerNetworkGatewayIps
+
 function Get-ApprovalBuckets {
     param([object[]]$Pending)
     $autoApprove = @($Pending | Where-Object {
             $_.clientId -eq "openclaw-control-ui" -and
             $_.clientMode -eq "webchat" -and
             $_.role -eq "operator" -and
-            $_.remoteIp -eq "172.18.0.1" -and
+            ($_localGatewayIps -contains $_.remoteIp) -and
             (@($_.scopes | Sort-Object) -join ",") -eq (@($safeScopes | Sort-Object) -join ",")
         })
     $otherPending = @($Pending | Where-Object { $_.requestId -notin @($autoApprove | ForEach-Object { $_.requestId }) })
@@ -105,48 +189,82 @@ function Get-ApprovalBuckets {
     }
 }
 
+function Find-NodeExe {
+    # Try PATH first, then the well-known Windows installer location.
+    $inPath = Get-Command node -ErrorAction SilentlyContinue
+    if ($inPath) { return $inPath.Source }
+    $fallback = "C:\Program Files\nodejs\node.exe"
+    if (Test-Path $fallback) { return $fallback }
+    return $null
+}
+
 function Approve-Requests {
+    # Returns the number of requests the gateway CONFIRMED approved (exit 0).
+    # Stale entries (unknown requestId) exit 1 and are NOT counted.
     param([object[]]$Requests)
+    $confirmed = 0
+
+    $nodeExe = Find-NodeExe
+    if (-not $nodeExe) {
+        Write-Warning "node not found in PATH; falling back to docker exec for approval."
+        foreach ($request in $Requests) {
+            $requestId = [string]$request.requestId
+            $approve = Invoke-External -FilePath "docker" -Arguments @(
+                "exec", $ContainerName,
+                "node", "dist/index.js",
+                "devices", "approve", $requestId
+            ) -AllowFailure
+            if ($approve.Output) { Write-LogBlock -Text $approve.Output }
+            if ($approve.ExitCode -eq 0) { $confirmed++ }
+        }
+        return $confirmed
+    }
+
     foreach ($request in $Requests) {
         $requestId = [string]$request.requestId
-        $approve = Invoke-External -FilePath "docker" -Arguments @(
-            "exec", $ContainerName,
-            "node", "dist/index.js",
-            "devices", "approve", $requestId
+        $approve = Invoke-External -FilePath $nodeExe -Arguments @(
+            $_approverScript,
+            $requestId,
+            "--port", [string]$_gatewayPort,
+            "--host-config-dir", $_hostConfigDir
         ) -AllowFailure
-        if ($approve.Output) {
-            Write-Host $approve.Output
+        if ($approve.Output) { Write-LogBlock -Text $approve.Output }
+        if ($approve.ExitCode -eq 0) {
+            $confirmed++
+        } else {
+            if ($approve.Output -match "unknown requestId") {
+                Write-LogLine -Message "  (requestId $requestId not in gateway memory - likely stale)" -Color DarkGray
+            }
         }
     }
+    return $confirmed
 }
 
 function Invoke-RepairPass {
-    $list = Get-DeviceList
-    $jsonText = if (-not [string]::IsNullOrWhiteSpace($list.StdOut)) { [string]$list.StdOut } else { [string]$list.Output }
-    if ([string]::IsNullOrWhiteSpace($jsonText)) {
-        Write-Host "No device list output was returned." -ForegroundColor Yellow
-        return [pscustomobject]@{ Pending = @(); Auto = @(); Other = @() }
-    }
+    $data = Read-DeviceFiles
+    $pending = @($data.Pending)
+    $paired  = @($data.Paired)
 
-    $devices = Parse-DeviceList -JsonText $jsonText -ExitCode $list.ExitCode
-    $pending = @($devices.pending)
     if ($pending.Count -eq 0) {
-        return [pscustomobject]@{ Pending = @(); Auto = @(); Other = @() }
+        return [pscustomobject]@{ Pending = @(); Paired = $paired; Auto = @(); Other = @(); ApprovedCount = 0 }
     }
 
     $buckets = Get-ApprovalBuckets -Pending $pending
-    Write-Host "Pending requests:" -ForegroundColor Cyan
+    Write-LogLine -Message "Pending requests:" -Color Cyan
     foreach ($request in $pending) {
         $marker = if ($request.requestId -in @($buckets.Auto | ForEach-Object { $_.requestId })) { "[auto]" } else { "[manual]" }
-        Write-Host "- $marker $($request.requestId) client=$($request.clientId) mode=$($request.clientMode) role=$($request.role) ip=$($request.remoteIp)"
+        Write-LogLine -Message "- $marker $($request.requestId) client=$($request.clientId) mode=$($request.clientMode) role=$($request.role) ip=$($request.remoteIp)"
     }
+    $approvedCount = 0
     if ($buckets.Auto.Count -gt 0) {
-        Approve-Requests -Requests $buckets.Auto
+        $approvedCount = Approve-Requests -Requests $buckets.Auto
     }
     return [pscustomobject]@{
-        Pending = $pending
-        Auto    = $buckets.Auto
-        Other   = $buckets.Other
+        Pending       = $pending
+        Paired        = $paired
+        Auto          = $buckets.Auto
+        Other         = $buckets.Other
+        ApprovedCount = $approvedCount
     }
 }
 
@@ -155,29 +273,41 @@ if ($OpenDashboard) {
 }
 
 $result = Invoke-RepairPass
-$approvedAuto = $result.Auto.Count -gt 0
-if ($result.Pending.Count -eq 0 -and $OpenDashboard) {
-    $deadline = (Get-Date).AddSeconds([Math]::Max(0, $PollSeconds))
+$approvedAuto = $result.ApprovedCount -gt 0
+
+if ($OpenDashboard) {
+    # The browser needs a few seconds to load the SPA and send its WebSocket request.
+    # Even if we already have paired Control UI devices in the file, this browser session
+    # might not have a stored device token (new profile, cleared storage, new machine) and
+    # will need to pair. We always poll for at least a grace period so we don't miss that.
+    $hasPairedControlUi = @($result.Paired | Where-Object { $_.clientId -eq "openclaw-control-ui" }).Count -gt 0
+    # Short grace period if already paired (browser likely reconnects in <5s).
+    # Full PollSeconds if no paired devices (fresh install needs more time to load and pair).
+    $waitSecs = if ($hasPairedControlUi) { [Math]::Min(10, $PollSeconds) } else { $PollSeconds }
+    $deadline = (Get-Date).AddSeconds($waitSecs)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 750
         $result = Invoke-RepairPass
-        if ($result.Auto.Count -gt 0) {
+        # Only count CONFIRMED approvals (exit 0). Stale entries fail fast and are ignored.
+        if ($result.ApprovedCount -gt 0) {
             $approvedAuto = $true
         }
-        if ($result.Pending.Count -gt 0) {
+        if ($approvedAuto -and $result.Pending.Count -eq 0) {
             break
         }
+        # Do not break on stale failures alone. We only stop early once a real approval
+        # happened and no valid pending requests remain; otherwise keep polling so a
+        # browser request that arrives 1-3s after open is still caught.
     }
 }
 
 if ($result.Pending.Count -eq 0) {
-    Write-Host "No pending pairing requests were found." -ForegroundColor Green
-    exit 0
+    Write-LogLine -Message "No pending pairing requests remain." -Color Green
 }
 
 if ($result.Other.Count -gt 0) {
     Write-Host ""
-    Write-Host "Some pending requests were not auto-approved." -ForegroundColor Yellow
+    Write-LogLine -Message "Some pending requests were not auto-approved." -Color Yellow
 
     if ($PromptForOtherPending) {
         $answer = Read-Host "Approve the remaining pending request IDs too? (y/n)"
@@ -188,12 +318,12 @@ if ($result.Other.Count -gt 0) {
 }
 
 Write-Host ""
-Write-Host "Pairing repair complete. Reopen the dashboard now:" -ForegroundColor Green
-Write-Host "D:\openclaw\openclaw-toolkit\run-dashboard.cmd"
+Write-LogLine -Message "Pairing repair complete. Reopen the dashboard now:" -Color Green
+Write-LogLine -Message (Join-Path $PSScriptRoot "run-dashboard.cmd")
 if ($OpenDashboard -and $approvedAuto) {
     Start-Sleep -Milliseconds 750
     Write-Host ""
-    Write-Host "Opening a fresh dashboard tab now that pairing is approved..." -ForegroundColor Green
+    Write-LogLine -Message "Opening a fresh dashboard tab now that pairing is approved..." -Color Green
     & (Join-Path $PSScriptRoot "open-dashboard.ps1")
 }
 

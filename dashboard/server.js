@@ -15,6 +15,22 @@ const port = 18791;
 const toolkitDir = path.resolve(__dirname, '..');
 const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
 
+// Simulate terminal \r handling and strip spinner noise from command output
+function cleanOutputChunk(raw) {
+  return raw
+    .split('\n')
+    .map(line => {
+      // \r means "overwrite current line" — keep only the last non-empty segment
+      const parts = line.split('\r');
+      return parts.filter(p => p.trim().length > 0).pop() ?? parts[parts.length - 1] ?? '';
+    })
+    // Drop pure spinner frame lines: lines that are only - \ | / and whitespace
+    .filter(line => !/^\s*[-\\|/]\s*$/.test(line))
+    .join('\n')
+    // Collapse runs of 3+ blank lines down to 2
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -87,23 +103,73 @@ const server = app.listen(port, '0.0.0.0', () => {
   console.log(`Toolkit Dashboard Backend running at http://0.0.0.0:${port}`);
 });
 
+const serverStartTime = Date.now();
 const wss = new WebSocketServer({ server });
 
+// Track the currently running child process so cancel-command can kill it.
+let activeChild = null;
+
 wss.on('connection', (ws) => {
+  // Tell the client when this server instance started.
+  // If the client sees a different start-time than before it will reload the page,
+  // picking up any newly built JS (e.g. after "Rebuild Dashboard").
+  ws.send(JSON.stringify({ type: 'server-info', startTime: serverStartTime }));
+
   ws.on('message', (message) => {
     const data = JSON.parse(message);
+    if (data.type === 'cancel-command') {
+      if (activeChild && !activeChild.killed) {
+        console.log('Cancelling active command...');
+        // Kill the whole cmd.exe process tree so child processes are also terminated.
+        spawn('taskkill', ['/pid', String(activeChild.pid), '/t', '/f']);
+        activeChild = null;
+        ws.send(JSON.stringify({ type: 'stdout', data: '\n[CANCELLED] Command was cancelled by user.\n' }));
+        ws.send(JSON.stringify({ type: 'exit', code: -1 }));
+      }
+      return;
+    }
+
     if (data.type === 'run-command') {
       const { command, args = [] } = data;
       console.log(`Running command: ${command} ${args.join(' ')}`);
+
+      // Rebuild is handled in-process: build UI, tell client, then process.exit(0)
+      // so the run-toolkit-dashboard.cmd restart loop brings the server back up cleanly.
+      if (command === 'toolkit-dashboard-rebuild') {
+        const uiDir = path.join(toolkitDir, 'dashboard', 'ui');
+        ws.send(JSON.stringify({ type: 'stdout', data: '==> Building dashboard UI...\n' }));
+        const build = spawn('cmd.exe', ['/c', 'npm run build'], { cwd: uiDir });
+        activeChild = build;
+        build.stdout.on('data', d => ws.send(JSON.stringify({ type: 'stdout', data: cleanOutputChunk(d.toString()) })));
+        build.stderr.on('data', d => ws.send(JSON.stringify({ type: 'stderr', data: cleanOutputChunk(d.toString()) })));
+        build.on('close', code => {
+          activeChild = null;
+          if (code !== 0) {
+            ws.send(JSON.stringify({ type: 'stdout', data: `\nBuild failed (exit ${code}).\n` }));
+            ws.send(JSON.stringify({ type: 'exit', code }));
+            return;
+          }
+          ws.send(JSON.stringify({ type: 'stdout', data: '\nBuild complete. Server is restarting...\n' }));
+          ws.send(JSON.stringify({ type: 'exit', code: 0 }));
+          // process.exit(0) signals the run-toolkit-dashboard.cmd restart loop to relaunch
+          setTimeout(() => process.exit(0), 400);
+        });
+        return;
+      }
+
       const child = spawn('cmd.exe', [
         '/c',
         path.join(toolkitDir, 'run-openclaw.cmd'),
         command,
         ...args
       ]);
-      child.stdout.on('data', (d) => ws.send(JSON.stringify({ type: 'stdout', data: d.toString() })));
-      child.stderr.on('data', (d) => ws.send(JSON.stringify({ type: 'stderr', data: d.toString() })));
-      child.on('close', (code) => ws.send(JSON.stringify({ type: 'exit', code })));
+      activeChild = child;
+      child.stdout.on('data', (d) => ws.send(JSON.stringify({ type: 'stdout', data: cleanOutputChunk(d.toString()) })));
+      child.stderr.on('data', (d) => ws.send(JSON.stringify({ type: 'stderr', data: cleanOutputChunk(d.toString()) })));
+      child.on('close', (code) => {
+        activeChild = null;
+        ws.send(JSON.stringify({ type: 'exit', code }));
+      });
     } else if (data.type === 'reboot-service') {
       const { service } = data;
       console.log(`Rebooting service: ${service}`);
@@ -115,8 +181,8 @@ wss.on('connection', (ws) => {
         // Gateway uses the main toolkit wrapper for stop/start
         const command = `& "${path.join(toolkitDir, 'run-openclaw.cmd')}" stop; & "${path.join(toolkitDir, 'run-openclaw.cmd')}" start`;
         const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command]);
-        child.stdout.on('data', (data) => ws.send(JSON.stringify({ type: 'stdout', data: data.toString() })));
-        child.stderr.on('data', (data) => ws.send(JSON.stringify({ type: 'stderr', data: data.toString() })));
+        child.stdout.on('data', (data) => ws.send(JSON.stringify({ type: 'stdout', data: cleanOutputChunk(data.toString()) })));
+        child.stderr.on('data', (data) => ws.send(JSON.stringify({ type: 'stderr', data: cleanOutputChunk(data.toString()) })));
         child.on('close', (code) => ws.send(JSON.stringify({ type: 'exit', code })));
         return;
       } else if (service === 'tailscale') {
@@ -132,8 +198,8 @@ wss.on('connection', (ws) => {
           '-File', path.join(toolkitDir, scriptFile)
         ]);
 
-        child.stdout.on('data', (data) => ws.send(JSON.stringify({ type: 'stdout', data: data.toString() })));
-        child.stderr.on('data', (data) => ws.send(JSON.stringify({ type: 'stderr', data: data.toString() })));
+        child.stdout.on('data', (data) => ws.send(JSON.stringify({ type: 'stdout', data: cleanOutputChunk(data.toString()) })));
+        child.stderr.on('data', (data) => ws.send(JSON.stringify({ type: 'stderr', data: cleanOutputChunk(data.toString()) })));
         child.on('close', (code) => ws.send(JSON.stringify({ type: 'exit', code })));
       }
     }

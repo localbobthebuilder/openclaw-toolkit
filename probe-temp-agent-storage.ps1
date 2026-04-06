@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$RepoPath = "D:\openclaw\openclaw",
-    [string]$StateRoot = "C:\Users\Deadline\.openclaw",
+    [string]$RepoPath,
+    [string]$StateRoot,
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
     [string]$AgentIdPrefix = "api-probe",
     [string]$ModelRef = "ollama/gemma4:latest",
@@ -11,6 +11,21 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Derive defaults from bootstrap config so paths are portable across machines/users
+$_scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$_configFile = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+if (-not $RepoPath -or -not $StateRoot) {
+    if (Test-Path $_configFile) {
+        . (Join-Path $_scriptDir "shared-config-paths.ps1")
+        $_bsCfg = Get-Content -Raw $_configFile | ConvertFrom-Json
+        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_scriptDir
+        if (-not $RepoPath   -and $_bsCfg.repoPath)      { $RepoPath   = [string]$_bsCfg.repoPath }
+        if (-not $StateRoot  -and $_bsCfg.hostConfigDir)  { $StateRoot  = [string]$_bsCfg.hostConfigDir }
+    }
+    if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::GetFullPath((Join-Path $_scriptDir "..\openclaw")) }
+    if (-not $StateRoot) { $StateRoot = Join-Path $env:USERPROFILE ".openclaw" }
+}
 
 function Invoke-External {
     param(

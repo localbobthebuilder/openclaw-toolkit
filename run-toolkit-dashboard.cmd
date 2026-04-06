@@ -31,20 +31,21 @@ if not exist "%UI_DIR%\dist" (
     popd
 )
 
-echo Starting backend server...
-start /B "Toolkit Dashboard Backend" node "%DASHBOARD_DIR%\server.js"
-
-echo Waiting for server to start...
-timeout /t 2 /nobreak > nul
-
 echo Opening dashboard in browser...
 powershell.exe -NoProfile -Command "Start-Process 'http://127.0.0.1:18791'"
 
 echo.
-echo Dashboard is running. Close this window to stop the backend.
-echo Press Ctrl+C to stop.
+echo Dashboard is running on http://127.0.0.1:18791
+echo Close this window or press Ctrl+C to stop.
 echo.
 
-:loop
-timeout /t 10 /nobreak > nul
-goto :loop
+:server_loop
+echo Starting backend server...
+node "%DASHBOARD_DIR%\server.js"
+set EXIT_CODE=%ERRORLEVEL%
+if "%EXIT_CODE%"=="0" (
+    echo Server requested restart. Restarting in 1 second...
+    timeout /t 1 /nobreak > nul
+    goto :server_loop
+)
+echo Dashboard server stopped (exit code %EXIT_CODE%).

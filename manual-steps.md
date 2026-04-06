@@ -84,7 +84,7 @@ Main operator wrapper:
 - `.\run-openclaw.cmd remote-review-smoke`
   Smoke-test `main -> coder-remote -> review-local` on the shared workspace and verify that the review task uses exact full file paths.
 - `.\run-openclaw.cmd temp-agent-probe`
-  Create a temporary agent through the live gateway API, create one session for it, and report which files appeared under `C:\Users\Deadline\.openclaw`. By default it cleans the probe back up and restarts the gateway so live state matches disk.
+  Create a temporary agent through the live gateway API, create one session for it, and report which files appeared under `%USERPROFILE%\.openclaw`. By default it cleans the probe back up and restarts the gateway so live state matches disk.
 - `.\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
 - `.\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
@@ -269,7 +269,7 @@ Temporary agent storage probe:
   concrete answer to "what files did OpenClaw create for this agent?"
 - The helper uses the live gateway API to add an agent, optionally creates one
   session so the session store materializes on disk, and prints the paths it
-  changed under `C:\Users\Deadline\.openclaw`.
+  changed under `%USERPROFILE%\.openclaw`.
 - By default it removes the temporary agent again and restarts the gateway at
   the end so the in-memory agent list matches the cleaned config file.
 - Use `-KeepAgent` only when you intentionally want to leave the probe agent in
@@ -306,13 +306,13 @@ The script still pauses for a few human-only steps when needed:
 
 ## 1. Repo clone and `.env` seeding
 
-If `D:\openclaw\openclaw` does not exist yet, bootstrap clones the repo for you:
+If `<repo-dir>` does not exist yet, bootstrap clones the repo for you:
 
 ```powershell
-git clone --depth 1 https://github.com/openclaw/openclaw.git D:\openclaw\openclaw
+git clone --depth 1 https://github.com/openclaw/openclaw.git <repo-dir>
 ```
 
-If `D:\openclaw\openclaw\.env` does not exist yet, bootstrap seeds it from:
+If `<repo-dir>\.env` does not exist yet, bootstrap seeds it from:
 
 `.\openclaw.env.template`
 
@@ -447,7 +447,7 @@ transcribe it using your live config.
 `verify` now runs that voice smoke test automatically when voice notes are
 enabled, so `bootstrap` covers it too. The WAV is created temporarily under your
 Windows temp folder and cleaned up afterwards; you do not need to keep a
-permanent sound file in `D:\openclaw\openclaw-toolkit`.
+permanent sound file in `<toolkit-dir>`.
 
 ## 5. Local model smoke test
 
@@ -531,11 +531,11 @@ it will stop with a clear error instead of leaving that agent broken.
 
 Important storage note:
 
-- On this machine, Ollama models live under `C:\Users\Deadline\.ollama\models`
+- On this machine, Ollama models live under `%USERPROFILE%\.ollama\models`
   and are not stored inside Docker Desktop's VHDX.
 - So `ollama rm` frees Ollama host disk space directly.
 - Docker Desktop compaction is a separate maintenance action for reclaiming
-  space inside `C:\Users\Deadline\AppData\Local\Docker\wsl\disk\docker_data.vhdx`.
+  space inside `%USERPROFILE%\AppData\Local\Docker\wsl\disk\docker_data.vhdx`.
 
 If you want to compact Docker Desktop storage after model churn, use:
 
@@ -648,7 +648,7 @@ Shared workspace note:
 
 - This setup now uses one shared workspace for all managed agents.
 - The shared workspace is `agents.defaults.workspace = /home/node/.openclaw/workspace`.
-- On this Windows machine, that maps to `C:\Users\Deadline\.openclaw\workspace`.
+- On this Windows machine, that maps to `%USERPROFILE%\.openclaw\workspace`.
 - `main`, `research`, `chat-local`, `review-local`, `coder-local`, and the
   optional `chat-openai` all work against that same project tree.
 - This is intentional so chat, coding, and review agents can collaborate on the
@@ -800,7 +800,7 @@ your machine and avoids stale tool warnings for capabilities you are not using,
 such as `x_search` or `code_execution`.
 
 That means a fresh machine does not need a pre-configured
-`C:\Users\<you>\.openclaw\openclaw.json` just to know which strong/local models
+`<repo-dir>.json` just to know which strong/local models
 or Telegram routes should exist. Bootstrap can reconstruct that layout from
 `.\openclaw-bootstrap.config.json`.
 
@@ -999,7 +999,7 @@ That creates a timestamped zip under:
 
 The backup includes:
 
-- host OpenClaw state from `C:\Users\Deadline\.openclaw`
+- host OpenClaw state from `%USERPROFILE%\.openclaw`
 - repo-local `.env`
 - repo-local `docker-compose.yml`
 - core setup toolkit files
@@ -1023,12 +1023,12 @@ setup toolkit, use:
 To restore from a specific zip:
 
 ```powershell
-.\run-restore.cmd -BackupPath D:\path\to\openclaw-backup-YYYYMMDD-HHMMSS.zip
+.\run-restore.cmd -BackupPath <repo-dir>-backup-YYYYMMDD-HHMMSS.zip
 ```
 
 Recommended migration flow on a new machine:
 
-1. Copy the `D:\openclaw\openclaw-toolkit` folder and your backup zip to the new machine.
+1. Copy the `<toolkit-dir>` folder and your backup zip to the new machine.
 2. Run `.\run-openclaw.cmd restore -RunBootstrap`
 3. Run `.\run-openclaw.cmd start`
 4. Run `.\run-openclaw.cmd status`
@@ -1279,7 +1279,7 @@ To stop OpenClaw cleanly, use:
 
 That helper stops the main gateway and removes the disposable `openclaw-sbx-*`
 sandbox worker containers. It does not delete your real state under
-`C:\Users\Deadline\.openclaw`.
+`%USERPROFILE%\.openclaw`.
 
 If you also want it to close Docker Desktop afterwards, use:
 
@@ -1296,7 +1296,7 @@ The gateway is long-lived and should come back after Docker Desktop starts.
 Sandbox containers are disposable. If a sandbox container is gone, OpenClaw can
 create a fresh one for the next message/session when needed.
 
-Your persistent state is on the host under `C:\Users\Deadline\.openclaw`
+Your persistent state is on the host under `%USERPROFILE%\.openclaw`
 because Docker mounts that folder into the gateway as `/home/node/.openclaw`.
 That host state includes things like:
 
@@ -1304,7 +1304,7 @@ That host state includes things like:
 - auth profiles
 - sessions/history/state
 - workspace files
-- sandbox directories under `C:\Users\Deadline\.openclaw\sandboxes`
+- sandbox directories under `%USERPROFILE%\.openclaw\sandboxes`
 
 So deleting or expiring a sandbox container does not mean losing your whole
 OpenClaw setup. It mostly means losing that one running execution environment,

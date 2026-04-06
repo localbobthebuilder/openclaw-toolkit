@@ -5,7 +5,7 @@ param(
     [string]$HealthUrl,
     [int]$DockerWaitSeconds = 240,
     [int]$OllamaWaitSeconds = 60,
-    [int]$DashboardRepairPollSeconds = 8,
+    [int]$DashboardRepairPollSeconds = 30,
     [switch]$NoOpenDashboard
 )
 
@@ -158,7 +158,11 @@ $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
 
 if (-not $RepoPath) {
-    $RepoPath = if ($config.repoPath) { [string]$config.repoPath } else { "D:\openclaw\openclaw" }
+    $RepoPath = if ($config.repoPath) {
+        [string]$config.repoPath
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $ConfigPath) "..\openclaw"))
+    }
 }
 
 if (-not $HealthUrl) {
