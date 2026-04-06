@@ -621,6 +621,54 @@ function Set-EnvVarValue {
     }
 }
 
+function Get-EnvVarValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if (-not (Test-Path $Path)) {
+        return $null
+    }
+
+    $match = Select-String -Path $Path -Pattern ("^" + [regex]::Escape($Name) + "=(.*)$") | Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+
+    return [string]$match.Matches[0].Groups[1].Value
+}
+
+function Merge-EnvTemplateDefaults {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+
+    if (-not (Test-Path $TemplatePath)) {
+        return
+    }
+
+    foreach ($line in Get-Content $TemplatePath) {
+        if ($line -notmatch '^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)=(?<value>.*)$') {
+            continue
+        }
+
+        $name = [string]$Matches.name
+        $templateValue = [string]$Matches.value
+        $currentValue = Get-EnvVarValue -Path $Path -Name $name
+
+        if ($null -eq $currentValue) {
+            Set-EnvVarValue -Path $Path -Name $name -Value $templateValue
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($currentValue) -and -not [string]::IsNullOrWhiteSpace($templateValue)) {
+            Set-EnvVarValue -Path $Path -Name $name -Value $templateValue
+        }
+    }
+}
+
 function Ensure-OpenClawCliStartupEnv {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -887,45 +935,49 @@ function Invoke-InteractiveDockerSetup {
 function Ensure-EnvFile {
     param([Parameter(Mandatory = $true)]$Config)
 
-    if (Test-Path $Config.envFilePath) {
-        Write-Host ".env already exists. Skipping env seeding."
-        return
-    }
-
     $envDir = Split-Path -Parent $Config.envFilePath
     if (-not (Test-Path $envDir)) {
         New-Item -ItemType Directory -Force -Path $envDir | Out-Null
     }
 
-    if ($Config.PSObject.Properties.Name -contains "envTemplatePath" -and $Config.envTemplatePath -and (Test-Path $Config.envTemplatePath)) {
+    $hasTemplate = $Config.PSObject.Properties.Name -contains "envTemplatePath" -and $Config.envTemplatePath -and (Test-Path $Config.envTemplatePath)
+    if (-not (Test-Path $Config.envFilePath)) {
+        if (-not $hasTemplate) {
+            Write-WarnLine "No env template found at $($Config.envTemplatePath). Falling back to interactive setup."
+            Invoke-InteractiveDockerSetup -Config $Config
+            return
+        }
+
         Copy-Item -LiteralPath $Config.envTemplatePath -Destination $Config.envFilePath -Force
         Write-Host "Seeded .env from setup template." -ForegroundColor Green
-
-        $hostConfigDir = Get-HostConfigDir -Config $Config
-        $hostWorkspaceDir = Get-HostWorkspaceDir -Config $Config
-        if (-not (Test-Path $hostConfigDir)) {
-            New-Item -ItemType Directory -Force -Path $hostConfigDir | Out-Null
-        }
-        if (-not (Test-Path $hostWorkspaceDir)) {
-            New-Item -ItemType Directory -Force -Path $hostWorkspaceDir | Out-Null
-        }
-
-        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_CONFIG_DIR" -Value (Convert-WindowsPathToDockerDesktop -Path $hostConfigDir)
-        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_WORKSPACE_DIR" -Value (Convert-WindowsPathToDockerDesktop -Path $hostWorkspaceDir)
-        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_PORT" -Value ([string]$Config.gatewayPort)
-        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_BRIDGE_PORT" -Value ([string]$Config.bridgePort)
-        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_BIND" -Value ([string]$Config.gatewayBind)
-
-        $rawEnv = Get-Content -Raw $Config.envFilePath
-        if ($rawEnv -notmatch '(?m)^OPENCLAW_GATEWAY_TOKEN=.+$') {
-            Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_TOKEN" -Value (New-RandomHexToken)
-        }
-
-        return
+    }
+    else {
+        Write-Host ".env already exists. Reconciling required values." -ForegroundColor Green
     }
 
-    Write-WarnLine "No env template found at $($Config.envTemplatePath). Falling back to interactive setup."
-    Invoke-InteractiveDockerSetup -Config $Config
+    if ($hasTemplate) {
+        Merge-EnvTemplateDefaults -Path $Config.envFilePath -TemplatePath $Config.envTemplatePath
+    }
+
+    $hostConfigDir = Get-HostConfigDir -Config $Config
+    $hostWorkspaceDir = Get-HostWorkspaceDir -Config $Config
+    if (-not (Test-Path $hostConfigDir)) {
+        New-Item -ItemType Directory -Force -Path $hostConfigDir | Out-Null
+    }
+    if (-not (Test-Path $hostWorkspaceDir)) {
+        New-Item -ItemType Directory -Force -Path $hostWorkspaceDir | Out-Null
+    }
+
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_CONFIG_DIR" -Value (Convert-WindowsPathToDockerDesktop -Path $hostConfigDir)
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_WORKSPACE_DIR" -Value (Convert-WindowsPathToDockerDesktop -Path $hostWorkspaceDir)
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_PORT" -Value ([string]$Config.gatewayPort)
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_BRIDGE_PORT" -Value ([string]$Config.bridgePort)
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_BIND" -Value ([string]$Config.gatewayBind)
+
+    $gatewayToken = Get-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_TOKEN"
+    if ([string]::IsNullOrWhiteSpace($gatewayToken)) {
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_GATEWAY_TOKEN" -Value (New-RandomHexToken)
+    }
 }
 
 function Set-OpenClawConfigJson {
