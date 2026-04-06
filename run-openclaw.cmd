@@ -63,6 +63,7 @@ if /I "%ACTION%"=="cli" goto :cli
 if /I "%ACTION%"=="add-local-model" goto :add_local_model
 if /I "%ACTION%"=="remove-local-model" goto :remove_local_model
 if /I "%ACTION%"=="sandbox-test" goto :sandbox_test
+if /I "%ACTION%"=="telegram-setup" goto :telegram_setup
 if /I "%ACTION%"=="telegram-ids" goto :telegram_ids
 if /I "%ACTION%"=="stop" goto :stop
 
@@ -211,6 +212,10 @@ exit /b %ERRORLEVEL%
 call "%SCRIPT_DIR%run-sandbox-test.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
+:telegram_setup
+call "%SCRIPT_DIR%run-telegram-setup.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
+
 :telegram_ids
 call "%SCRIPT_DIR%run-telegram-ids.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
@@ -243,6 +248,9 @@ echo     Start Docker/Ollama/OpenClaw and open the localhost dashboard with pair
 echo.
 echo   run-openclaw.cmd onboard
 echo     Launch interactive OpenClaw onboarding inside the gateway container in a new PowerShell window when needed.
+echo.
+echo   run-openclaw.cmd telegram-setup
+echo     Launch the interactive Telegram channel setup wizard inside the gateway container in a new PowerShell window.
 echo.
 echo   run-openclaw.cmd status
 echo     Show Docker, gateway, and Tailscale status.

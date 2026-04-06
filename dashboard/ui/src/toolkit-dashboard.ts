@@ -568,7 +568,7 @@ export class ToolkitDashboard extends LitElement {
                                ${s.title === 'Telegram' ? html`
                                    <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
                                            ?disabled=${this.isRunning}
-                                           @click=${() => this.runCommand('onboard')}>
+                                            @click=${() => this.runCommand('telegram-setup')}>
                                        Setup
                                    </button>
                                    <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 0.7rem;"
@@ -621,6 +621,7 @@ export class ToolkitDashboard extends LitElement {
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
       { id: 'start', name: 'Start', desc: 'Start all services and OpenClaw' },
       { id: 'onboard', name: 'Interactive Onboarding', desc: 'Launch openclaw onboard in a separate PowerShell window so you can answer prompts and make onboarding choices' },
+      { id: 'telegram-setup', name: 'Telegram Setup', desc: 'Launch the interactive Telegram channel setup wizard in a separate PowerShell window without storing any token in toolkit config' },
       { id: 'telegram-ids', name: 'Telegram IDs From Logs', desc: 'Inspect recent Telegram user and group IDs seen by the gateway so you can fill allowlists and group routing safely' },
       { id: 'stop', name: 'Stop', desc: 'Stop all services and OpenClaw' },
       { id: 'cli', args: ['--version'], name: 'OpenClaw CLI Version', desc: 'Run openclaw --version inside the gateway container and stream the result' },
@@ -958,6 +959,10 @@ export class ToolkitDashboard extends LitElement {
     if (!clone.skills || typeof clone.skills !== 'object') clone.skills = {};
     if (typeof clone.skills.enableAll !== 'boolean') {
       clone.skills.enableAll = clone.skills.enableAll === false || clone.skills.enableAll === 'false' ? false : true;
+    }
+    if (clone.telegram && typeof clone.telegram === 'object') {
+      delete clone.telegram.botToken;
+      delete clone.telegram.tokenFile;
     }
     if (typeof clone.ollama.pullVramBudgetFraction !== 'number' || !Number.isFinite(clone.ollama.pullVramBudgetFraction) || clone.ollama.pullVramBudgetFraction <= 0 || clone.ollama.pullVramBudgetFraction > 1) {
       const parsedBudget = Number(clone.ollama.pullVramBudgetFraction);
@@ -1978,18 +1983,8 @@ export class ToolkitDashboard extends LitElement {
                 <input type="checkbox" ?checked=${telegram.enabled} @change=${(e: any) => { this.ensureTelegramConfig().enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Telegram Bot
              </label>
-             <span class="help-text">Telegram uses long polling by default. Add a bot token or token file before bootstrap can initialize the live channel.</span>
-          </div>
-          <div class="form-group">
-            <label>Bot Token</label>
-            <input type="password" .value=${telegram.botToken || ''} @input=${(e: any) => { this.ensureTelegramConfig().botToken = e.target.value; this.requestUpdate(); }}>
-            <span class="help-text">Optional. Paste the BotFather token here, or leave it blank and use Token File instead.</span>
-          </div>
-          <div class="form-group">
-            <label>Token File</label>
-            <input type="text" .value=${telegram.tokenFile || ''} @input=${(e: any) => { this.ensureTelegramConfig().tokenFile = e.target.value; this.requestUpdate(); }}>
-            <span class="help-text">Optional. Preferred when you want the secret to stay outside openclaw-bootstrap.config.json.</span>
-          </div>
+             <span class="help-text">Use the Telegram Setup action from Status or Ops to authenticate the live channel. The dashboard no longer stores Telegram token fields in toolkit config.</span>
+           </div>
           <div class="form-group">
             <label>DM Policy</label>
             <select @change=${(e: any) => { this.ensureTelegramConfig().dmPolicy = e.target.value; this.requestUpdate(); }}>

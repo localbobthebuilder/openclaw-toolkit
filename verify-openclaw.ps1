@@ -1450,7 +1450,7 @@ if (Test-CheckRequested -Names @("telegram")) {
             $telegramMissingMessage = "channels.telegram is not initialized in live config yet. Re-run bootstrap to apply Telegram setup."
         }
         else {
-            $telegramMissingMessage = "Telegram setup incomplete: channels.telegram is not initialized because telegram.botToken or telegram.tokenFile is still missing from toolkit config."
+            $telegramMissingMessage = "Telegram setup incomplete: channels.telegram is not initialized in live config yet. Run .\run-openclaw.cmd telegram-setup or use the dashboard Telegram Setup action."
         }
     }
     elseif ($config.telegram) {

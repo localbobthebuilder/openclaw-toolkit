@@ -896,13 +896,13 @@ elseif (-not $bootstrapReady) {
 elseif (-not $telegramLiveEnabled) {
     if (-not ($bootstrapTelegramHasCredentials -or $liveTelegramHasCredentials)) {
         Write-Host "Telegram: setup incomplete (bot token or token file missing)" -ForegroundColor Yellow
-        Write-Host "Configure telegram.botToken or telegram.tokenFile in the toolkit config before bootstrap initializes channels.telegram."
-        Write-Host "Run: .\run-openclaw.cmd onboard"
+        Write-Host "Run the interactive Telegram setup wizard to configure channels.telegram in live OpenClaw config."
+        Write-Host "Run: .\run-openclaw.cmd telegram-setup"
     }
     else {
         Write-Host "Telegram: not initialized in live config yet" -ForegroundColor Yellow
         Write-Host "Credentials exist, but channels.telegram is not enabled in live OpenClaw config yet."
-        Write-Host "Run: .\run-openclaw.cmd bootstrap"
+        Write-Host "Run: .\run-openclaw.cmd telegram-setup"
     }
 }
 else {
