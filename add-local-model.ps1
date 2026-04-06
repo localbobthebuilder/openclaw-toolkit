@@ -337,7 +337,6 @@ function New-ManagedEndpointModelEntry {
     param(
         $ExistingEntry,
         [Parameter(Mandatory = $true)][string]$ModelId,
-        [Parameter(Mandatory = $true)][string]$DisplayName,
         [string[]]$Inputs = @("text"),
         [switch]$ReasoningModel,
         [Parameter(Mandatory = $true)][int]$ContextWindow,
@@ -354,7 +353,9 @@ function New-ManagedEndpointModelEntry {
     }
 
     $entry.id = $ModelId
-    $entry.name = $DisplayName
+    if ($entry.Contains("name")) {
+        $entry.Remove("name")
+    }
     $entry.input = @($Inputs)
     $entry.cost = [ordered]@{
         input      = 0
@@ -586,7 +587,7 @@ if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumCont
 }
 
 $existingEntry = Get-ToolkitEffectiveLocalModelEntry -Config $config -ModelId $plan.ModelId -EndpointKey $endpoint.key
-$newEntry = New-ManagedEndpointModelEntry -ExistingEntry $existingEntry -ModelId $plan.ModelId -DisplayName $plan.DisplayName -Inputs $InputKinds -ReasoningModel:$Reasoning -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
+$newEntry = New-ManagedEndpointModelEntry -ExistingEntry $existingEntry -ModelId $plan.ModelId -Inputs $InputKinds -ReasoningModel:$Reasoning -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
 
 Write-Step "Updating bootstrap config"
 Set-EndpointModelEntry -Config $config -EndpointKey $endpoint.key -ModelEntry $newEntry

@@ -130,8 +130,8 @@ export class ToolkitDashboard extends LitElement {
     try {
       const res = await fetch(this.getBaseUrl() + '/api/config');
       const data = await res.json();
-      this.config = data;
-      this.savedConfig = JSON.parse(JSON.stringify(data));
+      this.config = this.sanitizeConfigModelNames(data);
+      this.savedConfig = JSON.parse(JSON.stringify(this.config));
     } catch (err) {
       console.error('Failed to fetch config', err);
     }
@@ -242,6 +242,7 @@ export class ToolkitDashboard extends LitElement {
 
   async saveConfig() {
     try {
+      this.config = this.sanitizeConfigModelNames(this.config);
       const res = await fetch(this.getBaseUrl() + '/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -619,6 +620,37 @@ export class ToolkitDashboard extends LitElement {
     return [];
   }
 
+  sanitizeModelEntries(models: any[] | undefined) {
+    if (!Array.isArray(models)) return [];
+    return models.map((model: any) => {
+      const clone = JSON.parse(JSON.stringify(model));
+      delete clone.name;
+      return clone;
+    });
+  }
+
+  sanitizeConfigModelNames(config: any) {
+    const clone = JSON.parse(JSON.stringify(config));
+    if (!clone?.ollama) return clone;
+
+    if (Array.isArray(clone.ollama.models)) {
+      clone.ollama.models = this.sanitizeModelEntries(clone.ollama.models);
+    }
+
+    if (Array.isArray(clone.ollama.endpoints)) {
+      for (const endpoint of clone.ollama.endpoints) {
+        if (Array.isArray(endpoint?.models)) {
+          endpoint.models = this.sanitizeModelEntries(endpoint.models);
+        }
+        if (Array.isArray(endpoint?.hostedModels)) {
+          endpoint.hostedModels = this.sanitizeModelEntries(endpoint.hostedModels);
+        }
+      }
+    }
+
+    return clone;
+  }
+
   getEndpointHostedModels(endpoint: any) {
     if (Array.isArray(endpoint?.hostedModels)) {
       return endpoint.hostedModels;
@@ -635,7 +667,9 @@ export class ToolkitDashboard extends LitElement {
   }
 
   cloneModelCatalogEntry(model: any) {
-    return JSON.parse(JSON.stringify(model));
+    const clone = JSON.parse(JSON.stringify(model));
+    delete clone.name;
+    return clone;
   }
 
   getSharedModelCatalog() {
@@ -783,8 +817,8 @@ export class ToolkitDashboard extends LitElement {
             ${endpointHostedModels.map((model: any, idx: number) => html`
                 <div class="item-row">
                     <div class="item-info">
-                        <span class="item-title">${model.name || model.modelRef}</span>
-                        <span class="item-sub">${model.modelRef}${model.fallbackModelId ? ` | Local fallback: ollama/${model.fallbackModelId}` : ''}</span>
+                        <span class="item-title">${model.modelRef}</span>
+                        <span class="item-sub">${model.fallbackModelId ? `Local fallback: ollama/${model.fallbackModelId}` : 'Hosted provider model'}</span>
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
@@ -814,7 +848,7 @@ export class ToolkitDashboard extends LitElement {
                     ${models.length === 0 ? html`<div class="item-sub">No matching models are in the shared catalog yet.</div>` : ''}
                     ${models.map((m: any) => html`
                         <div class="selectable-item" @click=${() => this.handleModelSelected(this.selectorTarget === 'endpoint-hosted' ? m.modelRef : m.id)}>
-                            <div class="item-title">${m.name || m.id || m.modelRef}</div>
+                            <div class="item-title">${m.id || m.modelRef}</div>
                             <div class="item-sub">${this.selectorTarget === 'endpoint-hosted' ? `Ref: ${m.modelRef}` : `ID: ${m.id}`}</div>
                         </div>
                     `)}
@@ -884,12 +918,11 @@ export class ToolkitDashboard extends LitElement {
           return html`
           <div class="item-row">
             <div class="item-info">
-              <span class="item-title">${m.name || m.id}</span>
-              <span class="item-sub">${m.id} | Min Ctx: ${m.minimumContextWindow || 24576}</span>
+              <span class="item-title">${m.id}</span>
+              <span class="item-sub">Min Ctx: ${m.minimumContextWindow || 24576}</span>
             </div>
             ${hasSharedCatalog && idx >= 0 ? html`
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-secondary" @click=${() => this.editModel(idx)}>Edit</button>
                 <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove</button>
               </div>
             ` : ''}
@@ -901,8 +934,8 @@ export class ToolkitDashboard extends LitElement {
           return html`
           <div class="item-row">
             <div class="item-info">
-              <span class="item-title">${m.name || m.modelRef}</span>
-              <span class="item-sub">${m.modelRef}${m.fallbackModelId ? ` | Local fallback: ollama/${m.fallbackModelId}` : ''}</span>
+              <span class="item-title">${m.modelRef}</span>
+              <span class="item-sub">${m.fallbackModelId ? `Local fallback: ollama/${m.fallbackModelId}` : 'Hosted provider model'}</span>
             </div>
             ${hasSharedCatalog && idx >= 0 ? html`
               <div style="display: flex; gap: 8px;">
@@ -1258,7 +1291,7 @@ export class ToolkitDashboard extends LitElement {
               alert(`Model "${id}" is already in the catalog.`);
               return;
           }
-          models.push({ id, name: id, input: ['text'], minimumContextWindow: 24576 });
+          models.push({ id, input: ['text'], minimumContextWindow: 24576 });
           this.requestUpdate();
       }
   }
@@ -1272,7 +1305,7 @@ export class ToolkitDashboard extends LitElement {
               return;
           }
           const fallbackModelId = prompt('Optional local fallback model ID (e.g. qwen3-coder:30b):', '') || '';
-          const entry: any = { modelRef, name: modelRef };
+          const entry: any = { modelRef };
           if (fallbackModelId.trim()) {
               entry.fallbackModelId = fallbackModelId.trim();
           }
@@ -1292,8 +1325,6 @@ export class ToolkitDashboard extends LitElement {
   editModel(idx: number) {
       if (!Array.isArray(this.config?.ollama?.models)) return;
       const m = this.config.ollama.models[idx];
-      const name = prompt('Name:', m.name || m.id || m.modelRef);
-      if (name) m.name = name;
       if (m.modelRef) {
           const fallback = prompt('Optional local fallback model ID:', m.fallbackModelId || '');
           if (fallback && fallback.trim()) {
@@ -1301,7 +1332,8 @@ export class ToolkitDashboard extends LitElement {
           } else {
               delete m.fallbackModelId;
           }
+          this.requestUpdate();
+          return;
       }
-      this.requestUpdate();
   }
 }
