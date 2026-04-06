@@ -16,6 +16,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Invoke-External {
     param(
@@ -170,7 +171,7 @@ if (-not $HealthUrl) {
     $HealthUrl = "http://127.0.0.1:$gatewayPort/healthz"
 }
 
-$requiresOllama = [bool]($config.ollama -and $config.ollama.enabled)
+$requiresOllama = [bool]($config.ollama -and $config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config))
 
 Start-DockerDesktopIfNeeded
 if ($requiresOllama) {

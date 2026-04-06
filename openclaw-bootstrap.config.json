@@ -162,17 +162,35 @@
   ],
   "ollama": {
     "enabled": true,
-    "endpoints": [
-      {
-        "key": "local",
+    "setAsDefaultModel": false,
+    "clearFallbacks": true
+  },
+  "endpoints": [
+    {
+      "key": "local",
+      "default": true,
+      "telemetry": {
+        "kind": "local-nvidia-smi"
+      },
+      "hostedModels": [
+        {
+          "modelRef": "openai-codex/gpt-5.4",
+          "fallbackModelId": "qwen3-coder:30b"
+        },
+        {
+          "modelRef": "anthropic/claude-sonnet-4-6",
+          "fallbackModelId": "qwen3-coder:30b"
+        },
+        {
+          "modelRef": "google/gemini-3.1-flash-lite-preview",
+          "fallbackModelId": "qwen3:4b"
+        }
+      ],
+      "ollama": {
         "providerId": "ollama",
         "baseUrl": "http://host.docker.internal:11434",
         "hostBaseUrl": "http://127.0.0.1:11434",
         "apiKey": "ollama-local",
-        "default": true,
-        "telemetry": {
-          "kind": "local-nvidia-smi"
-        },
         "autoPullMissingModels": true,
         "models": [
           {
@@ -351,18 +369,21 @@
             "vramEstimateMiB": 19968
           }
         ]
+      }
+    },
+    {
+      "key": "review-pc",
+      "default": false,
+      "telemetry": {
+        "kind": "static-gpu-total",
+        "gpuTotalMiB": 8192
       },
-      {
-        "key": "review-pc",
+      "hostedModels": [],
+      "ollama": {
         "providerId": "ollama-review-pc",
         "baseUrl": "http://100.96.119.26:11434",
         "hostBaseUrl": "http://100.96.119.26:11434",
         "apiKey": "ollama-review-pc",
-        "default": false,
-        "telemetry": {
-          "kind": "static-gpu-total",
-          "gpuTotalMiB": 8192
-        },
         "autoPullMissingModels": true,
         "models": [
           {
@@ -444,10 +465,8 @@
           }
         ]
       }
-    ],
-    "setAsDefaultModel": false,
-    "clearFallbacks": true
-  },
+    }
+  ],
   "sandbox": {
     "enabled": true,
     "dockerSocketSource": "/var/run/docker.sock.raw",

@@ -121,10 +121,10 @@ Useful extras:
 - Ollama GPU fit probe:
   `run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072`
 - Add a new local model end to end:
-  `run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc`
+  `run-openclaw.cmd add-local-model -Model qwen2.5:7b -EndpointKey review-pc`
 - Add a new local model with a configured fallback model ID:
-  `run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b`
-- Named Ollama endpoints can also pre-provision models during `bootstrap` by listing them under endpoint `models`; bootstrap will pull what fits and warn on oversized models.
+  `run-openclaw.cmd add-local-model -Model qwen3-coder:30b -EndpointKey local -FallbackModel qwen2.5-coder:3b`
+- Endpoints can also pre-provision local models during `bootstrap` by listing them under endpoint `ollama.models`; bootstrap will pull what fits and warn on oversized models.
 - Remove a local model:
   `run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b`
 - Sandbox smoke test:

@@ -128,7 +128,20 @@ function Remove-ModelEntry {
     )
 
     $changed = New-Object System.Collections.Generic.List[string]
-    if ($Config.ollama -and $Config.ollama.PSObject.Properties.Name -contains "models") {
+    if ($Config.PSObject.Properties.Name -contains "modelCatalog" -and $Config.modelCatalog) {
+        $remaining = @(
+            foreach ($entry in @($Config.modelCatalog)) {
+                if ($entry -and [string]$entry.id -ne $ModelId) {
+                    $entry
+                }
+            }
+        )
+        if (@($remaining).Count -ne @($Config.modelCatalog).Count) {
+            $Config.modelCatalog = $remaining
+            $changed.Add("modelCatalog")
+        }
+    }
+    elseif ($Config.ollama -and $Config.ollama.PSObject.Properties.Name -contains "models") {
         $remaining = @(
             foreach ($entry in @($Config.ollama.models)) {
                 if ($entry -and [string]$entry.id -ne $ModelId) {
@@ -142,49 +155,58 @@ function Remove-ModelEntry {
         }
     }
 
-    foreach ($endpoint in @($Config.ollama.endpoints)) {
+    $endpointCollection = if ($Config.PSObject.Properties.Name -contains "endpoints" -and $Config.endpoints) {
+        @($Config.endpoints)
+    }
+    else {
+        @($Config.ollama.endpoints)
+    }
+
+    foreach ($endpoint in $endpointCollection) {
         if ($null -eq $endpoint) {
             continue
         }
 
-        if ($endpoint.PSObject.Properties.Name -contains "models") {
+        $runtime = if ($endpoint.PSObject.Properties.Name -contains "ollama" -and $null -ne $endpoint.ollama) { $endpoint.ollama } else { $endpoint }
+
+        if ($runtime.PSObject.Properties.Name -contains "models") {
             $newModels = @(
-                foreach ($entry in @($endpoint.models)) {
+                foreach ($entry in @($runtime.models)) {
                     if ($entry -and [string]$entry.id -ne $ModelId) {
                         $entry
                     }
                 }
             )
-            if (@($newModels).Count -ne @($endpoint.models).Count) {
-                $endpoint.models = $newModels
+            if (@($newModels).Count -ne @($runtime.models).Count) {
+                $runtime.models = $newModels
                 $changed.Add("$([string]$endpoint.key).models")
             }
         }
 
-        if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds") {
+        if ($runtime.PSObject.Properties.Name -contains "desiredModelIds") {
             $newDesiredIds = @(
-                foreach ($desiredId in @($endpoint.desiredModelIds)) {
+                foreach ($desiredId in @($runtime.desiredModelIds)) {
                     if ([string]$desiredId -ne $ModelId) {
                         [string]$desiredId
                     }
                 }
             )
-            if (@($newDesiredIds).Count -ne @($endpoint.desiredModelIds).Count) {
-                $endpoint.desiredModelIds = $newDesiredIds
+            if (@($newDesiredIds).Count -ne @($runtime.desiredModelIds).Count) {
+                $runtime.desiredModelIds = $newDesiredIds
                 $changed.Add("$([string]$endpoint.key).desiredModelIds")
             }
         }
 
-        if ($endpoint.PSObject.Properties.Name -contains "modelOverrides") {
+        if ($runtime.PSObject.Properties.Name -contains "modelOverrides") {
             $newOverrides = @(
-                foreach ($override in @($endpoint.modelOverrides)) {
+                foreach ($override in @($runtime.modelOverrides)) {
                     if ($override -and [string]$override.id -ne $ModelId) {
                         $override
                     }
                 }
             )
-            if (@($newOverrides).Count -ne @($endpoint.modelOverrides).Count) {
-                $endpoint.modelOverrides = $newOverrides
+            if (@($newOverrides).Count -ne @($runtime.modelOverrides).Count) {
+                $runtime.modelOverrides = $newOverrides
                 $changed.Add("$([string]$endpoint.key).modelOverrides")
             }
         }

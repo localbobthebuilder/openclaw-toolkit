@@ -391,18 +391,33 @@ function Set-EndpointModelEntry {
         [Parameter(Mandatory = $true)]$ModelEntry
     )
 
-    foreach ($endpoint in @($Config.ollama.endpoints)) {
+    $endpointCollection = if ($Config.PSObject.Properties.Name -contains "endpoints" -and $Config.endpoints) {
+        @($Config.endpoints)
+    }
+    else {
+        @($Config.ollama.endpoints)
+    }
+
+    foreach ($endpoint in $endpointCollection) {
         if ([string]$endpoint.key -ne $EndpointKey) {
             continue
         }
 
-        if (-not ($endpoint.PSObject.Properties.Name -contains "models")) {
-            $endpoint | Add-Member -NotePropertyName models -NotePropertyValue @()
+        $runtime = $null
+        if ($endpoint.PSObject.Properties.Name -contains "ollama" -and $null -ne $endpoint.ollama) {
+            $runtime = $endpoint.ollama
+        }
+        else {
+            $runtime = $endpoint
+        }
+
+        if (-not ($runtime.PSObject.Properties.Name -contains "models")) {
+            $runtime | Add-Member -NotePropertyName models -NotePropertyValue @()
         }
 
         $models = New-Object System.Collections.Generic.List[object]
         $replaced = $false
-        foreach ($existingModel in @($endpoint.models)) {
+        foreach ($existingModel in @($runtime.models)) {
             if ($existingModel -and [string]$existingModel.id -eq [string]$ModelEntry.id) {
                 $models.Add($ModelEntry)
                 $replaced = $true
@@ -415,12 +430,12 @@ function Set-EndpointModelEntry {
             $models.Add($ModelEntry)
         }
 
-        $endpoint.models = $models.ToArray()
-        if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds") {
-            $null = $endpoint.PSObject.Properties.Remove("desiredModelIds")
+        $runtime.models = $models.ToArray()
+        if ($runtime.PSObject.Properties.Name -contains "desiredModelIds") {
+            $null = $runtime.PSObject.Properties.Remove("desiredModelIds")
         }
-        if ($endpoint.PSObject.Properties.Name -contains "modelOverrides") {
-            $null = $endpoint.PSObject.Properties.Remove("modelOverrides")
+        if ($runtime.PSObject.Properties.Name -contains "modelOverrides") {
+            $null = $runtime.PSObject.Properties.Remove("modelOverrides")
         }
         return
     }

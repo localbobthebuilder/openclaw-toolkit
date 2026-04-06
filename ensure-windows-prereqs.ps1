@@ -12,6 +12,7 @@ if (-not $ConfigPath) {
 }
 
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-config-paths.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 
 function Write-Step {
     param([string]$Message)
@@ -351,7 +352,7 @@ $autoInstall = -not $CheckOnly
 $isAdmin = Test-IsAdministrator
 $hasWinget = Test-CommandExists "winget"
 $requiresTailscale = [bool]($config.tailscale -and $config.tailscale.enableServe)
-$requiresOllama = [bool]($config.ollama -and $config.ollama.enabled)
+$requiresOllama = [bool]($config.ollama -and $config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config))
 # Track which tools were already present before this run
 $dockerPresentBefore = Test-CommandExists "docker"
 

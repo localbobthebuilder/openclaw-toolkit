@@ -558,7 +558,7 @@ export class ToolkitDashboard extends LitElement {
         <div style="display: flex; gap: 10px;">
           <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
           <div class="tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</div>
-          <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Ollama Endpoints</div>
+          <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
           <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
           <div class="tab ${this.configSection === 'roles' ? 'active' : ''}" @click=${() => this.configSection = 'roles'}>Role Policies</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
@@ -700,12 +700,55 @@ export class ToolkitDashboard extends LitElement {
     `;
   }
 
-  getEndpointModels(endpoint: any) {
-    if (Array.isArray(endpoint?.models)) {
-      return endpoint.models;
+  getConfigEndpoints() {
+    if (Array.isArray(this.config?.endpoints)) {
+      return this.config.endpoints;
     }
-    if (Array.isArray(endpoint?.modelOverrides)) {
-      return endpoint.modelOverrides;
+    if (Array.isArray(this.config?.ollama?.endpoints)) {
+      return this.config.ollama.endpoints;
+    }
+    return [];
+  }
+
+  getEndpointOllama(endpoint: any) {
+    if (endpoint?.ollama && typeof endpoint.ollama === 'object') {
+      return endpoint.ollama;
+    }
+    if (endpoint && (endpoint.baseUrl || endpoint.hostBaseUrl || endpoint.providerId || Array.isArray(endpoint.models) || Array.isArray(endpoint.modelOverrides))) {
+      return endpoint;
+    }
+    return null;
+  }
+
+  ensureEndpointOllama(endpoint: any) {
+    let runtime = this.getEndpointOllama(endpoint);
+    if (runtime && runtime !== endpoint) {
+      return runtime;
+    }
+    if (runtime === endpoint) {
+      return endpoint;
+    }
+
+    const suffix = String(endpoint?.key || 'local').replace(/[^a-zA-Z0-9-]/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'local';
+    endpoint.ollama = {
+      enabled: true,
+      providerId: suffix === 'local' ? 'ollama' : `ollama-${suffix}`,
+      hostBaseUrl: 'http://127.0.0.1:11434',
+      baseUrl: 'http://host.docker.internal:11434',
+      apiKey: suffix === 'local' ? 'ollama-local' : `ollama-${suffix}`,
+      autoPullMissingModels: true,
+      models: []
+    };
+    return endpoint.ollama;
+  }
+
+  getEndpointModels(endpoint: any) {
+    const runtime = this.getEndpointOllama(endpoint);
+    if (Array.isArray(runtime?.models)) {
+      return runtime.models;
+    }
+    if (Array.isArray(runtime?.modelOverrides)) {
+      return runtime.modelOverrides;
     }
     return [];
   }
@@ -721,21 +764,65 @@ export class ToolkitDashboard extends LitElement {
 
   sanitizeConfigModelNames(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
-    if (!clone?.ollama) return clone;
+    if (!clone) return clone;
+    if (!clone.ollama) clone.ollama = {};
 
-    if (Array.isArray(clone.ollama.models)) {
-      clone.ollama.models = this.sanitizeModelEntries(clone.ollama.models);
+    const normalizeEndpoint = (endpoint: any) => {
+      const normalized: any = {
+        key: endpoint?.key || 'local',
+        default: !!endpoint?.default
+      };
+
+      if (endpoint?.name) normalized.name = endpoint.name;
+      if (endpoint?.telemetry) normalized.telemetry = endpoint.telemetry;
+      if (Array.isArray(endpoint?.hostedModels)) {
+        normalized.hostedModels = this.sanitizeModelEntries(endpoint.hostedModels);
+      }
+
+      const rawRuntime = endpoint?.ollama || endpoint;
+      const hasRuntime = !!endpoint?.ollama ||
+        !!endpoint?.baseUrl ||
+        !!endpoint?.hostBaseUrl ||
+        !!endpoint?.providerId ||
+        Array.isArray(endpoint?.models) ||
+        Array.isArray(endpoint?.modelOverrides) ||
+        Array.isArray(endpoint?.desiredModelIds);
+
+      if (hasRuntime) {
+        const runtime: any = {};
+        if (rawRuntime?.enabled === false) runtime.enabled = false;
+        if (rawRuntime?.providerId) runtime.providerId = rawRuntime.providerId;
+        if (rawRuntime?.baseUrl) runtime.baseUrl = rawRuntime.baseUrl;
+        if (rawRuntime?.hostBaseUrl) runtime.hostBaseUrl = rawRuntime.hostBaseUrl;
+        if (rawRuntime?.apiKey) runtime.apiKey = rawRuntime.apiKey;
+        if (typeof rawRuntime?.autoPullMissingModels === 'boolean') {
+          runtime.autoPullMissingModels = rawRuntime.autoPullMissingModels;
+        }
+        if (Array.isArray(rawRuntime?.models)) {
+          runtime.models = this.sanitizeModelEntries(rawRuntime.models);
+        } else if (Array.isArray(rawRuntime?.modelOverrides)) {
+          runtime.models = this.sanitizeModelEntries(rawRuntime.modelOverrides);
+        }
+        normalized.ollama = runtime;
+      }
+
+      return normalized;
+    };
+
+    if (Array.isArray(clone.modelCatalog)) {
+      clone.modelCatalog = this.sanitizeModelEntries(clone.modelCatalog);
+    } else if (Array.isArray(clone.ollama.models)) {
+      clone.modelCatalog = this.sanitizeModelEntries(clone.ollama.models);
+      delete clone.ollama.models;
     }
 
-    if (Array.isArray(clone.ollama.endpoints)) {
-      for (const endpoint of clone.ollama.endpoints) {
-        if (Array.isArray(endpoint?.models)) {
-          endpoint.models = this.sanitizeModelEntries(endpoint.models);
-        }
-        if (Array.isArray(endpoint?.hostedModels)) {
-          endpoint.hostedModels = this.sanitizeModelEntries(endpoint.hostedModels);
-        }
-      }
+    if (Array.isArray(clone.endpoints)) {
+      clone.endpoints = clone.endpoints.map((endpoint: any) => normalizeEndpoint(endpoint));
+    } else if (Array.isArray(clone.ollama.endpoints)) {
+      clone.endpoints = clone.ollama.endpoints.map((endpoint: any) => normalizeEndpoint(endpoint));
+      delete clone.ollama.endpoints;
+    } else {
+      clone.endpoints = [];
     }
 
     return clone;
@@ -763,6 +850,9 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getSharedModelCatalog() {
+    if (Array.isArray(this.config?.modelCatalog)) {
+      return this.config.modelCatalog;
+    }
     if (Array.isArray(this.config?.ollama?.models)) {
       return this.config.ollama.models;
     }
@@ -780,7 +870,7 @@ export class ToolkitDashboard extends LitElement {
       }
     }
 
-    for (const endpoint of this.config?.ollama?.endpoints || []) {
+    for (const endpoint of this.getConfigEndpoints()) {
       for (const model of this.getEndpointModels(endpoint)) {
         if (this.isLocalCatalogModel(model) && !seen.has(model.id)) {
           seen.add(model.id);
@@ -803,7 +893,7 @@ export class ToolkitDashboard extends LitElement {
       }
     }
 
-    for (const endpoint of this.config?.ollama?.endpoints || []) {
+    for (const endpoint of this.getConfigEndpoints()) {
       for (const model of this.getEndpointHostedModels(endpoint)) {
         if (this.isHostedCatalogModel(model) && !seen.has(model.modelRef)) {
           seen.add(model.modelRef);
@@ -816,13 +906,13 @@ export class ToolkitDashboard extends LitElement {
   }
 
   ensureSharedModelCatalog() {
-    if (!Array.isArray(this.config?.ollama?.models)) {
-      this.config.ollama.models = [
+    if (!Array.isArray(this.config?.modelCatalog)) {
+      this.config.modelCatalog = [
         ...this.getKnownLocalModelCatalog().map((model: any) => this.cloneModelCatalogEntry(model)),
         ...this.getKnownHostedModelCatalog().map((model: any) => this.cloneModelCatalogEntry(model))
       ];
     }
-    return this.config.ollama.models;
+    return this.config.modelCatalog;
   }
 
   getOllamaModelCatalog() {
@@ -834,34 +924,39 @@ export class ToolkitDashboard extends LitElement {
         return this.renderEndpointEditor(this.editingEndpointKey);
     }
 
+    const endpoints = this.getConfigEndpoints();
+
     return html`
       <div class="card">
         <div class="card-header">
-          <h3>Ollama Endpoints</h3>
+          <h3>Endpoints</h3>
           <button class="btn btn-ghost" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">These endpoints are Ollama runtimes. Each machine has its own local model catalog and optional hosted model pool.</p>
-        ${repeat(this.config.ollama.endpoints, (ep: any) => ep.key, (ep: any, idx) => html`
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines or PCs. Each one can expose a local Ollama runtime, a hosted model pool, or both.</p>
+        ${repeat(endpoints, (ep: any) => ep.key, (ep: any, idx) => {
+          const runtime = this.getEndpointOllama(ep);
+          return html`
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${ep.key}</span>
-              <span class="item-sub">${ep.hostBaseUrl} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted</span>
+              <span class="item-sub">${runtime?.hostBaseUrl || 'Hosted-only endpoint'} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted</span>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure & Tune Models</button>
+              <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure Endpoint</button>
               <button class="btn btn-danger" @click=${() => this.removeEndpoint(idx)}>Remove</button>
             </div>
           </div>
-        `)}
+        `})}
       </div>
     `;
   }
 
   renderEndpointEditor(key: string) {
-      const ep = this.config.ollama.endpoints.find((e: any) => e.key === key);
+      const ep = this.getConfigEndpoints().find((e: any) => e.key === key);
       if (!ep) return html`Endpoint not found`;
       const endpointModels = this.getEndpointModels(ep);
       const endpointHostedModels = this.getEndpointHostedModels(ep);
+      const runtime = this.getEndpointOllama(ep);
 
       return html`
         <div class="card">
@@ -872,17 +967,67 @@ export class ToolkitDashboard extends LitElement {
 
             <div class="grid-2">
                 <div class="form-group">
-                    <label>Base URL (Inside Docker)</label>
-                    <input type="text" .value=${ep.baseUrl} @input=${(e: any) => { ep.baseUrl = e.target.value; this.requestUpdate(); }}>
+                    <label>Endpoint Key</label>
+                    <input type="text" .value=${ep.key} disabled>
                 </div>
                 <div class="form-group">
-                    <label>Host Base URL (Direct Access)</label>
-                    <input type="text" .value=${ep.hostBaseUrl} @input=${(e: any) => { ep.hostBaseUrl = e.target.value; this.requestUpdate(); }}>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${!!ep.default} @change=${(e: any) => {
+                            if (e.target.checked) {
+                                for (const endpoint of this.getConfigEndpoints()) {
+                                    endpoint.default = endpoint.key === ep.key;
+                                }
+                            } else {
+                                ep.default = false;
+                            }
+                            this.requestUpdate();
+                        }}>
+                        Default endpoint
+                    </label>
                 </div>
             </div>
 
-            <h4 style="color: #666; margin-top: 20px;">Endpoint Models</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this endpoint. Bootstrap will pull them when they fit the machine.</p>
+            <div class="form-group" style="margin-top: 16px;">
+                <label class="toggle-switch">
+                    <input type="checkbox" ?checked=${!!runtime} @change=${(e: any) => {
+                        if (e.target.checked) {
+                            this.ensureEndpointOllama(ep);
+                        } else {
+                            delete ep.ollama;
+                        }
+                        this.requestUpdate();
+                    }}>
+                    This endpoint has a local Ollama runtime
+                </label>
+            </div>
+
+            ${runtime ? html`
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Base URL (Inside Docker)</label>
+                    <input type="text" .value=${runtime.baseUrl || ''} @input=${(e: any) => { runtime.baseUrl = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                    <label>Host Base URL (Direct Access)</label>
+                    <input type="text" .value=${runtime.hostBaseUrl || ''} @input=${(e: any) => { runtime.hostBaseUrl = e.target.value; this.requestUpdate(); }}>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Provider ID</label>
+                    <input type="text" .value=${runtime.providerId || ''} @input=${(e: any) => { runtime.providerId = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" ?checked=${runtime.autoPullMissingModels !== false} @change=${(e: any) => { runtime.autoPullMissingModels = e.target.checked; this.requestUpdate(); }}>
+                        Auto-pull missing local models when they fit
+                    </label>
+                </div>
+            </div>
+
+            <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine.</p>
              
             ${endpointModels.map((mo: any, idx: number) => html`
                 <div class="item-row">
@@ -900,9 +1045,12 @@ export class ToolkitDashboard extends LitElement {
             <div style="margin-top: 20px;">
                 <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Add Local Model from Catalog</button>
             </div>
+            ` : html`
+            <div class="item-sub" style="margin-top: 20px;">This endpoint is currently hosted-only. Enable the local runtime toggle above if this machine should run Ollama too.</div>
+            `}
 
             <h4 style="color: #666; margin-top: 24px;">Hosted Models</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models for this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs.</p>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models available from this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs.</p>
 
             ${endpointHostedModels.map((model: any, idx: number) => html`
                 <div class="item-row">
@@ -956,7 +1104,7 @@ export class ToolkitDashboard extends LitElement {
               this.runCommand('add-local-model', ['-Model', modelId, '-EndpointKey', this.editingEndpointKey!, '-MaxContextWindow', maxCtx, '-SkipBootstrap']);
           }
       } else if (this.selectorTarget === 'endpoint-hosted') {
-          const endpoint = this.config.ollama.endpoints.find((e: any) => e.key === this.editingEndpointKey);
+          const endpoint = this.getConfigEndpoints().find((e: any) => e.key === this.editingEndpointKey);
           const catalogEntry = this.getKnownHostedModelCatalog().find((entry: any) => entry.modelRef === modelId);
           if (!endpoint || !catalogEntry) return;
           if (!Array.isArray(endpoint.hostedModels)) endpoint.hostedModels = [];
@@ -985,7 +1133,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderModelsConfig() {
-    const hasSharedCatalog = Array.isArray(this.config?.ollama?.models);
+    const hasSharedCatalog = Array.isArray(this.config?.modelCatalog) || Array.isArray(this.config?.ollama?.models);
     const localModels = hasSharedCatalog ? this.getSharedModelCatalog().filter((model: any) => this.isLocalCatalogModel(model)) : this.getKnownLocalModelCatalog();
     const hostedModels = hasSharedCatalog ? this.getSharedModelCatalog().filter((model: any) => this.isHostedCatalogModel(model)) : this.getKnownHostedModelCatalog();
     return html`
@@ -1198,12 +1346,13 @@ export class ToolkitDashboard extends LitElement {
     if (!agent) return html`Agent not found`;
     const isExtra = key.startsWith('extra:');
 
-    const endpoints = (this.config.ollama.endpoints || []).map((e: any) => e.key);
+    const endpoints = this.getConfigEndpoints();
+    const localEndpoints = endpoints.filter((endpoint: any) => !!this.getEndpointOllama(endpoint));
     const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
     const subagents = agent.subagents || (agent.subagents = {});
     const effectiveWorkspaceMode = agent.workspaceMode || (this.config.multiAgent.sharedWorkspace?.enabled ? 'shared' : 'private');
     
-    const selectedEndpoint = this.config.ollama.endpoints.find((e: any) => e.key === agent.endpointKey);
+    const selectedEndpoint = endpoints.find((e: any) => e.key === agent.endpointKey);
     const availableTunedModels = selectedEndpoint ? this.getEndpointModels(selectedEndpoint).map((mo: any) => mo.id) : [];
     const availableHostedModels = selectedEndpoint ? this.getEndpointHostedModels(selectedEndpoint).map((model: any) => model.modelRef) : [];
 
@@ -1293,7 +1442,7 @@ export class ToolkitDashboard extends LitElement {
                         <label>Endpoint</label>
                         <select @change=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
                             <option value="">Select Endpoint</option>
-                            ${endpoints.map((ep: string) => html`<option value=${ep} ?selected=${agent.endpointKey === ep}>${ep}</option>`)}
+                            ${localEndpoints.map((ep: any) => html`<option value=${ep.key} ?selected=${agent.endpointKey === ep.key}>${ep.key}</option>`)}
                         </select>
                     </div>
                     <div class="form-group">
@@ -1313,7 +1462,7 @@ export class ToolkitDashboard extends LitElement {
                         <label>Endpoint (optional)</label>
                         <select @change=${(e: any) => { agent.endpointKey = e.target.value; this.requestUpdate(); }}>
                             <option value="">No endpoint</option>
-                            ${endpoints.map((ep: string) => html`<option value=${ep} ?selected=${agent.endpointKey === ep}>${ep}</option>`)}
+                            ${endpoints.map((ep: any) => html`<option value=${ep.key} ?selected=${agent.endpointKey === ep.key}>${ep.key}</option>`)}
                         </select>
                     </div>
                     <div class="form-group">
@@ -1496,15 +1645,28 @@ export class ToolkitDashboard extends LitElement {
   addEndpoint() {
     const key = prompt('Endpoint Key:');
     if (key) {
-        if (!this.config.ollama.endpoints) this.config.ollama.endpoints = [];
-        this.config.ollama.endpoints.push({ key, providerId: 'ollama', hostBaseUrl: 'http://127.0.0.1:11434', baseUrl: 'http://host.docker.internal:11434', models: [] });
+        if (!this.config.endpoints) this.config.endpoints = [];
+        this.config.endpoints.push({
+            key,
+            default: this.getConfigEndpoints().length === 0,
+            hostedModels: [],
+            ollama: {
+                enabled: true,
+                providerId: key === 'local' ? 'ollama' : `ollama-${key}`,
+                hostBaseUrl: 'http://127.0.0.1:11434',
+                baseUrl: 'http://host.docker.internal:11434',
+                apiKey: key === 'local' ? 'ollama-local' : `ollama-${key}`,
+                autoPullMissingModels: true,
+                models: []
+            }
+        });
         this.requestUpdate();
     }
   }
 
   removeEndpoint(idx: number) {
     if (confirm('Remove endpoint?')) {
-        this.config.ollama.endpoints.splice(idx, 1);
+        this.getConfigEndpoints().splice(idx, 1);
         this.requestUpdate();
     }
   }
@@ -1541,16 +1703,16 @@ export class ToolkitDashboard extends LitElement {
   }
 
   removeModel(idx: number) {
-      if (!Array.isArray(this.config?.ollama?.models)) return;
+      if (!Array.isArray(this.config?.modelCatalog)) return;
       if (confirm('Remove model?')) {
-          this.config.ollama.models.splice(idx, 1);
+          this.config.modelCatalog.splice(idx, 1);
           this.requestUpdate();
       }
   }
 
   editModel(idx: number) {
-      if (!Array.isArray(this.config?.ollama?.models)) return;
-      const m = this.config.ollama.models[idx];
+      if (!Array.isArray(this.config?.modelCatalog)) return;
+      const m = this.config.modelCatalog[idx];
       if (m.modelRef) {
           const fallback = prompt('Optional local fallback model ID:', m.fallbackModelId || '');
           if (fallback && fallback.trim()) {

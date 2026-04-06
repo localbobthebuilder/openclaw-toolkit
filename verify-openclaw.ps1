@@ -609,7 +609,7 @@ if ((Test-CheckRequested -Names @("voice")) -and $config.voiceNotes.enabled) {
     $voiceSmokeTestOutput = Invoke-LoggedScript -Label "Voice-note smoke test" -ScriptPath $voiceTestScript -SkipMessage "Voice smoke test skipped: script not found."
 }
 $localModelSmokeTestOutput = "Local model smoke test skipped."
-if ((Test-CheckRequested -Names @("local-model")) -and $config.ollama.enabled) {
+if ((Test-CheckRequested -Names @("local-model")) -and $config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)) {
     $localModelScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-local-models.ps1"
     $localModelSmokeTestOutput = Invoke-LoggedScript -Label "Local model smoke test" -ScriptPath $localModelScript -SkipMessage "Local model smoke test skipped: script not found."
 }
@@ -768,7 +768,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled -and $config.multiAgent.remoteCoderAgent.modelRef) {
             $expectedModelRefs = Add-UniqueString -List $expectedModelRefs -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$config.multiAgent.remoteCoderAgent.modelRef))
         }
-        if ($config.ollama -and $config.ollama.enabled) {
+        if ($config.ollama -and $config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)) {
             foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $config)) {
                 foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $config -EndpointKey ([string]$endpoint.key))) {
                     if ($model.id) {

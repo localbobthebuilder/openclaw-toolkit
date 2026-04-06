@@ -2024,7 +2024,7 @@ Ensure-AgentBootstrapOverlayHook -Config $config
 Set-OpenClawConfigValue -Path "models.mode" -Value "merge"
 
 $ollamaState = $null
-if ($config.ollama.enabled) {
+if ($config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)) {
     $ollamaState = Ensure-OllamaState -Config $config
 }
 
@@ -2080,7 +2080,7 @@ if ($config.contextManagement) {
     }
 }
 
-if ($config.ollama.enabled) {
+if ($config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)) {
     if ($ollamaState -and $ollamaState.Reachable) {
         foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $config)) {
             if ($ollamaState.ProviderEntries.Contains($endpoint.providerId)) {

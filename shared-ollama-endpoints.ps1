@@ -11,88 +11,83 @@ function Normalize-ToolkitOllamaModelEntries {
     return $normalized.ToArray()
 }
 
-function Get-ToolkitLegacyLocalModelCatalog {
+function Normalize-ToolkitHostedModelEntries {
+    param($Entries)
+
+    $normalized = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($Entries)) {
+        if ($entry -and $entry.PSObject.Properties.Name -contains "modelRef" -and -not [string]::IsNullOrWhiteSpace([string]$entry.modelRef)) {
+            $normalized.Add($entry)
+        }
+    }
+
+    return $normalized.ToArray()
+}
+
+function Get-ToolkitSharedModelCatalog {
     param([Parameter(Mandatory = $true)]$Config)
 
+    if ($Config.PSObject.Properties.Name -contains "modelCatalog" -and $Config.modelCatalog) {
+        return @($Config.modelCatalog)
+    }
+
     if ($Config.ollama -and $Config.ollama.models) {
-        return @(Normalize-ToolkitOllamaModelEntries -Entries $Config.ollama.models)
+        return @($Config.ollama.models)
     }
 
     return @()
 }
 
-function Get-ToolkitOllamaEndpoints {
+function Get-ToolkitLegacyLocalModelCatalog {
     param([Parameter(Mandatory = $true)]$Config)
 
-    $endpoints = @()
-    if ($Config.ollama -and $Config.ollama.PSObject.Properties.Name -contains "endpoints" -and $Config.ollama.endpoints) {
-        $endpoints = @($Config.ollama.endpoints)
+    return @(Normalize-ToolkitOllamaModelEntries -Entries (Get-ToolkitSharedModelCatalog -Config $Config))
+}
+
+function Get-ToolkitEndpoints {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $rawEndpoints = @()
+    if ($Config.PSObject.Properties.Name -contains "endpoints" -and $Config.endpoints) {
+        $rawEndpoints = @($Config.endpoints)
+    }
+    elseif ($Config.ollama -and $Config.ollama.PSObject.Properties.Name -contains "endpoints" -and $Config.ollama.endpoints) {
+        $rawEndpoints = @($Config.ollama.endpoints)
     }
     elseif ($Config.ollama -and $Config.ollama.enabled) {
         $legacy = [ordered]@{
-            key        = "local"
-            providerId = "ollama"
-            baseUrl    = if ($Config.ollama.baseUrl) { [string]$Config.ollama.baseUrl } else { "http://127.0.0.1:11434" }
-            apiKey     = if ($Config.ollama.apiKey) { [string]$Config.ollama.apiKey } else { "ollama-local" }
-            default    = $true
-            telemetry  = [ordered]@{
+            key      = "local"
+            default  = $true
+            telemetry = [ordered]@{
                 kind = "local-nvidia-smi"
             }
+            ollama   = [ordered]@{
+                enabled             = $true
+                providerId          = "ollama"
+                baseUrl             = if ($Config.ollama.baseUrl) { [string]$Config.ollama.baseUrl } else { "http://127.0.0.1:11434" }
+                hostBaseUrl         = if ($Config.ollama.hostBaseUrl) { [string]$Config.ollama.hostBaseUrl } else { "http://127.0.0.1:11434" }
+                apiKey              = if ($Config.ollama.apiKey) { [string]$Config.ollama.apiKey } else { "ollama-local" }
+                autoPullMissingModels = $true
+            }
         }
-        $endpoints = @([pscustomobject]$legacy)
+        $rawEndpoints = @([pscustomobject]$legacy)
     }
 
     $normalized = New-Object System.Collections.Generic.List[object]
     $sawDefault = $false
-    foreach ($endpoint in @($endpoints)) {
+    foreach ($endpoint in @($rawEndpoints)) {
         if ($null -eq $endpoint) {
             continue
         }
 
-        $key = if ($endpoint.key) { [string]$endpoint.key } else { "local" }
-        $providerId = if ($endpoint.PSObject.Properties.Name -contains "providerId" -and $endpoint.providerId) {
-            [string]$endpoint.providerId
-        }
-        elseif ($key -eq "local") {
-            "ollama"
-        }
-        else {
-            "ollama-" + (($key -replace '[^a-zA-Z0-9-]', '-').Trim('-').ToLowerInvariant())
-        }
-
+        $key = if ($endpoint.PSObject.Properties.Name -contains "key" -and $endpoint.key) { [string]$endpoint.key } else { "local" }
         $item = [ordered]@{
-            key               = $key
-            providerId        = $providerId
-            baseUrl           = if ($endpoint.baseUrl) { [string]$endpoint.baseUrl } else { "http://127.0.0.1:11434" }
-            hostBaseUrl       = if ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) {
-                [string]$endpoint.hostBaseUrl
-            }
-            elseif ($endpoint.baseUrl) {
-                [string]$endpoint.baseUrl
-            }
-            else {
-                "http://127.0.0.1:11434"
-            }
-            apiKey            = if ($endpoint.apiKey) { [string]$endpoint.apiKey } else { "ollama-$key" }
-            default           = [bool]($endpoint.PSObject.Properties.Name -contains "default" -and $endpoint.default)
-            usesEndpointModels = [bool]($endpoint.PSObject.Properties.Name -contains "models")
-            models            = @(
-                if ($endpoint.PSObject.Properties.Name -contains "models" -and $endpoint.models) {
-                    Normalize-ToolkitOllamaModelEntries -Entries $endpoint.models
-                }
-            )
-            legacyDesiredModelIds = @(
-                if ($endpoint.PSObject.Properties.Name -contains "desiredModelIds" -and $endpoint.desiredModelIds) {
-                    foreach ($modelId in @($endpoint.desiredModelIds)) {
-                        if (-not [string]::IsNullOrWhiteSpace([string]$modelId)) {
-                            [string]$modelId
-                        }
-                    }
-                }
-            )
-            legacyModelOverrides = @(
-                if ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $endpoint.modelOverrides) {
-                    Normalize-ToolkitOllamaModelEntries -Entries $endpoint.modelOverrides
+            key          = $key
+            name         = if ($endpoint.PSObject.Properties.Name -contains "name" -and $endpoint.name) { [string]$endpoint.name } else { $key }
+            default      = [bool]($endpoint.PSObject.Properties.Name -contains "default" -and $endpoint.default)
+            hostedModels = @(
+                if ($endpoint.PSObject.Properties.Name -contains "hostedModels" -and $endpoint.hostedModels) {
+                    Normalize-ToolkitHostedModelEntries -Entries $endpoint.hostedModels
                 }
             )
         }
@@ -101,11 +96,73 @@ function Get-ToolkitOllamaEndpoints {
             $item.telemetry = $endpoint.telemetry
         }
 
-        if ($endpoint.PSObject.Properties.Name -contains "autoPullMissingModels") {
-            $item.autoPullMissingModels = [bool]$endpoint.autoPullMissingModels
+        $rawOllama = $null
+        if ($endpoint.PSObject.Properties.Name -contains "ollama" -and $null -ne $endpoint.ollama) {
+            $rawOllama = $endpoint.ollama
         }
-        else {
-            $item.autoPullMissingModels = $true
+        elseif ($endpoint.PSObject.Properties.Name -contains "baseUrl" -or
+                $endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -or
+                $endpoint.PSObject.Properties.Name -contains "providerId" -or
+                $endpoint.PSObject.Properties.Name -contains "models" -or
+                $endpoint.PSObject.Properties.Name -contains "desiredModelIds" -or
+                $endpoint.PSObject.Properties.Name -contains "modelOverrides") {
+            $rawOllama = $endpoint
+        }
+
+        if ($null -ne $rawOllama) {
+            $ollamaEnabled = $true
+            if ($rawOllama.PSObject.Properties.Name -contains "enabled" -and $null -ne $rawOllama.enabled) {
+                $ollamaEnabled = [bool]$rawOllama.enabled
+            }
+
+            if ($ollamaEnabled) {
+                $providerId = if ($rawOllama.PSObject.Properties.Name -contains "providerId" -and $rawOllama.providerId) {
+                    [string]$rawOllama.providerId
+                }
+                elseif ($key -eq "local") {
+                    "ollama"
+                }
+                else {
+                    "ollama-" + (($key -replace '[^a-zA-Z0-9-]', '-').Trim('-').ToLowerInvariant())
+                }
+
+                $item.ollama = [pscustomobject][ordered]@{
+                    enabled               = $true
+                    providerId            = $providerId
+                    baseUrl               = if ($rawOllama.PSObject.Properties.Name -contains "baseUrl" -and $rawOllama.baseUrl) { [string]$rawOllama.baseUrl } else { "http://127.0.0.1:11434" }
+                    hostBaseUrl           = if ($rawOllama.PSObject.Properties.Name -contains "hostBaseUrl" -and $rawOllama.hostBaseUrl) {
+                        [string]$rawOllama.hostBaseUrl
+                    }
+                    elseif ($rawOllama.PSObject.Properties.Name -contains "baseUrl" -and $rawOllama.baseUrl) {
+                        [string]$rawOllama.baseUrl
+                    }
+                    else {
+                        "http://127.0.0.1:11434"
+                    }
+                    apiKey                = if ($rawOllama.PSObject.Properties.Name -contains "apiKey" -and $rawOllama.apiKey) { [string]$rawOllama.apiKey } else { "ollama-$key" }
+                    autoPullMissingModels = if ($rawOllama.PSObject.Properties.Name -contains "autoPullMissingModels") { [bool]$rawOllama.autoPullMissingModels } else { $true }
+                    usesEndpointModels    = [bool]($rawOllama.PSObject.Properties.Name -contains "models")
+                    models                = @(
+                        if ($rawOllama.PSObject.Properties.Name -contains "models" -and $rawOllama.models) {
+                            Normalize-ToolkitOllamaModelEntries -Entries $rawOllama.models
+                        }
+                    )
+                    legacyDesiredModelIds = @(
+                        if ($rawOllama.PSObject.Properties.Name -contains "desiredModelIds" -and $rawOllama.desiredModelIds) {
+                            foreach ($modelId in @($rawOllama.desiredModelIds)) {
+                                if (-not [string]::IsNullOrWhiteSpace([string]$modelId)) {
+                                    [string]$modelId
+                                }
+                            }
+                        }
+                    )
+                    legacyModelOverrides  = @(
+                        if ($rawOllama.PSObject.Properties.Name -contains "modelOverrides" -and $rawOllama.modelOverrides) {
+                            Normalize-ToolkitOllamaModelEntries -Entries $rawOllama.modelOverrides
+                        }
+                    )
+                }
+            }
         }
 
         if ($item.default) {
@@ -120,6 +177,88 @@ function Get-ToolkitOllamaEndpoints {
     }
 
     return $normalized.ToArray()
+}
+
+function Get-ToolkitDefaultEndpoint {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    foreach ($endpoint in @(Get-ToolkitEndpoints -Config $Config)) {
+        if ($endpoint.default) {
+            return $endpoint
+        }
+    }
+
+    return $null
+}
+
+function Get-ToolkitEndpoint {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$EndpointKey
+    )
+
+    $endpoints = @(Get-ToolkitEndpoints -Config $Config)
+    if ([string]::IsNullOrWhiteSpace($EndpointKey)) {
+        return (Get-ToolkitDefaultEndpoint -Config $Config)
+    }
+
+    foreach ($endpoint in $endpoints) {
+        if ([string]$endpoint.key -eq $EndpointKey) {
+            return $endpoint
+        }
+    }
+
+    return $null
+}
+
+function Get-ToolkitEndpointHostedModelCatalog {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [string]$EndpointKey
+    )
+
+    $endpoint = Get-ToolkitEndpoint -Config $Config -EndpointKey $EndpointKey
+    if ($null -eq $endpoint) {
+        return @()
+    }
+
+    return @($endpoint.hostedModels)
+}
+
+function Get-ToolkitOllamaEndpoints {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $ollamaEndpoints = New-Object System.Collections.Generic.List[object]
+    foreach ($endpoint in @(Get-ToolkitEndpoints -Config $Config)) {
+        if (-not ($endpoint.PSObject.Properties.Name -contains "ollama") -or $null -eq $endpoint.ollama) {
+            continue
+        }
+
+        $runtime = $endpoint.ollama
+        $item = [ordered]@{
+            key                   = [string]$endpoint.key
+            name                  = [string]$endpoint.name
+            default               = [bool]$endpoint.default
+            providerId            = [string]$runtime.providerId
+            baseUrl               = [string]$runtime.baseUrl
+            hostBaseUrl           = [string]$runtime.hostBaseUrl
+            apiKey                = [string]$runtime.apiKey
+            autoPullMissingModels = [bool]$runtime.autoPullMissingModels
+            usesEndpointModels    = [bool]$runtime.usesEndpointModels
+            models                = @($runtime.models)
+            legacyDesiredModelIds = @($runtime.legacyDesiredModelIds)
+            legacyModelOverrides  = @($runtime.legacyModelOverrides)
+            hostedModels          = @($endpoint.hostedModels)
+        }
+
+        if ($endpoint.PSObject.Properties.Name -contains "telemetry" -and $endpoint.telemetry) {
+            $item.telemetry = $endpoint.telemetry
+        }
+
+        $ollamaEndpoints.Add([pscustomobject]$item)
+    }
+
+    return $ollamaEndpoints.ToArray()
 }
 
 function Get-ToolkitDefaultOllamaEndpoint {
@@ -162,6 +301,12 @@ function Get-ToolkitOllamaProviderIds {
             [string]$endpoint.providerId
         }
     )
+}
+
+function Test-ToolkitHasOllamaEndpoints {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    return (@(Get-ToolkitOllamaEndpoints -Config $Config).Count -gt 0)
 }
 
 function Get-ToolkitOllamaHostBaseUrl {
@@ -244,7 +389,10 @@ function Get-AgentOllamaEndpointKey {
     if ($null -ne $AgentConfig -and
         $AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
         -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
-        return [string]$AgentConfig.endpointKey
+        $explicit = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey ([string]$AgentConfig.endpointKey)
+        if ($null -ne $explicit) {
+            return [string]$explicit.key
+        }
     }
 
     $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config

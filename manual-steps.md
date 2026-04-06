@@ -87,7 +87,7 @@ Main operator wrapper:
   Create a temporary agent through the live gateway API, create one session for it, and report which files appeared under `%USERPROFILE%\.openclaw`. By default it cleans the probe back up and restarts the gateway so live state matches disk.
 - `.\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
-- `.\run-openclaw.cmd add-local-model -Model <ollama-model> -Name <display-name> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
+- `.\run-openclaw.cmd add-local-model -Model <ollama-model> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
   Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, optionally write `fallbackModelId`, and optionally assign it to an agent before reapplying bootstrap.
 - `.\run-openclaw.cmd remove-local-model -Model <ollama-model> [-ReplaceWith <other-ollama-model>]`
   Remove a local Ollama model from managed config and host Ollama storage. If the model is managed, retarget any managed local-agent references before reapplying bootstrap.
@@ -113,30 +113,30 @@ Wrapper help note:
 - The top-level wrapper also forwards these help aliases to subcommands, so
   `.\run-openclaw.cmd verify /?` works too.
 
-Named Ollama endpoints can also declare endpoint-level desired models. That is
+Endpoints are machines or PCs. If one has a local Ollama runtime, it can
+declare endpoint-level desired models under `endpoint.ollama.models`. That is
 useful when you have multiple Ollama PCs and want bootstrap to keep a small
 starter model present on each machine even before any agent is assigned to it.
 
 Example:
 
 ```json
-"ollama": {
-  "endpoints": [
-    {
-      "key": "review-pc",
+"endpoints": [
+  {
+    "key": "review-pc",
+    "ollama": {
       "baseUrl": "http://desktop-r9ab74f:11434",
       "models": [
         {
           "id": "qwen2.5:7b",
-          "name": "Qwen 2.5 7B",
           "input": ["text"],
           "minimumContextWindow": 16384
         }
       ],
       "autoPullMissingModels": true
     }
-  ]
-}
+  }
+]
 ```
 
 With that in place, `bootstrap` will try to pull `qwen2.5:7b` onto

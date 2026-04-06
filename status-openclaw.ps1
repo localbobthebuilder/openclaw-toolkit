@@ -297,7 +297,7 @@ function Get-OllamaEndpointSnapshots {
     param($BootstrapConfig)
 
     $snapshots = @()
-    if ($null -eq $BootstrapConfig -or -not $BootstrapConfig.ollama -or -not $BootstrapConfig.ollama.enabled) {
+    if ($null -eq $BootstrapConfig -or -not (Test-ToolkitHasOllamaEndpoints -Config $BootstrapConfig)) {
         return $snapshots
     }
 
