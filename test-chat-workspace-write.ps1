@@ -138,6 +138,16 @@ function Stop-OllamaModelFromRef {
     }
 }
 
+function Get-ErrorMessage {
+    param($ErrorRecord)
+
+    if ($null -ne $ErrorRecord -and $ErrorRecord.Exception -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.Exception.Message)) {
+        return [string]$ErrorRecord.Exception.Message.Trim()
+    }
+
+    return ($ErrorRecord | Out-String).Trim()
+}
+
 function Add-UniqueString {
     param(
         [string[]]$List = @(),
@@ -347,7 +357,7 @@ try {
     ) | Write-Output
 }
 catch {
-    $message = ($_ | Out-String).Trim()
+    $message = Get-ErrorMessage -ErrorRecord $_
     @(
         "Chat workspace write smoke test failed."
         "Agent: $AgentId"

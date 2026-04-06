@@ -119,10 +119,21 @@ function Get-ErrorCategory {
 
     $normalized = $Message.ToLowerInvariant()
     if ($normalized -match '429|resource_exhausted|quota|rate limit|too many requests') { return "provider-quota" }
+    if ($normalized -match 'temporarily overloaded|overloaded|capacity|busy') { return "provider-capacity" }
     if ($normalized -match '401|403|unauthorized|forbidden|auth|api key|not authenticated') { return "provider-auth" }
     if ($normalized -match 'gateway closed|service restart|container .+ is not running|econnrefused') { return "gateway" }
     if ($normalized -match 'model.+not found|unknown model|could not resolve any ollama model|no configured ollama models') { return "model-missing" }
     return "task"
+}
+
+function Get-ErrorMessage {
+    param($ErrorRecord)
+
+    if ($null -ne $ErrorRecord -and $ErrorRecord.Exception -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.Exception.Message)) {
+        return [string]$ErrorRecord.Exception.Message.Trim()
+    }
+
+    return ($ErrorRecord | Out-String).Trim()
 }
 
 function Add-UniqueString {
@@ -466,7 +477,7 @@ try {
     ) | Write-Output
 }
 catch {
-    $message = ($_ | Out-String).Trim()
+    $message = Get-ErrorMessage -ErrorRecord $_
     $category = Get-ErrorCategory -Message $message
     @(
         "Local model smoke test failed."

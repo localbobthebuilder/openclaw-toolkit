@@ -524,14 +524,28 @@ function Invoke-LoggedScript {
     }
     catch {
         $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
-        $errorText = ($_ | Out-String).Trim()
+        $errorText = if ($_.Exception -and -not [string]::IsNullOrWhiteSpace([string]$_.Exception.Message)) {
+            [string]$_.Exception.Message.Trim()
+        }
+        else {
+            ($_ | Out-String).Trim()
+        }
+        $capturedText = ($captured -join [Environment]::NewLine).Trim()
+        $hasStructuredResult = $capturedText -match '__SMOKE_JSON__:\s*\{'
         Write-Detail "FAIL in $elapsed" ([ConsoleColor]::Red)
         if ($errorText) {
-            $captured.Add($errorText)
             $preview = ($errorText -split "(`r`n|`n|`r)")[0]
             Write-Detail $preview ([ConsoleColor]::Red)
         }
-        return (($captured + @("Verification sub-step failed.", $errorText)) -join [Environment]::NewLine).Trim()
+
+        if ($hasStructuredResult) {
+            return $capturedText
+        }
+
+        if ($errorText) {
+            $captured.Add("Failure: $errorText")
+        }
+        return ($captured -join [Environment]::NewLine).Trim()
     }
 }
 
@@ -2142,16 +2156,24 @@ if (Test-CheckRequested -Names @("agent")) {
             $status = [string]$check.status
             if ($status -eq "fail") {
                 Write-Detail ("{0}: FAIL [{1}]" -f $label, $check.category) ([ConsoleColor]::Yellow)
+                if ($check.targetModel) {
+                    Write-Detail "Target model: $($check.targetModel)" ([ConsoleColor]::Yellow)
+                }
+                if ($check.runtime) {
+                    Write-Detail "Runtime: $($check.runtime)" ([ConsoleColor]::Yellow)
+                }
                 if ($check.detail) {
                     Write-Detail "Reason: $($check.detail)" ([ConsoleColor]::Yellow)
                 }
             }
             elseif ($status -eq "pass") {
+                $targetSuffix = if ($check.targetModel) { " target $($check.targetModel)" } else { "" }
                 $runtimeSuffix = if ($check.runtime) { " via $($check.runtime)" } else { "" }
-                Write-Detail ("{0}: PASS{1}" -f $label, $runtimeSuffix)
+                Write-Detail ("{0}: PASS{1}{2}" -f $label, $targetSuffix, $runtimeSuffix)
             }
             else {
-                Write-Detail ("{0}: SKIP/INFO ({1})" -f $label, $check.detail)
+                $targetSuffix = if ($check.targetModel) { " target $($check.targetModel)" } else { "" }
+                Write-Detail ("{0}: SKIP/INFO{1} ({2})" -f $label, $targetSuffix, $check.detail)
             }
         }
     }
