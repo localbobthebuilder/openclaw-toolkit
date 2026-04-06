@@ -443,6 +443,45 @@ function Set-EndpointModelEntry {
     throw "Could not find endpoint '$EndpointKey' while writing model entry."
 }
 
+function Set-SharedCatalogLocalModelEntry {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$ModelEntry
+    )
+
+    $catalogEntry = [ordered]@{}
+    foreach ($property in $ModelEntry.PSObject.Properties) {
+        if ([string]$property.Name -eq "fallbackModelId") {
+            continue
+        }
+
+        $catalogEntry[$property.Name] = $property.Value
+    }
+    $catalogModel = [pscustomobject]$catalogEntry
+
+    if (-not ($Config.PSObject.Properties.Name -contains "modelCatalog")) {
+        $Config | Add-Member -NotePropertyName modelCatalog -NotePropertyValue @()
+    }
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $replaced = $false
+    foreach ($existingEntry in @($Config.modelCatalog)) {
+        if ($existingEntry -and $existingEntry.PSObject.Properties.Name -contains "id" -and [string]$existingEntry.id -eq [string]$catalogModel.id) {
+            $entries.Add($catalogModel)
+            $replaced = $true
+        }
+        elseif ($existingEntry) {
+            $entries.Add($existingEntry)
+        }
+    }
+
+    if (-not $replaced) {
+        $entries.Add($catalogModel)
+    }
+
+    $Config.modelCatalog = $entries.ToArray()
+}
+
 function Resolve-ConfiguredFallbackModelId {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -606,6 +645,7 @@ $newEntry = New-ManagedEndpointModelEntry -ExistingEntry $existingEntry -ModelId
 
 Write-Step "Updating bootstrap config"
 Set-EndpointModelEntry -Config $config -EndpointKey $endpoint.key -ModelEntry $newEntry
+Set-SharedCatalogLocalModelEntry -Config $config -ModelEntry $newEntry
 
 $assigned = $false
 if ($AssignTo) {

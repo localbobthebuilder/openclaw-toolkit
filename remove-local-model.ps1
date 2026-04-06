@@ -81,13 +81,41 @@ function Get-LocalModelIds {
     )
 }
 
-function Get-OllamaInstalledModelIds {
+function Invoke-OllamaCli {
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [string[]]$Arguments = @(),
+        [switch]$AllowFailure
+    )
+
     $ollamaCommand = Get-Command "ollama" -ErrorAction SilentlyContinue
     if ($null -eq $ollamaCommand) {
+        throw "Ollama CLI is not available on this machine."
+    }
+
+    $oldHost = $env:OLLAMA_HOST
+    try {
+        $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $Endpoint
+        return Invoke-External -FilePath $ollamaCommand.Source -Arguments $Arguments -AllowFailure:$AllowFailure
+    }
+    finally {
+        if ([string]::IsNullOrWhiteSpace($oldHost)) {
+            Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:OLLAMA_HOST = $oldHost
+        }
+    }
+}
+
+function Get-OllamaInstalledModelIds {
+    param($Endpoint)
+
+    if ($null -eq $Endpoint) {
         return @()
     }
 
-    $result = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("list") -AllowFailure
+    $result = Invoke-OllamaCli -Endpoint $Endpoint -Arguments @("list") -AllowFailure
     if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Output)) {
         return @()
     }
@@ -110,15 +138,36 @@ function Get-OllamaInstalledModelIds {
 }
 
 function Remove-OllamaModel {
-    param([Parameter(Mandatory = $true)][string]$ModelId)
+    param(
+        [Parameter(Mandatory = $true)]$Endpoint,
+        [Parameter(Mandatory = $true)][string]$ModelId
+    )
 
-    $ollamaCommand = Get-Command "ollama" -ErrorAction SilentlyContinue
-    if ($null -eq $ollamaCommand) {
-        throw "Ollama CLI is not available on this machine, so host model removal cannot proceed."
-    }
+    $null = Invoke-OllamaCli -Endpoint $Endpoint -Arguments @("stop", $ModelId) -AllowFailure
+    return Invoke-OllamaCli -Endpoint $Endpoint -Arguments @("rm", $ModelId) -AllowFailure
+}
 
-    $null = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("stop", $ModelId) -AllowFailure
-    return Invoke-External -FilePath $ollamaCommand.Source -Arguments @("rm", $ModelId) -AllowFailure
+function Get-EndpointModelAssignments {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ModelId
+    )
+
+    return @(
+        foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+            $matches = @(
+                foreach ($entry in @($endpoint.models)) {
+                    if ($entry -and [string]$entry.id -eq $ModelId) {
+                        $entry
+                    }
+                }
+            )
+
+            if ($matches.Count -gt 0) {
+                $endpoint
+            }
+        }
+    )
 }
 
 function Remove-ModelEntry {
@@ -272,7 +321,13 @@ $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
 
 $currentIds = @(Get-LocalModelIds -Config $config)
-$installedOllamaIds = @(Get-OllamaInstalledModelIds)
+$assignedEndpoints = @(Get-EndpointModelAssignments -Config $config -ModelId $Model)
+$defaultOllamaEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $config
+$installedOllamaIds = @(
+    if ($null -ne $defaultOllamaEndpoint) {
+        Get-OllamaInstalledModelIds -Endpoint $defaultOllamaEndpoint
+    }
+)
 $isManagedModel = $Model -in $currentIds
 $isInstalledInOllama = $Model -in $installedOllamaIds
 
@@ -334,26 +389,49 @@ else {
     Write-Host "Model '$Model' is not in the managed bootstrap config; config update is skipped." -ForegroundColor Yellow
 }
 
-if (-not $KeepOllamaModel -and $isInstalledInOllama) {
-    Write-Step "Removing $Model from host Ollama storage"
-    if ($PSCmdlet.ShouldProcess($Model, "remove Ollama model")) {
-        $removeResult = Remove-OllamaModel -ModelId $Model
-        if ($removeResult.ExitCode -eq 0) {
-            Write-Host "Removed $Model from Ollama host storage." -ForegroundColor Green
+if (-not $KeepOllamaModel) {
+    $storageRemovalEndpoints = New-Object System.Collections.Generic.List[object]
+    foreach ($endpoint in $assignedEndpoints) {
+        $storageRemovalEndpoints.Add($endpoint)
+    }
+
+    if ($storageRemovalEndpoints.Count -eq 0 -and $isInstalledInOllama -and $null -ne $defaultOllamaEndpoint) {
+        $storageRemovalEndpoints.Add($defaultOllamaEndpoint)
+    }
+
+    if ($storageRemovalEndpoints.Count -gt 0) {
+        $removalFailures = New-Object System.Collections.Generic.List[string]
+        foreach ($endpoint in $storageRemovalEndpoints) {
+            $endpointLabel = if ($endpoint.name) { "$($endpoint.key) ($($endpoint.name))" } else { [string]$endpoint.key }
+            $hostBaseUrl = [string](Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint)
+            Write-Step "Removing $Model from Ollama storage on endpoint $endpointLabel"
+            if ($PSCmdlet.ShouldProcess("$endpointLabel [$hostBaseUrl]", "remove Ollama model $Model")) {
+                $removeResult = Remove-OllamaModel -Endpoint $endpoint -ModelId $Model
+                if ($removeResult.ExitCode -eq 0) {
+                    Write-Host "Removed $Model from endpoint $endpointLabel." -ForegroundColor Green
+                }
+                elseif ($removeResult.Output -match '(?i)(not found|no such model|not currently loaded|cannot find)') {
+                    Write-Host "Model '$Model' was not present on endpoint $endpointLabel." -ForegroundColor Yellow
+                }
+                else {
+                    $removalFailures.Add("$endpointLabel [$hostBaseUrl]: $($removeResult.Output)")
+                }
+            }
+            else {
+                Write-Host "WhatIf: would remove $Model from endpoint $endpointLabel." -ForegroundColor Yellow
+            }
         }
-        else {
-            throw "Ollama rm failed for '$Model': $($removeResult.Output)"
+
+        if ($removalFailures.Count -gt 0) {
+            throw "Ollama rm failed for '$Model' on one or more endpoints:`n$($removalFailures -join [Environment]::NewLine)"
         }
     }
     else {
-        Write-Host "WhatIf: would remove $Model from Ollama host storage." -ForegroundColor Yellow
+        Write-Host "Model '$Model' was not installed in reachable Ollama endpoint storage." -ForegroundColor Yellow
     }
 }
 elseif ($KeepOllamaModel) {
-    Write-Host "Keeping $Model in host Ollama storage because -KeepOllamaModel was set." -ForegroundColor Yellow
-}
-else {
-    Write-Host "Model '$Model' was not installed in host Ollama storage." -ForegroundColor Yellow
+    Write-Host "Keeping $Model in endpoint Ollama storage because -KeepOllamaModel was set." -ForegroundColor Yellow
 }
 
 if ($isManagedModel -and -not $SkipBootstrap) {

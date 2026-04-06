@@ -165,6 +165,188 @@
     "setAsDefaultModel": false,
     "clearFallbacks": true
   },
+  "modelCatalog": [
+    {
+      "id": "qwen3.5:35b-a3b",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 128000,
+      "maxTokens": 8192,
+      "vramEstimateMiB": 22528
+    },
+    {
+      "id": "qwen3-coder:30b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 106496,
+      "maxTokens": 8192,
+      "vramEstimateMiB": 18432
+    },
+    {
+      "id": "glm-4.7-flash:latest",
+      "reasoning": true,
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 90000,
+      "maxTokens": 8192,
+      "vramEstimateMiB": 19456
+    },
+    {
+      "id": "qwen2.5:7b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 16384,
+      "contextWindow": 32768,
+      "maxTokens": 4096,
+      "vramEstimateMiB": 4864
+    },
+    {
+      "id": "qwen3:4b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 16384,
+      "vramEstimateMiB": 2816
+    },
+    {
+      "id": "qwen3:8b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 16384,
+      "vramEstimateMiB": 5376
+    },
+    {
+      "id": "qwen2.5-coder:3b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "vramEstimateMiB": 2048
+    },
+    {
+      "id": "qwen2.5-coder:1.5b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 16384,
+      "vramEstimateMiB": 1024
+    },
+    {
+      "id": "gemma4:latest",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 131072,
+      "maxTokens": 8192,
+      "vramEstimateMiB": 5376
+    },
+    {
+      "id": "gemma4:26b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 126976,
+      "maxTokens": 8192,
+      "vramEstimateMiB": 16896
+    },
+    {
+      "id": "gemma4:31b",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 24576,
+      "maxTokens": 8192,
+      "vramEstimateMiB": 19968
+    },
+    {
+      "modelRef": "openai-codex/gpt-5.4"
+    },
+    {
+      "modelRef": "anthropic/claude-sonnet-4-6"
+    },
+    {
+      "modelRef": "google/gemini-3.1-flash-lite-preview"
+    }
+  ],
   "endpoints": [
     {
       "key": "local",
