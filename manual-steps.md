@@ -335,7 +335,7 @@ Bootstrap then fills in the machine-specific values such as:
 This is intentionally better than copying a raw machine-specific `.env`, because
 the host paths are re-derived for the current Windows user profile.
 
-If the host state under `C:\Users\<you>\.openclaw` is still completely new,
+If the host state under `%USERPROFILE%\.openclaw` is still completely new,
 bootstrap warns you and continues. In that case you may still need manual
 dashboard sign-in or other first-run onboarding for auth/secrets on that
 machine.
@@ -825,7 +825,7 @@ Gemini note:
 
 - This setup now uses the official Google Gemini API-key provider in OpenClaw.
 - It does not rely on the unofficial Gemini CLI OAuth integration.
-- OpenClaw stores its own Gemini auth in the gateway auth profiles inside `C:\Users\<you>\.openclaw`.
+- OpenClaw stores its own Gemini auth in the gateway auth profiles inside `%USERPROFILE%\.openclaw`.
 - The supported one-time login path is:
 
 ```powershell
@@ -1067,7 +1067,7 @@ What restore does:
 - extracts the selected backup zip
 - creates a safety backup first if the target machine already has OpenClaw state
 - clones the OpenClaw repo if it is missing
-- restores host state into `C:\Users\<you>\.openclaw`
+- restores host state into `%USERPROFILE%\.openclaw`
 - restores repo-local `.env` and `docker-compose.yml`
 - optionally runs bootstrap afterwards
 

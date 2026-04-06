@@ -68,31 +68,32 @@ if /I "%ACTION%"=="stop" goto :stop
 
 echo Unknown action: %ACTION%
 echo.
+set "HELP_EXIT_CODE=1"
 goto :help
 
 :prereqs
 call "%SCRIPT_DIR%run-prereqs.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :bootstrap
 call "%SCRIPT_DIR%run-bootstrap.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :backup
 call "%SCRIPT_DIR%run-backup.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :restore
 call "%SCRIPT_DIR%run-restore.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :update
 call "%SCRIPT_DIR%run-update.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :start
 call "%SCRIPT_DIR%run-start.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :onboard
 call "%SCRIPT_DIR%run-openclaw-onboard.cmd" %FORWARD_ARGS%
@@ -100,99 +101,99 @@ exit /b %ERRORLEVEL%
 
 :status
 call "%SCRIPT_DIR%run-status.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :dashboard
 call "%SCRIPT_DIR%run-dashboard.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :phone_dashboard
 call "%SCRIPT_DIR%run-phone-dashboard.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :toolkit_dashboard
 call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :toolkit_dashboard_stop
 call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" stop
-goto :eof
+exit /b %ERRORLEVEL%
 
 :toolkit_dashboard_rebuild
 call "%SCRIPT_DIR%rebuild-toolkit-dashboard.cmd"
-goto :eof
+exit /b %ERRORLEVEL%
 
 :dashboard_repair
 call "%SCRIPT_DIR%run-dashboard-repair.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :openai_auth
 call "%SCRIPT_DIR%run-openai-auth.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :ollama_auth
 call "%SCRIPT_DIR%run-ollama-auth.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :gemini_auth
 call "%SCRIPT_DIR%run-gemini-auth.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :claude_auth
 call "%SCRIPT_DIR%run-claude-auth.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :copilot_auth
 call "%SCRIPT_DIR%run-copilot-auth.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :verify
 call "%SCRIPT_DIR%run-verify.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :agents
 call "%SCRIPT_DIR%run-configure-agents.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :watchdog
 call "%SCRIPT_DIR%run-watchdog.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :install_watchdog
 call "%SCRIPT_DIR%run-install-watchdog.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :compact_storage
 call "%SCRIPT_DIR%run-compact-storage.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :voice_test
 call "%SCRIPT_DIR%run-voice-test.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :local_model_test
 call "%SCRIPT_DIR%run-local-model-test.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :agent_smoke
 call "%SCRIPT_DIR%run-agent-smoke.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :remote_review_smoke
 call "%SCRIPT_DIR%run-remote-review-smoke.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :local_delegate_test
 call "%SCRIPT_DIR%run-local-delegated-coder-test.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :temp_agent_probe
 call "%SCRIPT_DIR%run-temp-agent-probe.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :model_fit
 call "%SCRIPT_DIR%run-model-fit.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :cli
 call "%SCRIPT_DIR%run-openclaw-cli.cmd" %FORWARD_ARGS%
@@ -200,25 +201,26 @@ exit /b %ERRORLEVEL%
 
 :add_local_model
 call "%SCRIPT_DIR%run-add-local-model.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :remove_local_model
 call "%SCRIPT_DIR%run-remove-local-model.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :sandbox_test
 call "%SCRIPT_DIR%run-sandbox-test.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :telegram_ids
 call "%SCRIPT_DIR%run-telegram-ids.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :stop
 call "%SCRIPT_DIR%run-stop.cmd" %FORWARD_ARGS%
-goto :eof
+exit /b %ERRORLEVEL%
 
 :help
+if not defined HELP_EXIT_CODE set "HELP_EXIT_CODE=0"
 echo OpenClaw operator commands
 echo.
 echo   run-openclaw.cmd prereqs
@@ -352,6 +354,6 @@ echo   %~f0 add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -Endp
 echo   %~f0 remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b -CompactDockerData
 echo   %~f0 stop -StopDockerDesktop
 echo   %~f0 dashboard-repair
-exit /b 0
+exit /b %HELP_EXIT_CODE%
 
 

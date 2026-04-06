@@ -165,7 +165,19 @@ function Invoke-External {
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
-    $null = $process.Start()
+    try {
+        $null = $process.Start()
+    }
+    catch [System.ComponentModel.Win32Exception] {
+        if (-not $AllowFailure) {
+            throw "Command not found: $FilePath"
+        }
+
+        return [pscustomobject]@{
+            ExitCode = -1
+            Output   = "Command not found: $FilePath"
+        }
+    }
     $stdout = $process.StandardOutput.ReadToEnd()
     $stderr = $process.StandardError.ReadToEnd()
     $process.WaitForExit()
@@ -186,6 +198,224 @@ function Invoke-External {
 function Test-CommandExists {
     param([string]$Name)
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Convert-WindowsPathToDockerDesktop {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath -match '^(?<drive>[A-Za-z]):\\(?<rest>.*)$') {
+        $drive = $Matches.drive.ToLowerInvariant()
+        $rest = $Matches.rest -replace '\\', '/'
+        if ([string]::IsNullOrWhiteSpace($rest)) {
+            return "/$drive"
+        }
+        return "/$drive/$rest"
+    }
+
+    return ($fullPath -replace '\\', '/')
+}
+
+function Convert-DockerDesktopPathToWindows {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $trimmed = $Path.Trim()
+    if ($trimmed -match '^(?<drive>[A-Za-z]):\\') {
+        return [System.IO.Path]::GetFullPath($trimmed)
+    }
+
+    if ($trimmed -match '^/(?<drive>[A-Za-z])(?:/(?<rest>.*))?$') {
+        $drive = $Matches.drive.ToUpperInvariant()
+        $rest = if ($Matches.rest) { ($Matches.rest -replace '/', '\') } else { "" }
+        $windowsPath = if ([string]::IsNullOrWhiteSpace($rest)) {
+            "${drive}:\"
+        }
+        else {
+            "${drive}:\$rest"
+        }
+        return [System.IO.Path]::GetFullPath($windowsPath)
+    }
+
+    return $null
+}
+
+function Test-PathWithinRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Root
+    )
+
+    $normalizedPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $normalizedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\')
+    if ($normalizedPath.Length -eq 0 -or $normalizedRoot.Length -eq 0) {
+        return $false
+    }
+
+    return $normalizedPath.Equals($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $normalizedPath.StartsWith($normalizedRoot + "\", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-EnvVarValueFromFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if (-not (Test-Path $Path)) {
+        return $null
+    }
+
+    $match = Select-String -Path $Path -Pattern ("^" + [regex]::Escape($Name) + "=(.*)$") | Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+
+    return [string]$match.Matches[0].Groups[1].Value
+}
+
+function Get-ExternalFailureInfo {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$Output,
+        [int]$ExitCode = 1
+    )
+
+    $commandName = [System.IO.Path]::GetFileName($FilePath).ToLowerInvariant()
+    $fullText = ((@($Arguments) -join " ") + [Environment]::NewLine + ($Output ?? "")).ToLowerInvariant()
+    $summary = $null
+
+    switch ($commandName) {
+        { $_ -in @("docker", "docker.exe") } {
+            if ($fullText -match 'failed to connect to the docker api|error during connect|dockerdesktoplinuxengine|dockerdesktopwindowsengine|daemon is not running|is the docker daemon running|cannot find the file specified') {
+                $summary = "Docker engine is not running or not reachable."
+            }
+            elseif ($fullText -match 'no such container|container .* is not running') {
+                $summary = "OpenClaw gateway container is not running."
+            }
+            break
+        }
+        { $_ -in @("curl", "curl.exe") } {
+            if ($fullText -match 'failed to connect|could not connect|connection refused|timed out') {
+                $summary = "Target service is not responding."
+            }
+            break
+        }
+    }
+
+    $details = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($summary)) {
+        [void]$details.Add($summary)
+    }
+
+    $rawOutput = ($Output ?? "").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($rawOutput) -and $rawOutput -ne $summary) {
+        if ($details.Count -gt 0) {
+            [void]$details.Add("")
+            [void]$details.Add("Raw output:")
+        }
+        [void]$details.Add($rawOutput)
+    }
+
+    if ($details.Count -eq 0) {
+        [void]$details.Add("Command failed with exit code $ExitCode.")
+    }
+
+    [pscustomobject]@{
+        Summary = $summary
+        Output  = ($details -join [Environment]::NewLine)
+    }
+}
+
+function Test-ResultHasIssue {
+    param($Result)
+
+    return $null -ne $Result -and $null -ne $Result.ExitCode -and [int]$Result.ExitCode -ne 0
+}
+
+function Invoke-LoggedEnvPathValidation {
+    param(
+        [Parameter(Mandatory = $true)][string]$EnvFilePath,
+        [Parameter(Mandatory = $true)][string]$CurrentUserProfile,
+        [Parameter(Mandatory = $true)]$Checks
+    )
+
+    Write-Step "Docker bind-mount env paths"
+    $started = Get-Date
+
+    if (-not (Test-Path $EnvFilePath)) {
+        $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+        Write-Detail "FAIL in $elapsed" ([ConsoleColor]::Red)
+        Write-Detail "OpenClaw env file not found: $EnvFilePath" ([ConsoleColor]::Red)
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output   = "OpenClaw env file not found: $EnvFilePath"
+        }
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $hasIssue = $false
+
+    foreach ($check in @($Checks)) {
+        $name = [string]$check.Name
+        $expectedPath = [System.IO.Path]::GetFullPath([string]$check.ExpectedPath)
+        $expectedDockerPath = Convert-WindowsPathToDockerDesktop -Path $expectedPath
+        $rawValue = Get-EnvVarValueFromFile -Path $EnvFilePath -Name $name
+
+        if ([string]::IsNullOrWhiteSpace($rawValue)) {
+            $hasIssue = $true
+            [void]$lines.Add("FAIL: $name is missing from $EnvFilePath")
+            continue
+        }
+
+        $resolvedWindowsPath = Convert-DockerDesktopPathToWindows -Path $rawValue
+        if ([string]::IsNullOrWhiteSpace($resolvedWindowsPath)) {
+            $hasIssue = $true
+            [void]$lines.Add("FAIL: $name uses an unsupported host path format: $rawValue")
+            continue
+        }
+
+        $insideCurrentProfile = Test-PathWithinRoot -Path $resolvedWindowsPath -Root $CurrentUserProfile
+        if (-not $insideCurrentProfile) {
+            $hasIssue = $true
+            [void]$lines.Add("FAIL: $name points outside the current user profile.")
+            [void]$lines.Add("Actual: $rawValue")
+            [void]$lines.Add("Resolved: $resolvedWindowsPath")
+            [void]$lines.Add("Expected user profile root: $CurrentUserProfile")
+            [void]$lines.Add("")
+            continue
+        }
+
+        if (-not $resolvedWindowsPath.Equals($expectedPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $hasIssue = $true
+            [void]$lines.Add("FAIL: $name does not match the toolkit-managed host path.")
+            [void]$lines.Add("Actual: $rawValue")
+            [void]$lines.Add("Resolved: $resolvedWindowsPath")
+            [void]$lines.Add("Expected: $expectedDockerPath")
+            [void]$lines.Add("")
+            continue
+        }
+
+        [void]$lines.Add("PASS: $name -> $rawValue")
+    }
+
+    $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+    if ($hasIssue) {
+        Write-Detail "Docker bind-mount env paths need attention in $elapsed" ([ConsoleColor]::Yellow)
+    }
+    else {
+        Write-Detail "Docker bind-mount env paths match the current user in $elapsed" ([ConsoleColor]::Green)
+    }
+
+    $output = ($lines -join [Environment]::NewLine).Trim()
+    return [pscustomobject]@{
+        ExitCode = if ($hasIssue) { 1 } else { 0 }
+        Output   = $output
+    }
 }
 
 function Invoke-LoggedExternal {
@@ -209,8 +439,16 @@ function Invoke-LoggedExternal {
             Write-Detail $message ([ConsoleColor]::Green)
         }
         else {
-            $message = if ($FailureSummary) { $FailureSummary } else { "WARN: exit code $($result.ExitCode) in $elapsed" }
+            $failureInfo = Get-ExternalFailureInfo -FilePath $FilePath -Arguments $Arguments -Output $result.Output -ExitCode ([int]$result.ExitCode)
+            $message = if ($FailureSummary) { $FailureSummary } elseif ($failureInfo.Summary) { $failureInfo.Summary } else { "WARN: exit code $($result.ExitCode) in $elapsed" }
             Write-Detail $message ([ConsoleColor]::Yellow)
+            if ($failureInfo.Summary -and $FailureSummary -and $failureInfo.Summary -ne $FailureSummary) {
+                Write-Detail $failureInfo.Summary ([ConsoleColor]::Yellow)
+            }
+            $result = [pscustomobject]@{
+                ExitCode = [int]$result.ExitCode
+                Output   = $failureInfo.Output
+            }
         }
 
         return $result
@@ -218,12 +456,24 @@ function Invoke-LoggedExternal {
     catch {
         $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
         Write-Detail "FAIL in $elapsed" ([ConsoleColor]::Red)
-        $errorText = ($_ | Out-String).Trim()
-        if ($errorText) {
+        $errorText = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message.Trim() } else { ($_ | Out-String).Trim() }
+        $failureInfo = Get-ExternalFailureInfo -FilePath $FilePath -Arguments $Arguments -Output $errorText -ExitCode 1
+        if ($FailureSummary) {
+            Write-Detail $FailureSummary ([ConsoleColor]::Red)
+        }
+        if ($failureInfo.Summary) {
+            if (-not $FailureSummary -or $failureInfo.Summary -ne $FailureSummary) {
+                Write-Detail $failureInfo.Summary ([ConsoleColor]::Red)
+            }
+        }
+        elseif ($errorText) {
             $preview = ($errorText -split "(`r`n|`n|`r)")[0]
             Write-Detail $preview ([ConsoleColor]::Red)
         }
-        throw
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output   = $failureInfo.Output
+        }
     }
 }
 
@@ -955,29 +1205,34 @@ if (-not (Test-Path $config.repoPath)) {
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 $liveConfig = Get-OpenClawConfigDocument -Config $config
 
-@(
+$missingVerificationCommands = @(
     @{ Name = "curl.exe"; Required = (Test-CheckRequested -Names @("health")) },
     @{ Name = "docker"; Required = (Test-CheckRequested -Names @("docker", "models", "voice", "local-model", "agent", "sandbox", "chat-write", "audit")) },
     @{ Name = "tailscale"; Required = (Test-CheckRequested -Names @("tailscale")) },
     @{ Name = "git"; Required = (Test-CheckRequested -Names @("git")) }
-) | Where-Object { $_.Required } | ForEach-Object {
-    $cmd = $_.Name
-    if (-not (Test-CommandExists $cmd)) {
-        throw "Missing required command: $cmd"
-    }
-}
+) | Where-Object { $_.Required -and (-not (Test-CommandExists $_.Name)) } | ForEach-Object { $_.Name }
 
 Write-Step "Collecting OpenClaw verification data"
 Write-Detail "Config: $ConfigPath"
 Write-Detail "Host config: $hostConfigPath"
 Write-Detail "Report: $($config.verification.reportPath)"
+foreach ($missingCommand in @($missingVerificationCommands)) {
+    Write-Detail "Command not found: $missingCommand" ([ConsoleColor]::Yellow)
+}
 $health = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("health")) {
     $health = Invoke-LoggedExternal -Label "Gateway health check" -FilePath "curl.exe" -Arguments @("-s", $config.verification.healthUrl) -AllowFailure -SuccessSummary "Gateway health endpoint responded." -FailureSummary "Gateway health endpoint did not return success."
 }
 $dockerPs = New-SkippedExternalResult
+$dockerEnvPaths = New-SkippedExternalResult
 $managedImages = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("docker")) {
+    $envFilePath = if ($config.envFilePath) { [string]$config.envFilePath } else { Join-Path $config.repoPath ".env" }
+    $dockerEnvPaths = Invoke-LoggedEnvPathValidation -EnvFilePath $envFilePath -CurrentUserProfile ([System.IO.Path]::GetFullPath($env:USERPROFILE)) -Checks @(
+        @{ Name = "OPENCLAW_CONFIG_DIR"; ExpectedPath = (Get-HostConfigDir -Config $config) },
+        @{ Name = "OPENCLAW_WORKSPACE_DIR"; ExpectedPath = (Get-HostWorkspaceDir -Config $config) }
+    )
+
     $dockerPs = Invoke-LoggedExternal -Label "Docker container status" -FilePath "docker" -Arguments @("ps", "--format", "table {{.Names}}`t{{.Status}}`t{{.Ports}}") -SuccessSummary "Docker responded with running container list."
 
     Write-Step "Managed Docker image completeness"
@@ -1825,6 +2080,7 @@ $reportLines = New-Object System.Collections.Generic.List[string]
 
 if (Test-CheckRequested -Names @("health")) { Add-ReportSection -Lines $reportLines -Title "Health" -Content $health.Output }
 if (Test-CheckRequested -Names @("docker")) {
+    Add-ReportSection -Lines $reportLines -Title "Docker Env Paths" -Content $dockerEnvPaths.Output
     Add-ReportSection -Lines $reportLines -Title "Docker PS" -Content $dockerPs.Output
     Add-ReportSection -Lines $reportLines -Title "Managed Images" -Content $managedImages.Output
 }
@@ -1866,7 +2122,10 @@ Write-Host ""
 Write-Host "==> Verification summary" -ForegroundColor Cyan
 Write-Detail "Requested checks: $(@($script:RequestedChecks) -join ', ')"
 if (Test-CheckRequested -Names @("health")) { Write-Detail "Health exit code: $($health.ExitCode)" }
-if (Test-CheckRequested -Names @("docker")) { Write-Detail "Managed images: $(if ($managedImages.ExitCode -eq 0) { 'PASS' } else { 'INFO/INCOMPLETE' })" }
+if (Test-CheckRequested -Names @("docker")) {
+    Write-Detail "Docker env paths: $(if ($dockerEnvPaths.ExitCode -eq 0) { 'PASS' } else { 'FAIL' })"
+    Write-Detail "Managed images: $(if ($managedImages.ExitCode -eq 0) { 'PASS' } else { 'INFO/INCOMPLETE' })"
+}
 if (Test-CheckRequested -Names @("voice")) { Write-Detail "Voice smoke test: $(Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null)" }
 if (Test-CheckRequested -Names @("local-model")) {
     Write-Detail "Local model smoke test: $(Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured)"
@@ -1901,6 +2160,41 @@ if (Test-CheckRequested -Names @("sandbox")) { Write-Detail "Sandbox smoke test:
 if (Test-CheckRequested -Names @("chat-write")) { Write-Detail "Chat workspace write smoke test: $(if ($chatWorkspaceWriteSmokeTestOutput -match 'passed') { 'PASS' } elseif ($chatWorkspaceWriteSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
 if (Test-CheckRequested -Names @("multi-agent")) { Write-Detail "Multi-agent verification: $(if ((@($multiAgentVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($multiAgentVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' })" }
 if (Test-CheckRequested -Names @("context")) { Write-Detail "Context management verification: $(if ((@($contextManagementVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($contextManagementVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' })" }
+
+$hasActionableIssues = $false
+foreach ($result in @($health, $dockerEnvPaths, $dockerPs, $managedImages, $serveStatus, $funnelStatus, $modelsList, $modelsStatus, $telegramConfig, $audioConfig, $audioBackendProbe, $sandboxExplain, $audit, $gitStatus)) {
+    if (Test-ResultHasIssue -Result $result) {
+        $hasActionableIssues = $true
+        break
+    }
+}
+
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("voice")) -and (Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null) -eq "FAIL") {
+    $hasActionableIssues = $true
+}
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("local-model")) -and (Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured) -eq "FAIL") {
+    $hasActionableIssues = $true
+}
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("agent")) -and (Get-SmokeSummaryLabel -Output $agentCapabilitiesSmokeTestOutput -StructuredResult $agentCapabilitiesSmokeStructured) -eq "FAIL") {
+    $hasActionableIssues = $true
+}
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("sandbox")) -and $sandboxSmokeTestOutput -match 'failed') {
+    $hasActionableIssues = $true
+}
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("chat-write")) -and $chatWorkspaceWriteSmokeTestOutput -match 'failed') {
+    $hasActionableIssues = $true
+}
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("multi-agent")) -and ((@($multiAgentVerification) -join ' ') -match 'FAIL:')) {
+    $hasActionableIssues = $true
+}
+if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("context")) -and ((@($contextManagementVerification) -join ' ') -match 'FAIL:')) {
+    $hasActionableIssues = $true
+}
+
+if ($hasActionableIssues) {
+    Write-Host "Verification completed with actionable issues. Review the details above and the saved report." -ForegroundColor Yellow
+}
 Write-Host "Verification report written to $reportPath" -ForegroundColor Green
+exit $(if ($hasActionableIssues) { 2 } else { 0 })
 
 

@@ -40,5 +40,5 @@ run-openclaw.cmd update
 
 ## Documentation
 
-- [manual-steps.md](/D:/openclaw/openclaw-toolkit/manual-steps.md)
-- [quick-reference.md](/D:/openclaw/openclaw-toolkit/quick-reference.md)
+- [manual-steps.md](manual-steps.md)
+- [quick-reference.md](quick-reference.md)
