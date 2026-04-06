@@ -110,12 +110,24 @@ function Invoke-External {
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
-    $null = $process.Start()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
 
-    $exitCode = $process.ExitCode
+    try {
+        $null = $process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+
+        $process.WaitForExit()
+        $stdoutTask.Wait()
+        $stderrTask.Wait()
+
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
+        $exitCode = $process.ExitCode
+    }
+    finally {
+        $process.Dispose()
+    }
+
     $text = (($stdout, $stderr) | Where-Object { $_ -and $_.Trim().Length -gt 0 }) -join [Environment]::NewLine
 
     if ($text -and -not $Quiet) {
@@ -618,7 +630,7 @@ function Ensure-SandboxImages {
             $null = Invoke-External -FilePath "docker" -Arguments @(
                 "build", "-t", $Config.sandbox.sandboxBaseImage,
                 "-f", "Dockerfile.sandbox", "."
-            )
+            ) -StreamOutput
         }
         finally {
             Pop-Location
@@ -638,7 +650,7 @@ function Ensure-SandboxImages {
                 "-f", "Dockerfile.sandbox-common",
                 "--build-arg", "BASE_IMAGE=$($Config.sandbox.sandboxBaseImage)",
                 "."
-            )
+            ) -StreamOutput
         }
         finally {
             Pop-Location
