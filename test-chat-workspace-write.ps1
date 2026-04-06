@@ -265,9 +265,16 @@ $probeFileName = "$probeId.txt"
 $probePath = Join-Path $WorkspaceHostPath $probeFileName
 $runtimeModelRef = ""
 $modelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $script:BootstrapConfig -LiveConfig $liveConfig -AgentId $AgentId
+$targetModelRef = if ($modelPlan.modelOverrideRef) {
+    [string]$modelPlan.modelOverrideRef
+}
+else {
+    [string](@(Get-AgentModelCandidateRefs -LiveConfig $liveConfig -AgentId $AgentId) | Select-Object -First 1)
+}
 
 Write-ProgressLine "Using agent $AgentId in session $sessionId" Cyan
 Write-ProgressLine "Workspace host path: $WorkspaceHostPath" Cyan
+Add-ToolkitVerificationCleanupModelRef -ModelRef $targetModelRef | Out-Null
 
 if (Test-Path $probePath) {
     Remove-Item -LiteralPath $probePath -Recurse -Force
@@ -330,6 +337,7 @@ try {
     $provider = [string]$json.result.meta.agentMeta.provider
     $model = [string]$json.result.meta.agentMeta.model
     $runtimeModelRef = if ([string]::IsNullOrWhiteSpace($provider) -or [string]::IsNullOrWhiteSpace($model)) { "" } else { "$provider/$model" }
+    Add-ToolkitVerificationCleanupModelRef -ModelRef $runtimeModelRef | Out-Null
 
     if ($sandboxed) {
         throw "Expected $AgentId to run unsandboxed for writable Telegram workspace access."
@@ -349,7 +357,8 @@ try {
     @(
         "Chat workspace write smoke test passed."
         "Agent: $AgentId"
-        "Runtime provider/model: $runtimeModelRef"
+        "Configured model for ${AgentId}: $targetModelRef"
+        "Observed model for ${AgentId}: $runtimeModelRef"
         "Sandboxed: $sandboxed"
         "Created and removed: $probePath"
         "Reply: $payloadText"
@@ -361,7 +370,8 @@ catch {
     @(
         "Chat workspace write smoke test failed."
         "Agent: $AgentId"
-        "Runtime provider/model: $runtimeModelRef"
+        "Configured model for ${AgentId}: $targetModelRef"
+        "Observed model for ${AgentId}: $runtimeModelRef"
         $message
         "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='fail';agentId=$AgentId;runtime=$runtimeModelRef;category='task';detail=$message}) -Compress)"
     ) | Write-Output

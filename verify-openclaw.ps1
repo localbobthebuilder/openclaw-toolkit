@@ -85,10 +85,76 @@ function Write-Step {
 function Write-Detail {
     param(
         [string]$Message,
-        [ConsoleColor]$Color = [ConsoleColor]::DarkGray
+        [ConsoleColor]$Color = [ConsoleColor]::White
     )
 
     Write-Host "    $Message" -ForegroundColor $Color
+}
+
+function Test-SmokeStructuredMetadataLine {
+    param([string]$Line)
+
+    return -not [string]::IsNullOrWhiteSpace($Line) -and $Line -match '^__SMOKE_JSON__:\s*\{'
+}
+
+function Remove-SmokeStructuredMetadata {
+    param([string]$Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return $Output
+    }
+
+    $lines = @(
+        foreach ($line in @($Output -split "\r\n|\n|\r")) {
+            if (Test-SmokeStructuredMetadataLine -Line $line) {
+                continue
+            }
+
+            $line
+        }
+    )
+
+    return (($lines -join [Environment]::NewLine).Trim())
+}
+
+function Get-DetailColorForLine {
+    param([string]$Line)
+
+    if ([string]::IsNullOrWhiteSpace($Line)) {
+        return [ConsoleColor]::White
+    }
+
+    $trimmed = $Line.Trim()
+    if ($trimmed -match '^(FAIL:|FAIL in\b|Reason:|Failure:|.* smoke test failed\.$|Agent capability smoke test failed\.$)') {
+        return [ConsoleColor]::Red
+    }
+    if ($trimmed -match '^(PASS:|PASS in\b|.* smoke test passed\.$|Stopped )') {
+        return [ConsoleColor]::Green
+    }
+    if ($trimmed -match '^(SKIP:|INFO:|WARN:|Category:|Verification completed with actionable issues)') {
+        return [ConsoleColor]::Yellow
+    }
+    if ($trimmed -match '^(Configured model for |Observed model for )') {
+        return [ConsoleColor]::Cyan
+    }
+
+    return [ConsoleColor]::White
+}
+
+function Write-SummaryStatusDetail {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$Status
+    )
+
+    $color = switch -Regex ($Status) {
+        '^PASS$' { [ConsoleColor]::Green; break }
+        '^FAIL$' { [ConsoleColor]::Red; break }
+        '^(SKIP/INFO|INFO|INFO/INCOMPLETE)$' { [ConsoleColor]::Yellow; break }
+        default { [ConsoleColor]::White }
+    }
+
+    Write-Detail "${Label}: $Status" $color
 }
 
 function Test-CheckRequested {
@@ -123,9 +189,10 @@ function Add-ReportSection {
         [Parameter(Mandatory = $true)][string]$Content
     )
 
+    $sanitizedContent = Remove-SmokeStructuredMetadata -Output $Content
     [void]$Lines.Add("")
     [void]$Lines.Add("[$Title]")
-    [void]$Lines.Add($Content)
+    [void]$Lines.Add($sanitizedContent)
 }
 
 function Format-Duration {
@@ -337,6 +404,96 @@ function Test-ResultHasIssue {
     return $null -ne $Result -and $null -ne $Result.ExitCode -and [int]$Result.ExitCode -ne 0
 }
 
+function Invoke-RegisteredLocalModelCleanup {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $modelRefs = @(Get-ToolkitVerificationCleanupModelRefs)
+    if ($modelRefs.Count -eq 0) {
+        return [pscustomobject]@{
+            Attempted = $false
+            HasIssue  = $false
+        }
+    }
+
+    Write-Step "Local model cleanup"
+
+    $ollamaCommand = Get-Command "ollama" -ErrorAction SilentlyContinue
+    if ($null -eq $ollamaCommand) {
+        Write-Detail "Skipping cleanup because ollama CLI is not available on the host." ([ConsoleColor]::Yellow)
+        return [pscustomobject]@{
+            Attempted = $true
+            HasIssue  = $true
+        }
+    }
+
+    $hasIssue = $false
+    foreach ($modelRef in @($modelRefs)) {
+        if ([string]::IsNullOrWhiteSpace($modelRef)) {
+            continue
+        }
+
+        $providerId, $modelId = ([string]$modelRef -split "/", 2)
+        if ([string]::IsNullOrWhiteSpace($modelId) -or $providerId -notlike "ollama*") {
+            continue
+        }
+
+        $endpoint = Get-ToolkitOllamaEndpointByProviderId -Config $Config -ProviderId $providerId
+        if ($null -eq $endpoint) {
+            $hasIssue = $true
+            Write-Detail "Skipping $modelRef because its Ollama endpoint is no longer configured." ([ConsoleColor]::Yellow)
+            continue
+        }
+
+        $oldHost = $env:OLLAMA_HOST
+        try {
+            $env:OLLAMA_HOST = Get-ToolkitOllamaHostBaseUrl -Endpoint $endpoint
+            Write-Detail "Stopping $modelRef to free GPU memory" ([ConsoleColor]::DarkGray)
+            $stopOutput = @(& $ollamaCommand.Source "stop" $modelId 2>&1 | ForEach-Object { ($_ | Out-String).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $stopExitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+        }
+        catch {
+            $stopExitCode = 1
+            $stopOutput = @(
+                if ($_.Exception -and -not [string]::IsNullOrWhiteSpace([string]$_.Exception.Message)) {
+                    [string]$_.Exception.Message.Trim()
+                }
+                else {
+                    ($_ | Out-String).Trim()
+                }
+            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        }
+        finally {
+            if ($null -eq $oldHost) {
+                Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:OLLAMA_HOST = $oldHost
+            }
+        }
+
+        $stopPreview = (@($stopOutput) -join " ").ToLowerInvariant()
+        $alreadyUnloaded = $stopPreview -match 'not loaded|not running|no running model|not found'
+        if ($stopExitCode -eq 0) {
+            Write-Detail "Stopped $modelRef" ([ConsoleColor]::Green)
+        }
+        elseif ($alreadyUnloaded) {
+            Write-Detail "$modelRef was already unloaded" ([ConsoleColor]::DarkGray)
+        }
+        else {
+            $hasIssue = $true
+            Write-Detail "Ollama stop for $modelRef returned exit code $stopExitCode." ([ConsoleColor]::Yellow)
+            if (@($stopOutput).Count -gt 0) {
+                Write-Detail (@($stopOutput)[0]) ([ConsoleColor]::Yellow)
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Attempted = $true
+        HasIssue  = $hasIssue
+    }
+}
+
 function Invoke-LoggedEnvPathValidation {
     param(
         [Parameter(Mandatory = $true)][string]$EnvFilePath,
@@ -405,7 +562,7 @@ function Invoke-LoggedEnvPathValidation {
 
     $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
     if ($hasIssue) {
-        Write-Detail "Docker bind-mount env paths need attention in $elapsed" ([ConsoleColor]::Yellow)
+        Write-Detail "Docker bind-mount env paths need attention in $elapsed" ([ConsoleColor]::Red)
     }
     else {
         Write-Detail "Docker bind-mount env paths match the current user in $elapsed" ([ConsoleColor]::Green)
@@ -441,9 +598,9 @@ function Invoke-LoggedExternal {
         else {
             $failureInfo = Get-ExternalFailureInfo -FilePath $FilePath -Arguments $Arguments -Output $result.Output -ExitCode ([int]$result.ExitCode)
             $message = if ($FailureSummary) { $FailureSummary } elseif ($failureInfo.Summary) { $failureInfo.Summary } else { "WARN: exit code $($result.ExitCode) in $elapsed" }
-            Write-Detail $message ([ConsoleColor]::Yellow)
+            Write-Detail $message ([ConsoleColor]::Red)
             if ($failureInfo.Summary -and $FailureSummary -and $failureInfo.Summary -ne $FailureSummary) {
-                Write-Detail $failureInfo.Summary ([ConsoleColor]::Yellow)
+                Write-Detail $failureInfo.Summary ([ConsoleColor]::Red)
             }
             $result = [pscustomobject]@{
                 ExitCode = [int]$result.ExitCode
@@ -504,7 +661,9 @@ function Invoke-LoggedScript {
                 $line = ($_ | Out-String).TrimEnd()
                 if (-not [string]::IsNullOrWhiteSpace($line)) {
                     $captured.Add($line)
-                    Write-Detail $line ([ConsoleColor]::Gray)
+                    if (-not (Test-SmokeStructuredMetadataLine -Line $line)) {
+                        Write-Detail $line (Get-DetailColorForLine -Line $line)
+                    }
                 }
             }
         }
@@ -513,7 +672,9 @@ function Invoke-LoggedScript {
                 $line = ($_ | Out-String).TrimEnd()
                 if (-not [string]::IsNullOrWhiteSpace($line)) {
                     $captured.Add($line)
-                    Write-Detail $line ([ConsoleColor]::Gray)
+                    if (-not (Test-SmokeStructuredMetadataLine -Line $line)) {
+                        Write-Detail $line (Get-DetailColorForLine -Line $line)
+                    }
                 }
             }
         }
@@ -533,7 +694,7 @@ function Invoke-LoggedScript {
         $capturedText = ($captured -join [Environment]::NewLine).Trim()
         $hasStructuredResult = $capturedText -match '__SMOKE_JSON__:\s*\{'
         Write-Detail "FAIL in $elapsed" ([ConsoleColor]::Red)
-        if ($errorText) {
+        if ($errorText -and -not $hasStructuredResult) {
             $preview = ($errorText -split "(`r`n|`n|`r)")[0]
             Write-Detail $preview ([ConsoleColor]::Red)
         }
@@ -1308,6 +1469,13 @@ if (Test-CheckRequested -Names @("voice")) {
         'for cmd in whisper whisper-cli sherpa-onnx-offline ffmpeg; do if command -v "$cmd" >/dev/null 2>&1; then printf "%s: %s\n" "$cmd" "$(command -v "$cmd")"; fi; done'
     ) -AllowFailure -SuccessSummary "Collected available voice backend binaries." -FailureSummary "Could not probe voice backend binaries."
 }
+Reset-ToolkitVerificationCleanupModelRefs
+$verificationExitCode = 1
+$cleanupResult = [pscustomobject]@{
+    Attempted = $false
+    HasIssue  = $false
+}
+try {
 $voiceSmokeTestOutput = "Voice smoke test skipped."
 if ((Test-CheckRequested -Names @("voice")) -and $config.voiceNotes.enabled) {
     $voiceTestScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-voice-notes.ps1"
@@ -2135,53 +2303,53 @@ $reportLines -join [Environment]::NewLine | Set-Content -Path $reportPath -Encod
 Write-Host ""
 Write-Host "==> Verification summary" -ForegroundColor Cyan
 Write-Detail "Requested checks: $(@($script:RequestedChecks) -join ', ')"
-if (Test-CheckRequested -Names @("health")) { Write-Detail "Health exit code: $($health.ExitCode)" }
+if (Test-CheckRequested -Names @("health")) { Write-SummaryStatusDetail -Label "Health" -Status $(if ($health.ExitCode -eq 0) { "PASS" } else { "FAIL" }) }
 if (Test-CheckRequested -Names @("docker")) {
-    Write-Detail "Docker env paths: $(if ($dockerEnvPaths.ExitCode -eq 0) { 'PASS' } else { 'FAIL' })"
-    Write-Detail "Managed images: $(if ($managedImages.ExitCode -eq 0) { 'PASS' } else { 'INFO/INCOMPLETE' })"
+    Write-SummaryStatusDetail -Label "Docker env paths" -Status $(if ($dockerEnvPaths.ExitCode -eq 0) { 'PASS' } else { 'FAIL' })
+    Write-SummaryStatusDetail -Label "Managed images" -Status $(if ($managedImages.ExitCode -eq 0) { 'PASS' } else { 'INFO/INCOMPLETE' })
 }
-if (Test-CheckRequested -Names @("voice")) { Write-Detail "Voice smoke test: $(Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null)" }
+if (Test-CheckRequested -Names @("voice")) { Write-SummaryStatusDetail -Label "Voice smoke test" -Status (Get-SmokeSummaryLabel -Output $voiceSmokeTestOutput -StructuredResult $null) }
 if (Test-CheckRequested -Names @("local-model")) {
-    Write-Detail "Local model smoke test: $(Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured)"
+    Write-SummaryStatusDetail -Label "Local model smoke test" -Status (Get-SmokeSummaryLabel -Output $localModelSmokeTestOutput -StructuredResult $localModelSmokeStructured)
     if ($localModelSmokeStructured -and [string]$localModelSmokeStructured.status -eq "fail") {
-        Write-Detail "Local model failure category: $($localModelSmokeStructured.category)" ([ConsoleColor]::Yellow)
-        Write-Detail "Local model detail: $($localModelSmokeStructured.detail)" ([ConsoleColor]::Yellow)
+        Write-Detail "Local model failure category: $($localModelSmokeStructured.category)" ([ConsoleColor]::Red)
+        Write-Detail "Local model detail: $($localModelSmokeStructured.detail)" ([ConsoleColor]::Red)
     }
 }
 if (Test-CheckRequested -Names @("agent")) {
-    Write-Detail "Agent capability smoke test: $(Get-SmokeSummaryLabel -Output $agentCapabilitiesSmokeTestOutput -StructuredResult $agentCapabilitiesSmokeStructured)"
+    Write-SummaryStatusDetail -Label "Agent capability smoke test" -Status (Get-SmokeSummaryLabel -Output $agentCapabilitiesSmokeTestOutput -StructuredResult $agentCapabilitiesSmokeStructured)
     if ($agentCapabilitiesSmokeStructured -and $agentCapabilitiesSmokeStructured.checks) {
         foreach ($check in @($agentCapabilitiesSmokeStructured.checks)) {
             $label = ("Agent check {0} ({1})" -f $check.name, $check.agentId)
             $status = [string]$check.status
             if ($status -eq "fail") {
-                Write-Detail ("{0}: FAIL [{1}]" -f $label, $check.category) ([ConsoleColor]::Yellow)
+                Write-Detail ("{0}: FAIL [{1}]" -f $label, $check.category) ([ConsoleColor]::Red)
                 if ($check.targetModel) {
-                    Write-Detail "Target model: $($check.targetModel)" ([ConsoleColor]::Yellow)
+                    Write-Detail "Configured model for $($check.agentId): $($check.targetModel)" ([ConsoleColor]::Red)
                 }
                 if ($check.runtime) {
-                    Write-Detail "Runtime: $($check.runtime)" ([ConsoleColor]::Yellow)
+                    Write-Detail "Observed model for $($check.agentId): $($check.runtime)" ([ConsoleColor]::Red)
                 }
                 if ($check.detail) {
-                    Write-Detail "Reason: $($check.detail)" ([ConsoleColor]::Yellow)
+                    Write-Detail "Reason: $($check.detail)" ([ConsoleColor]::Red)
                 }
             }
             elseif ($status -eq "pass") {
-                $targetSuffix = if ($check.targetModel) { " target $($check.targetModel)" } else { "" }
-                $runtimeSuffix = if ($check.runtime) { " via $($check.runtime)" } else { "" }
-                Write-Detail ("{0}: PASS{1}{2}" -f $label, $targetSuffix, $runtimeSuffix)
+                $targetSuffix = if ($check.targetModel) { "; configured model $($check.targetModel)" } else { "" }
+                $runtimeSuffix = if ($check.runtime) { "; observed model $($check.runtime)" } else { "" }
+                Write-Detail ("{0}: PASS{1}{2}" -f $label, $targetSuffix, $runtimeSuffix) ([ConsoleColor]::Green)
             }
             else {
-                $targetSuffix = if ($check.targetModel) { " target $($check.targetModel)" } else { "" }
-                Write-Detail ("{0}: SKIP/INFO{1} ({2})" -f $label, $targetSuffix, $check.detail)
+                $targetSuffix = if ($check.targetModel) { "; configured model $($check.targetModel)" } else { "" }
+                Write-Detail ("{0}: SKIP/INFO{1} ({2})" -f $label, $targetSuffix, $check.detail) ([ConsoleColor]::Yellow)
             }
         }
     }
 }
-if (Test-CheckRequested -Names @("sandbox")) { Write-Detail "Sandbox smoke test: $(if ($sandboxSmokeTestOutput -match 'passed') { 'PASS' } elseif ($sandboxSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
-if (Test-CheckRequested -Names @("chat-write")) { Write-Detail "Chat workspace write smoke test: $(if ($chatWorkspaceWriteSmokeTestOutput -match 'passed') { 'PASS' } elseif ($chatWorkspaceWriteSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' })" }
-if (Test-CheckRequested -Names @("multi-agent")) { Write-Detail "Multi-agent verification: $(if ((@($multiAgentVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($multiAgentVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' })" }
-if (Test-CheckRequested -Names @("context")) { Write-Detail "Context management verification: $(if ((@($contextManagementVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($contextManagementVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' })" }
+if (Test-CheckRequested -Names @("sandbox")) { Write-SummaryStatusDetail -Label "Sandbox smoke test" -Status $(if ($sandboxSmokeTestOutput -match 'passed') { 'PASS' } elseif ($sandboxSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' }) }
+if (Test-CheckRequested -Names @("chat-write")) { Write-SummaryStatusDetail -Label "Chat workspace write smoke test" -Status $(if ($chatWorkspaceWriteSmokeTestOutput -match 'passed') { 'PASS' } elseif ($chatWorkspaceWriteSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' }) }
+if (Test-CheckRequested -Names @("multi-agent")) { Write-SummaryStatusDetail -Label "Multi-agent verification" -Status $(if ((@($multiAgentVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($multiAgentVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' }) }
+if (Test-CheckRequested -Names @("context")) { Write-SummaryStatusDetail -Label "Context management verification" -Status $(if ((@($contextManagementVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($contextManagementVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' }) }
 
 $hasActionableIssues = $false
 foreach ($result in @($health, $dockerEnvPaths, $dockerPs, $managedImages, $serveStatus, $funnelStatus, $modelsList, $modelsStatus, $telegramConfig, $audioConfig, $audioBackendProbe, $sandboxExplain, $audit, $gitStatus)) {
@@ -2217,6 +2385,19 @@ if ($hasActionableIssues) {
     Write-Host "Verification completed with actionable issues. Review the details above and the saved report." -ForegroundColor Yellow
 }
 Write-Host "Verification report written to $reportPath" -ForegroundColor Green
-exit $(if ($hasActionableIssues) { 2 } else { 0 })
+$verificationExitCode = if ($hasActionableIssues) { 2 } else { 0 }
+}
+finally {
+    $cleanupResult = Invoke-RegisteredLocalModelCleanup -Config $config
+    Reset-ToolkitVerificationCleanupModelRefs
+}
 
+if ($cleanupResult.HasIssue) {
+    Write-Host "Verification cleanup could not confirm all local models were unloaded." -ForegroundColor Yellow
+    if ($verificationExitCode -eq 0) {
+        $verificationExitCode = 2
+    }
+}
+
+exit $verificationExitCode
 

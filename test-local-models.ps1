@@ -416,6 +416,7 @@ $sessionId = "smoke-localmodel-" + [guid]::NewGuid().ToString("N").Substring(0, 
 Write-ProgressLine "Using container $ContainerName" Cyan
 Write-ProgressLine "Agent $AgentId will target $targetModelRef" Cyan
 Write-ProgressLine "Session $sessionId with timeout ${TimeoutSeconds}s" Cyan
+Add-ToolkitVerificationCleanupModelRef -ModelRef $targetModelRef | Out-Null
 
 try {
     Write-ProgressLine "Resetting session state" Gray
@@ -459,6 +460,7 @@ try {
     $payloadText = [string]$json.result.payloads[0].text
     $provider = [string]$json.result.meta.agentMeta.provider
     $model = [string]$json.result.meta.agentMeta.model
+    Add-ToolkitVerificationCleanupModelRef -ModelRef ($provider + '/' + $model) | Out-Null
 
     if ($provider -notlike "ollama*") {
         throw "Expected provider 'ollama*' but got '$provider'."
@@ -470,8 +472,8 @@ try {
     @(
         "Local model smoke test passed."
         "Agent: $AgentId"
-        "Model: $targetModelRef"
-        "Runtime provider/model: $provider/$model"
+        "Configured model for ${AgentId}: $targetModelRef"
+        "Observed model for ${AgentId}: $provider/$model"
         "Reply: $payloadText"
         "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='pass';agentId=$AgentId;modelRef=$targetModelRef;runtime=($provider + '/' + $model);category='';detail='Local model replied correctly.'}) -Compress)"
     ) | Write-Output
@@ -482,7 +484,7 @@ catch {
     @(
         "Local model smoke test failed."
         "Agent: $AgentId"
-        "Model: $targetModelRef"
+        "Configured model for ${AgentId}: $targetModelRef"
         "Category: $category"
         $message
         "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='fail';agentId=$AgentId;modelRef=$targetModelRef;runtime='';category=$category;detail=$message}) -Compress)"

@@ -440,6 +440,43 @@ function Get-ToolkitModelIdFromRef {
     return [string]$ModelRef
 }
 
+function Reset-ToolkitVerificationCleanupModelRefs {
+    $global:ToolkitVerificationCleanupModelRefs = New-Object System.Collections.Generic.List[string]
+}
+
+function Get-ToolkitVerificationCleanupModelRefs {
+    if ($null -eq $global:ToolkitVerificationCleanupModelRefs) {
+        Reset-ToolkitVerificationCleanupModelRefs
+    }
+
+    return @($global:ToolkitVerificationCleanupModelRefs.ToArray())
+}
+
+function Add-ToolkitVerificationCleanupModelRef {
+    param([string]$ModelRef)
+
+    if ([string]::IsNullOrWhiteSpace($ModelRef)) {
+        return $false
+    }
+
+    $modelRefText = [string]$ModelRef
+    $providerId = ($modelRefText -split "/", 2)[0]
+    if ($providerId -notlike "ollama*") {
+        return $false
+    }
+
+    if ($modelRefText -in @(Get-ToolkitVerificationCleanupModelRefs)) {
+        return $true
+    }
+
+    if ($null -eq $global:ToolkitVerificationCleanupModelRefs) {
+        Reset-ToolkitVerificationCleanupModelRefs
+    }
+
+    $global:ToolkitVerificationCleanupModelRefs.Add($modelRefText)
+    return $true
+}
+
 function Convert-ToolkitLocalModelIdToRef {
     param(
         [Parameter(Mandatory = $true)]$Config,

@@ -491,7 +491,8 @@ try {
         $chatModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $chatAgentId
         $chatTargetModelRef = Resolve-AgentSmokeTargetModelRef -PrimaryModelRef $chatModelRef -ModelPlan $chatModelPlan
         if ($chatTargetModelRef) {
-            Write-ProgressLine "[$chatAgentId] Target model: $chatTargetModelRef" Cyan
+            Write-ProgressLine "[$chatAgentId] Configured model: $chatTargetModelRef" Cyan
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatTargetModelRef | Out-Null
         }
         if ($chatModelPlan.status -eq "skip") {
             $outputLines.Add("SKIP: $chatAgentId smoke skipped because no endpoint-defined local model currently fits.")
@@ -512,19 +513,21 @@ try {
             Write-ProgressLine "[$chatAgentId] Initializing a real git repo in the shared workspace" Gray
             $chatInit = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $chatRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatInit
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
             $chatInitReply = (Get-AgentReplyText -AgentJson $chatInit).Trim()
             if (-not (Test-Path (Join-Path $chatRepoPath ".git"))) {
                 throw "Expected git repo at $chatRepoPath, but .git directory was not created. Agent reply: $chatInitReply"
             }
             $outputLines.Add("PASS: $chatAgentId initialized git repo $chatRepoName")
             if ($chatTargetModelRef) {
-                $outputLines.Add("Target model: $chatTargetModelRef")
+                $outputLines.Add("Configured model for ${chatAgentId}: $chatTargetModelRef")
             }
-            $outputLines.Add("Runtime: $chatRuntime")
+            $outputLines.Add("Observed model for ${chatAgentId}: $chatRuntime")
 
             Write-ProgressLine "[$chatAgentId] Writing a README inside that repo" Gray
             $chatWrite = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$chatRepoName/README.md with exactly this content: telegram smoke test. Then reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatWrite
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
             $chatWriteReply = (Get-AgentReplyText -AgentJson $chatWrite).Trim()
             if ($chatWriteReply -ne "WRITE_OK" -and $chatWriteReply -ne "telegram smoke test") {
                 throw "Expected WRITE_OK from $chatAgentId after README write, but got: $chatWriteReply"
@@ -542,6 +545,7 @@ try {
             Write-ProgressLine "[$chatAgentId] Reading the README back through OpenClaw" Gray
             $chatRead = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-read-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$chatRepoName/README.md. Reply with exactly the file contents and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatRead
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
             $chatReadReply = (Get-AgentReplyText -AgentJson $chatRead).Trim()
             if ((Normalize-SmokeSentence -Text $chatReadReply) -ne "telegram smoke test") {
                 throw "Expected README readback 'telegram smoke test', but got: $chatReadReply"
@@ -551,6 +555,7 @@ try {
             Write-ProgressLine "[$chatAgentId] Running git status inside the repo" Gray
             $chatStatus = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${chatRepoName}: git status --short --branch. Reply with the exact git output and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatStatus
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
             $chatStatusReply = (Get-AgentReplyText -AgentJson $chatStatus).Trim()
             $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $chatRepoPath, "status", "--short", "--branch")).Output.Trim()
             if ($hostStatus -ne $chatStatusReply) {
@@ -569,10 +574,10 @@ try {
             $failures.Add("${chatAgentId}: [$category] $message")
             $outputLines.Add("FAIL: $chatAgentId useful git/file workflow failed [$category]")
             if ($chatTargetModelRef) {
-                $outputLines.Add("Target model: $chatTargetModelRef")
+                $outputLines.Add("Configured model for ${chatAgentId}: $chatTargetModelRef")
             }
             if ($chatRuntime) {
-                $outputLines.Add("Runtime: $chatRuntime")
+                $outputLines.Add("Observed model for ${chatAgentId}: $chatRuntime")
             }
             $outputLines.Add("Reason: $message")
             $checkResults.Add((New-CheckResult -Name "chat" -Status "fail" -AgentId $chatAgentId -TargetModel $chatTargetModelRef -Runtime $chatRuntime -Category $category -Detail $message))
@@ -591,22 +596,24 @@ try {
             $modelsToStop.Add($researchModelRef)
         }
         if ($researchModelRef) {
-            Write-ProgressLine "[$researchAgentId] Target model: $researchModelRef" Cyan
+            Write-ProgressLine "[$researchAgentId] Configured model: $researchModelRef" Cyan
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $researchModelRef | Out-Null
         }
         $researchRuntime = ""
         try {
             Write-ProgressLine "[$researchAgentId] Performing a real web-backed research check" Gray
             $researchTurn = Invoke-AgentTurn -AgentId $researchAgentId -SessionId "smoke-research-$suffix" -Message "Use web_search to find the official documentation domain for OpenClaw. Reply with exactly docs.openclaw.ai and nothing else." -Timeout $TimeoutSeconds
             $researchRuntime = Get-AgentRuntimeRef -AgentJson $researchTurn
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $researchRuntime | Out-Null
             $researchReply = (Get-AgentReplyText -AgentJson $researchTurn).Trim()
             if ($researchReply -ne "docs.openclaw.ai") {
                 throw "Expected docs.openclaw.ai from $researchAgentId, but got: $researchReply"
             }
             $outputLines.Add("PASS: $researchAgentId completed a real research workflow")
             if ($researchModelRef) {
-                $outputLines.Add("Target model: $researchModelRef")
+                $outputLines.Add("Configured model for ${researchAgentId}: $researchModelRef")
             }
-            $outputLines.Add("Runtime: $researchRuntime")
+            $outputLines.Add("Observed model for ${researchAgentId}: $researchRuntime")
             $checkResults.Add((New-CheckResult -Name "research" -Status "pass" -AgentId $researchAgentId -TargetModel $researchModelRef -Runtime $researchRuntime -Detail "Completed a web-backed research task." ))
         }
         catch {
@@ -615,10 +622,10 @@ try {
             $failures.Add("${researchAgentId}: [$category] $message")
             $outputLines.Add("FAIL: $researchAgentId research workflow failed [$category]")
             if ($researchModelRef) {
-                $outputLines.Add("Target model: $researchModelRef")
+                $outputLines.Add("Configured model for ${researchAgentId}: $researchModelRef")
             }
             if ($researchRuntime) {
-                $outputLines.Add("Runtime: $researchRuntime")
+                $outputLines.Add("Observed model for ${researchAgentId}: $researchRuntime")
             }
             $outputLines.Add("Reason: $message")
             $checkResults.Add((New-CheckResult -Name "research" -Status "fail" -AgentId $researchAgentId -TargetModel $researchModelRef -Runtime $researchRuntime -Category $category -Detail $message))
@@ -637,12 +644,13 @@ try {
         $reviewModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $reviewAgentId
         $reviewTargetModelRef = Resolve-AgentSmokeTargetModelRef -PrimaryModelRef $reviewModelRef -ModelPlan $reviewModelPlan
         if ($reviewTargetModelRef) {
-            Write-ProgressLine "[$reviewAgentId] Target model: $reviewTargetModelRef" Cyan
+            Write-ProgressLine "[$reviewAgentId] Configured model: $reviewTargetModelRef" Cyan
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewTargetModelRef | Out-Null
         }
         if ($reviewModelPlan.status -eq "skip") {
             $outputLines.Add("SKIP: $reviewAgentId smoke skipped because no endpoint-defined local model currently fits.")
             if ($reviewTargetModelRef) {
-                $outputLines.Add("Target model: $reviewTargetModelRef")
+                $outputLines.Add("Configured model for ${reviewAgentId}: $reviewTargetModelRef")
             }
             $outputLines.Add($reviewModelPlan.detail)
             $checkResults.Add((New-CheckResult -Name "review" -Status "skip" -AgentId $reviewAgentId -TargetModel $reviewTargetModelRef -Category "fit" -Detail $reviewModelPlan.detail))
@@ -658,15 +666,16 @@ try {
             Write-ProgressLine "[$reviewAgentId] Verifying read-only review access to the shared workspace" Gray
             $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$reviewProbeName. If it contains the exact phrase 'review smoke ok', reply with exactly REVIEW_OK and nothing else." -ModelOverrideRef $reviewModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $reviewRuntime = Get-AgentRuntimeRef -AgentJson $reviewTurn
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewRuntime | Out-Null
             $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
             if ($reviewReply -ne "REVIEW_OK") {
                 throw "Expected REVIEW_OK from $reviewAgentId, but got: $reviewReply"
             }
             $outputLines.Add("PASS: $reviewAgentId can read and verify shared workspace files")
             if ($reviewTargetModelRef) {
-                $outputLines.Add("Target model: $reviewTargetModelRef")
+                $outputLines.Add("Configured model for ${reviewAgentId}: $reviewTargetModelRef")
             }
-            $outputLines.Add("Runtime: $reviewRuntime")
+            $outputLines.Add("Observed model for ${reviewAgentId}: $reviewRuntime")
             $checkResults.Add((New-CheckResult -Name "review" -Status "pass" -AgentId $reviewAgentId -TargetModel $reviewTargetModelRef -Runtime $reviewRuntime -Detail "Read and verified shared workspace content."))
         }
         catch {
@@ -675,10 +684,10 @@ try {
             $failures.Add("${reviewAgentId}: [$category] $message")
             $outputLines.Add("FAIL: $reviewAgentId review-read workflow failed [$category]")
             if ($reviewTargetModelRef) {
-                $outputLines.Add("Target model: $reviewTargetModelRef")
+                $outputLines.Add("Configured model for ${reviewAgentId}: $reviewTargetModelRef")
             }
             if ($reviewRuntime) {
-                $outputLines.Add("Runtime: $reviewRuntime")
+                $outputLines.Add("Observed model for ${reviewAgentId}: $reviewRuntime")
             }
             $outputLines.Add("Reason: $message")
             $checkResults.Add((New-CheckResult -Name "review" -Status "fail" -AgentId $reviewAgentId -TargetModel $reviewTargetModelRef -Runtime $reviewRuntime -Category $category -Detail $message))
@@ -698,12 +707,13 @@ try {
         $coderModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $coderAgentId
         $coderTargetModelRef = Resolve-AgentSmokeTargetModelRef -PrimaryModelRef $coderModelRef -ModelPlan $coderModelPlan
         if ($coderTargetModelRef) {
-            Write-ProgressLine "[$coderAgentId] Target model: $coderTargetModelRef" Cyan
+            Write-ProgressLine "[$coderAgentId] Configured model: $coderTargetModelRef" Cyan
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $coderTargetModelRef | Out-Null
         }
         if ($coderModelPlan.status -eq "skip") {
             $outputLines.Add("SKIP: $coderAgentId smoke skipped because no endpoint-defined local model currently fits.")
             if ($coderTargetModelRef) {
-                $outputLines.Add("Target model: $coderTargetModelRef")
+                $outputLines.Add("Configured model for ${coderAgentId}: $coderTargetModelRef")
             }
             $outputLines.Add($coderModelPlan.detail)
             $checkResults.Add((New-CheckResult -Name "coder" -Status "skip" -AgentId $coderAgentId -TargetModel $coderTargetModelRef -Category "fit" -Detail $coderModelPlan.detail))
@@ -719,6 +729,7 @@ try {
             Write-ProgressLine "[$coderAgentId] Creating a bounded coding artifact in the shared workspace" Gray
             $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exactly this content: coder smoke ok. Then reply with exactly CODER_WRITE_OK and nothing else." -ModelOverrideRef $coderModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $coderRuntime = Get-AgentRuntimeRef -AgentJson $coderWrite
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $coderRuntime | Out-Null
             $coderReply = (Get-AgentReplyText -AgentJson $coderWrite).Trim()
             if ($coderReply -ne "CODER_WRITE_OK") {
                 throw "Expected CODER_WRITE_OK from $coderAgentId, but got: $coderReply"
@@ -732,9 +743,9 @@ try {
             }
             $outputLines.Add("PASS: $coderAgentId can write bounded workspace files")
             if ($coderTargetModelRef) {
-                $outputLines.Add("Target model: $coderTargetModelRef")
+                $outputLines.Add("Configured model for ${coderAgentId}: $coderTargetModelRef")
             }
-            $outputLines.Add("Runtime: $coderRuntime")
+            $outputLines.Add("Observed model for ${coderAgentId}: $coderRuntime")
             $checkResults.Add((New-CheckResult -Name "coder" -Status "pass" -AgentId $coderAgentId -TargetModel $coderTargetModelRef -Runtime $coderRuntime -Detail "Created a bounded workspace artifact."))
         }
         catch {
@@ -743,10 +754,10 @@ try {
             $failures.Add("${coderAgentId}: [$category] $message")
             $outputLines.Add("FAIL: $coderAgentId bounded write workflow failed [$category]")
             if ($coderTargetModelRef) {
-                $outputLines.Add("Target model: $coderTargetModelRef")
+                $outputLines.Add("Configured model for ${coderAgentId}: $coderTargetModelRef")
             }
             if ($coderRuntime) {
-                $outputLines.Add("Runtime: $coderRuntime")
+                $outputLines.Add("Observed model for ${coderAgentId}: $coderRuntime")
             }
             $outputLines.Add("Reason: $message")
             $checkResults.Add((New-CheckResult -Name "coder" -Status "fail" -AgentId $coderAgentId -TargetModel $coderTargetModelRef -Runtime $coderRuntime -Category $category -Detail $message))
@@ -792,7 +803,7 @@ $structuredResult = [pscustomobject]@{
 if ($failures.Count -gt 0) {
     $outputLines.Insert(0, "Agent capability smoke test failed.")
     $outputLines.Add("Workspace: $WorkspaceHostPath")
-    $outputLines.Add("Failures: $($failures.Count)")
+    $outputLines.Add("Failed checks: $($failures.Count)")
     $outputLines.Add("Telegram-routed agent exercised useful file + git workflows in shared workspace, but at least one managed agent could not complete its expected tool path.")
     $outputLines.Add("__SMOKE_JSON__: $(ConvertTo-Json $structuredResult -Depth 8 -Compress)")
     $outputLines | Write-Output
