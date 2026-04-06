@@ -18,6 +18,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   private ws: WebSocket | null = null;
   private statusAbortController: AbortController | null = null;
+  private seenServerStartTime: string | null = null;
 
   // Helper for API URL construction
   private getBaseUrl() {
@@ -181,14 +182,15 @@ export class ToolkitDashboard extends LitElement {
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === 'server-info') {
-        const key = 'dashboardServerStart';
-        const last = localStorage.getItem(key);
-        localStorage.setItem(key, String(msg.startTime));
-        // Different start-time = server was restarted (e.g. after rebuild).
-        // Reload to pick up the new JS bundle.
-        if (last && last !== String(msg.startTime)) {
+        const currentStartTime = String(msg.startTime);
+        // On a freshly opened tab, the first server-info just establishes the
+        // current backend instance. Only reload if this same tab later sees the
+        // backend restart underneath it (for example after a rebuild).
+        if (this.seenServerStartTime && this.seenServerStartTime !== currentStartTime) {
           window.location.reload();
+          return;
         }
+        this.seenServerStartTime = currentStartTime;
         return;
       }
       if (msg.type === 'stdout' || msg.type === 'stderr') {
