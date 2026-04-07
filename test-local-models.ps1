@@ -230,10 +230,8 @@ function Get-PreferredLocalSmokeCandidateRefs {
     if ($null -ne $BootstrapConfig) {
         $endpointKey = $null
         $bootstrapAgentConfig = Get-BootstrapManagedAgentConfigById -BootstrapConfig $BootstrapConfig -AgentId $AgentId
-        if ($null -ne $bootstrapAgentConfig -and
-            $bootstrapAgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
-            -not [string]::IsNullOrWhiteSpace([string]$bootstrapAgentConfig.endpointKey)) {
-            $endpointKey = [string]$bootstrapAgentConfig.endpointKey
+        if ($null -ne $bootstrapAgentConfig) {
+            $endpointKey = Get-ToolkitAgentEndpointKey -Config $BootstrapConfig -AgentConfig $bootstrapAgentConfig
         }
         elseif (@($refs).Count -gt 0) {
             $providerId = ([string]$refs[0] -split '/', 2)[0]

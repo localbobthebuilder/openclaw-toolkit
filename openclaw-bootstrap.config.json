@@ -360,6 +360,12 @@
     {
       "key": "local",
       "default": true,
+      "agents": [
+        "main",
+        "chat-local",
+        "review-local",
+        "coder-local"
+      ],
       "telemetry": {
         "kind": "local-nvidia-smi"
       },
@@ -566,6 +572,10 @@
     {
       "key": "review-pc",
       "default": false,
+      "agents": [
+        "review-remote",
+        "coder-remote"
+      ],
       "telemetry": {
         "kind": "static-gpu-total",
         "gpuTotalMiB": 8192
@@ -685,7 +695,6 @@
         "rolePolicyKey": "orchestrator",
         "isMain": true,
         "default": true,
-        "endpointKey": "local",
         "sandboxMode": "off",
         "subagents": {
           "enabled": false,
@@ -732,7 +741,6 @@
         "name": "Local Chat",
         "enabled": true,
         "rolePolicyKey": "trustedChat",
-        "endpointKey": "local",
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -766,7 +774,6 @@
         "name": "Local Reviewer",
         "enabled": true,
         "rolePolicyKey": "review",
-        "endpointKey": "local",
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -781,7 +788,6 @@
         "name": "Coder Delegate",
         "enabled": true,
         "rolePolicyKey": "codingDelegate",
-        "endpointKey": "local",
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -804,7 +810,6 @@
         "name": "Remote Reviewer",
         "enabled": true,
         "rolePolicyKey": "review",
-        "endpointKey": "review-pc",
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -826,7 +831,6 @@
         "name": "Remote Coder",
         "enabled": true,
         "rolePolicyKey": "codingDelegate",
-        "endpointKey": "review-pc",
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,

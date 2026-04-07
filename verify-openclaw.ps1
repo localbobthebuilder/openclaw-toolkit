@@ -1128,7 +1128,12 @@ function Resolve-ExpectedConfiguredModelRef {
         return $ModelRef
     }
 
-    return (Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $ModelRef -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig))
+    $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+    if ([string]::IsNullOrWhiteSpace($endpointKey)) {
+        return $ModelRef
+    }
+
+    return (Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $ModelRef -EndpointKey $endpointKey)
 }
 
 function Convert-NormalizedJson {
@@ -1703,7 +1708,7 @@ if ((Test-CheckRequested -Names @("sandbox")) -and $config.sandbox.enabled) {
     $sandboxSmokeTestOutput = Invoke-LoggedScript -Label "Sandbox smoke test" -ScriptPath $sandboxScript -SkipMessage "Sandbox smoke test skipped: script not found."
 }
 $chatWorkspaceWriteSmokeTestOutput = "Chat workspace write smoke test skipped."
-if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localChatAgent)) {
+if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $config.multiAgent.localChatAgent)) {
     $chatWorkspaceScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-chat-workspace-write.ps1"
     $chatWorkspaceParams = @{}
     if ($config.multiAgent.localChatAgent.id) {
@@ -2316,7 +2321,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                         $workspaceAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$agentId)
                         if ($null -ne $workspaceAgent -and
                             (Test-ToolkitAgentEnabled -AgentConfig $workspaceAgent) -and
-                            (Test-ToolkitAgentAssigned -AgentConfig $workspaceAgent)) {
+                            (Test-ToolkitAgentAssigned -Config $config -AgentConfig $workspaceAgent)) {
                             $workspaceAgent
                         }
                     }

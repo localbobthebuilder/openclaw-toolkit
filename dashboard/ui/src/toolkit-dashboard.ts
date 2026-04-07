@@ -595,6 +595,100 @@ export class ToolkitDashboard extends LitElement {
     return normalized;
   }
 
+  normalizeEndpointRecord(endpoint: any) {
+    const normalized = JSON.parse(JSON.stringify(endpoint || {}));
+    normalized.default = this.normalizeBoolean(normalized.default, false);
+    if (!Array.isArray(normalized.hostedModels)) {
+      normalized.hostedModels = [];
+    }
+    if (!Array.isArray(normalized.agents)) {
+      normalized.agents = [];
+    }
+    normalized.agents = normalized.agents
+      .map((agentId: any) => String(agentId || '').trim())
+      .filter((agentId: string) => agentId.length > 0);
+    return normalized;
+  }
+
+  getConfigEndpointsFrom(config: any) {
+    if (Array.isArray(config?.endpoints)) {
+      return config.endpoints;
+    }
+    if (Array.isArray(config?.ollama?.endpoints)) {
+      return config.ollama.endpoints;
+    }
+    return [];
+  }
+
+  getEndpointAgentIds(endpoint: any) {
+    if (!endpoint || typeof endpoint !== 'object') {
+      return [];
+    }
+    if (!Array.isArray(endpoint.agents)) {
+      endpoint.agents = [];
+    }
+    endpoint.agents = endpoint.agents
+      .map((agentId: any) => String(agentId || '').trim())
+      .filter((agentId: string) => agentId.length > 0);
+    return endpoint.agents;
+  }
+
+  normalizeEndpointAgentAssignments(config: any) {
+    const endpoints = this.getConfigEndpointsFrom(config).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
+    if (Array.isArray(config?.endpoints)) {
+      config.endpoints = endpoints;
+    } else if (Array.isArray(config?.ollama?.endpoints)) {
+      config.ollama.endpoints = endpoints;
+    }
+
+    const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
+    const validAgentIds = new Set(
+      agents
+        .map((agent: any) => String(agent?.id || '').trim())
+        .filter((agentId: string) => agentId.length > 0)
+    );
+    const legacyAssignments = new Map<string, string>();
+    for (const agent of agents) {
+      const agentId = String(agent?.id || '').trim();
+      if (!agentId) continue;
+      const legacyEndpointKey = typeof agent?.endpointKey === 'string' ? agent.endpointKey.trim() : '';
+      if (legacyEndpointKey) {
+        legacyAssignments.set(agentId, legacyEndpointKey);
+      }
+    }
+
+    const assignedAgentIds = new Set<string>();
+    for (const endpoint of endpoints) {
+      const cleanedAgentIds: string[] = [];
+      for (const agentId of this.getEndpointAgentIds(endpoint)) {
+        if (!validAgentIds.has(agentId) || assignedAgentIds.has(agentId)) {
+          continue;
+        }
+        cleanedAgentIds.push(agentId);
+        assignedAgentIds.add(agentId);
+      }
+      endpoint.agents = cleanedAgentIds;
+    }
+
+    for (const [agentId, endpointKey] of legacyAssignments.entries()) {
+      if (assignedAgentIds.has(agentId)) {
+        continue;
+      }
+      const endpoint = endpoints.find((candidate: any) => String(candidate?.key || '') === endpointKey);
+      if (!endpoint) {
+        continue;
+      }
+      endpoint.agents = [...this.getEndpointAgentIds(endpoint), agentId];
+      assignedAgentIds.add(agentId);
+    }
+
+    for (const agent of agents) {
+      delete agent.endpointKey;
+    }
+
+    return config;
+  }
+
   getEmptyTemplateState() {
     return { agents: {}, workspaces: {} };
   }
@@ -721,6 +815,10 @@ export class ToolkitDashboard extends LitElement {
       if (Array.isArray(workspace?.agents)) {
         workspace.agents = workspace.agents.map((agentId: string) => agentId === normalizedOldId ? normalizedNewId : agentId);
       }
+    }
+
+    for (const endpoint of this.getConfigEndpoints()) {
+      endpoint.agents = this.getEndpointAgentIds(endpoint).map((agentId: string) => agentId === normalizedOldId ? normalizedNewId : agentId);
     }
 
     const telegramRouting = this.config?.multiAgent?.telegramRouting;
@@ -1001,7 +1099,7 @@ export class ToolkitDashboard extends LitElement {
             </div>
           </div>
           <div class="topology-help" style="margin-top: 14px;">
-            The visual board edits the same config used elsewhere: <strong>endpointKey</strong> for placement and <strong>subagents.allowAgents</strong> for delegation.
+            The visual board edits the same config used elsewhere: <strong>endpoints[].agents</strong> for placement and <strong>subagents.allowAgents</strong> for delegation.
           </div>
         </div>
 
@@ -1380,13 +1478,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getConfigEndpoints() {
-    if (Array.isArray(this.config?.endpoints)) {
-      return this.config.endpoints;
-    }
-    if (Array.isArray(this.config?.ollama?.endpoints)) {
-      return this.config.ollama.endpoints;
-    }
-    return [];
+    return this.getConfigEndpointsFrom(this.config);
   }
 
   getDefaultEndpoint() {
@@ -1405,11 +1497,14 @@ export class ToolkitDashboard extends LitElement {
   }
 
   resolveAgentEndpoint(agent: any) {
-    const endpoints = this.getConfigEndpoints();
-    if (typeof agent?.endpointKey === 'string' && agent.endpointKey.length > 0) {
-      const explicitEndpoint = endpoints.find((endpoint: any) => endpoint.key === agent.endpointKey);
-      if (explicitEndpoint) {
-        return explicitEndpoint;
+    const agentId = String(agent?.id || '').trim();
+    if (!agentId) {
+      return null;
+    }
+
+    for (const endpoint of this.getConfigEndpoints()) {
+      if (this.getEndpointAgentIds(endpoint).includes(agentId)) {
+        return endpoint;
       }
     }
 
@@ -1518,9 +1613,7 @@ export class ToolkitDashboard extends LitElement {
     if (key) clone.key = key;
     delete clone.modelSource;
     clone.enabled = this.normalizeBoolean(clone.enabled, true);
-    if (typeof clone.endpointKey !== 'string' || !clone.endpointKey.trim()) {
-      delete clone.endpointKey;
-    }
+    delete clone.endpointKey;
     if (!Array.isArray(clone.candidateModelRefs)) {
       clone.candidateModelRefs = [];
     }
@@ -1541,6 +1634,9 @@ export class ToolkitDashboard extends LitElement {
     const pushAgent = (agent: any, key?: string) => {
       if (!agent || typeof agent !== 'object' || typeof agent.id !== 'string' || !agent.id.trim()) return;
       const normalized = this.sanitizeAgentRecord(agent, key);
+      if (typeof agent?.endpointKey === 'string' && agent.endpointKey.trim().length > 0) {
+        normalized.endpointKey = agent.endpointKey.trim();
+      }
       delete normalized.workspaceMode;
       delete normalized.workspace;
       delete normalized.sharedWorkspaceAccess;
@@ -1635,6 +1731,12 @@ export class ToolkitDashboard extends LitElement {
     for (const rawAgent of agentsList) {
       const workspace = workspaceByAgentId.get(rawAgent?.id);
       const agent = this.sanitizeAgentRecord(rawAgent, rawAgent?.key);
+      const endpoint = this.getConfigEndpointsFrom(config).find((candidate: any) =>
+        this.getEndpointAgentIds(candidate).includes(String(agent?.id || ''))
+      );
+      if (endpoint?.key) {
+        agent.endpointKey = endpoint.key;
+      }
       if (workspace?.mode === 'private') {
         agent.workspaceMode = 'private';
         if (workspace.path) {
@@ -1671,6 +1773,13 @@ export class ToolkitDashboard extends LitElement {
 
     clone.agents = migrated.agents || { rolePolicies: {}, telegramRouting: {}, list: [] };
     clone.workspaces = Array.isArray(migrated.workspaces) ? migrated.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
+    const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
+    if (Array.isArray(clone.endpoints)) {
+      clone.endpoints = normalizedEndpoints;
+    } else if (Array.isArray(clone?.ollama?.endpoints)) {
+      clone.ollama.endpoints = normalizedEndpoints;
+    }
+    this.normalizeEndpointAgentAssignments(clone);
     if (Array.isArray(clone.agents?.list)) {
       clone.agents.list = clone.agents.list.map((agent: any) => {
         const normalized = this.sanitizeAgentRecord(agent, agent?.key);
@@ -1678,9 +1787,6 @@ export class ToolkitDashboard extends LitElement {
         delete normalized.workspaceMode;
         delete normalized.workspace;
         delete normalized.sharedWorkspaceAccess;
-        if (typeof normalized.endpointKey !== 'string' || !normalized.endpointKey.trim()) {
-          delete normalized.endpointKey;
-        }
         return normalized;
       });
     }
@@ -1705,6 +1811,13 @@ export class ToolkitDashboard extends LitElement {
     if (!Array.isArray(clone.workspaces)) {
       clone.workspaces = [];
     }
+    const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
+    if (Array.isArray(clone.endpoints)) {
+      clone.endpoints = normalizedEndpoints;
+    } else if (Array.isArray(clone?.ollama?.endpoints)) {
+      clone.ollama.endpoints = normalizedEndpoints;
+    }
+    this.normalizeEndpointAgentAssignments(clone);
     clone.workspaces = clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace));
     clone.agents.list = clone.agents.list.map((agent: any) => {
       const normalized = this.sanitizeAgentRecord(agent, agent?.key);
@@ -1764,6 +1877,7 @@ export class ToolkitDashboard extends LitElement {
 
       if (endpoint?.name) normalized.name = endpoint.name;
       if (endpoint?.telemetry) normalized.telemetry = endpoint.telemetry;
+      normalized.agents = this.getEndpointAgentIds(endpoint);
       if (Array.isArray(endpoint?.hostedModels)) {
         normalized.hostedModels = this.sanitizeModelEntries(endpoint.hostedModels);
       }
@@ -2019,6 +2133,10 @@ export class ToolkitDashboard extends LitElement {
       subagents.allowAgents = subagents.allowAgents.filter((candidateId: string) => candidateId !== agentId);
     }
 
+    for (const endpoint of this.getConfigEndpoints()) {
+      endpoint.agents = this.getEndpointAgentIds(endpoint).filter((candidateId: string) => candidateId !== agentId);
+    }
+
     const telegramRouting = this.config?.multiAgent?.telegramRouting;
     if (telegramRouting && telegramRouting.targetAgentId === agentId) {
       delete telegramRouting.targetAgentId;
@@ -2172,16 +2290,27 @@ export class ToolkitDashboard extends LitElement {
     this.toggleTopologyDelegation(this.topologyLinkSourceAgentId, agentId);
   }
 
+  setAgentEndpointAssignment(agent: any, endpointKey: string | null) {
+    const agentId = String(agent?.id || '').trim();
+    if (agentId) {
+      for (const endpoint of this.getConfigEndpoints()) {
+        endpoint.agents = this.getEndpointAgentIds(endpoint).filter((candidateId: string) => candidateId !== agentId);
+      }
+      if (endpointKey && endpointKey.length > 0) {
+        const targetEndpoint = this.getConfigEndpoints().find((candidate: any) => candidate.key === endpointKey);
+        if (targetEndpoint) {
+          targetEndpoint.agents = [...this.getEndpointAgentIds(targetEndpoint), agentId];
+        }
+      }
+    }
+    const endpoint = endpointKey ? this.getConfigEndpoints().find((candidate: any) => candidate.key === endpointKey) : null;
+    this.syncAgentEndpointModelSelection(agent, endpoint);
+  }
+
   assignTopologyAgentToEndpoint(agentKey: string, endpointKey: string | null) {
     const entry = this.getTopologyAgentEntryByKey(agentKey);
     if (!entry) return;
-    if (endpointKey && endpointKey.length > 0) {
-      entry.agent.endpointKey = endpointKey;
-    } else {
-      delete entry.agent.endpointKey;
-    }
-    const endpoint = endpointKey ? this.getConfigEndpoints().find((candidate: any) => candidate.key === endpointKey) : null;
-    this.syncAgentEndpointModelSelection(entry.agent, endpoint);
+    this.setAgentEndpointAssignment(entry.agent, endpointKey);
     this.clearTopologyNotice();
     this.requestUpdate();
   }
@@ -2304,11 +2433,12 @@ export class ToolkitDashboard extends LitElement {
         <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines or PCs. Each one can expose a local Ollama runtime, a hosted model pool, or both.</p>
         ${repeat(endpoints, (ep: any) => ep.key, (ep: any, idx) => {
           const runtime = this.getEndpointOllama(ep);
+          const assignedAgentCount = this.getEndpointAgentIds(ep).length;
           return html`
           <div class="item-row">
             <div class="item-info">
               <span class="item-title">${ep.key}</span>
-              <span class="item-sub">${runtime?.hostBaseUrl || 'Hosted-only endpoint'} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted</span>
+              <span class="item-sub">${runtime?.hostBaseUrl || 'Hosted-only endpoint'} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted | ${assignedAgentCount} assigned</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure Endpoint</button>
@@ -2326,6 +2456,12 @@ export class ToolkitDashboard extends LitElement {
       const endpointModels = this.getEndpointModels(ep);
       const endpointHostedModels = this.getEndpointHostedModels(ep);
       const runtime = this.getEndpointOllama(ep);
+      const assignedAgentIds = this.getEndpointAgentIds(ep);
+      const assignedAgents = this.getManagedAgentEntries().filter(({ agent }: any) => assignedAgentIds.includes(String(agent?.id || '')));
+      const availableAgents = this.getManagedAgentEntries().filter(({ agent }: any) => {
+        const agentId = String(agent?.id || '');
+        return agentId.length > 0 && !assignedAgentIds.includes(agentId);
+      });
 
       return html`
         <div class="card">
@@ -2368,6 +2504,34 @@ export class ToolkitDashboard extends LitElement {
                     }}>
                     This endpoint has a local Ollama runtime
                 </label>
+            </div>
+
+            <h4 style="color: #666; margin-top: 24px;">Assigned Agents</h4>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Endpoints now own agent placement. Agents listed here belong to this machine/workbench.</p>
+            <div class="tag-list">
+                ${assignedAgents.map(({ agent }: any) => html`
+                    <div class="tag">
+                        ${agent.name ? `${agent.name} (${agent.id})` : agent.id}
+                        <span class="tag-remove" @click=${() => {
+                            this.setAgentEndpointAssignment(agent, null);
+                            this.requestUpdate();
+                        }}>×</span>
+                    </div>
+                `)}
+            </div>
+            <div style="margin-top: 10px; margin-bottom: 20px;">
+                <select @change=${(e: any) => {
+                    const agentId = e.target.value;
+                    const entry = this.getManagedAgentEntries().find((candidate: any) => String(candidate?.agent?.id || '') === agentId);
+                    if (entry) {
+                        this.setAgentEndpointAssignment(entry.agent, ep.key);
+                        this.requestUpdate();
+                    }
+                    e.target.value = '';
+                }}>
+                    <option value="">${availableAgents.length === 0 ? 'All configured agents are already assigned' : '+ Add Agent to Endpoint'}</option>
+                    ${availableAgents.map(({ agent }: any) => html`<option value=${agent.id}>${agent.name ? `${agent.name} (${agent.id})` : agent.id}</option>`)}
+                </select>
             </div>
 
             ${runtime ? html`
@@ -2736,9 +2900,7 @@ export class ToolkitDashboard extends LitElement {
     const agentTemplateFiles = this.ensureAgentTemplateFiles(agent);
     const effectiveWorkspaceMode = agent.workspaceMode || (this.config.multiAgent.sharedWorkspace?.enabled ? 'shared' : 'private');
     const selectedEndpoint = this.resolveAgentEndpoint(agent);
-    const effectiveEndpointKey = (typeof agent.endpointKey === 'string' && agent.endpointKey.length > 0)
-      ? agent.endpointKey
-      : (selectedEndpoint?.key || '');
+    const effectiveEndpointKey = selectedEndpoint?.key || '';
     const endpointModelOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
     const allowedAgentChoices = this.getAllowedAgentChoices(agent.id);
     const selectedAllowedAgents = Array.isArray(subagents.allowAgents) ? subagents.allowAgents : (subagents.allowAgents = []);
@@ -2790,9 +2952,8 @@ export class ToolkitDashboard extends LitElement {
                 <div class="form-group">
                     <label>Endpoint</label>
                     <select @change=${(e: any) => {
-                        agent.endpointKey = e.target.value;
-                        const endpoint = endpoints.find((entry: any) => entry.key === agent.endpointKey);
-                        this.syncAgentEndpointModelSelection(agent, endpoint);
+                        const endpointKey = e.target.value || null;
+                        this.setAgentEndpointAssignment(agent, endpointKey);
                         this.requestUpdate();
                     }}>
                         <option value="">Select Endpoint</option>
@@ -3192,6 +3353,7 @@ export class ToolkitDashboard extends LitElement {
         this.config.endpoints.push({
             key,
             default: this.getConfigEndpoints().length === 0,
+            agents: [],
             hostedModels: [],
             ollama: {
                 enabled: true,

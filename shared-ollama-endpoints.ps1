@@ -85,6 +85,15 @@ function Get-ToolkitEndpoints {
             key          = $key
             name         = if ($endpoint.PSObject.Properties.Name -contains "name" -and $endpoint.name) { [string]$endpoint.name } else { $key }
             default      = [bool]($endpoint.PSObject.Properties.Name -contains "default" -and $endpoint.default)
+            agents       = @(
+                if ($endpoint.PSObject.Properties.Name -contains "agents" -and $endpoint.agents) {
+                    foreach ($agentId in @($endpoint.agents)) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$agentId)) {
+                            [string]$agentId
+                        }
+                    }
+                }
+            )
             hostedModels = @(
                 if ($endpoint.PSObject.Properties.Name -contains "hostedModels" -and $endpoint.hostedModels) {
                     Normalize-ToolkitHostedModelEntries -Entries $endpoint.hostedModels
@@ -523,10 +532,9 @@ function Get-AgentOllamaEndpointKey {
         $AgentConfig
     )
 
-    if ($null -ne $AgentConfig -and
-        $AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
-        $explicit = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey ([string]$AgentConfig.endpointKey)
+    $derivedEndpointKey = Get-ToolkitAgentEndpointKey -Config $Config -AgentConfig $AgentConfig
+    if (-not [string]::IsNullOrWhiteSpace($derivedEndpointKey)) {
+        $explicit = Get-ToolkitOllamaEndpoint -Config $Config -EndpointKey $derivedEndpointKey
         if ($null -ne $explicit) {
             return [string]$explicit.key
         }

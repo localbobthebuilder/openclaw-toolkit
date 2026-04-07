@@ -85,6 +85,23 @@ function Set-ToolkitArrayDefaultProperty {
     }
 }
 
+function Get-ToolkitMutableEndpointsCollection {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "endpoints" -and $null -ne $Config.endpoints) {
+        return @($Config.endpoints)
+    }
+
+    if ($Config.PSObject.Properties.Name -contains "ollama" -and
+        $null -ne $Config.ollama -and
+        $Config.ollama.PSObject.Properties.Name -contains "endpoints" -and
+        $null -ne $Config.ollama.endpoints) {
+        return @($Config.ollama.endpoints)
+    }
+
+    return @()
+}
+
 function Normalize-ToolkitAgentConfig {
     param([Parameter(Mandatory = $true)]$AgentConfig)
 
@@ -108,6 +125,97 @@ function Normalize-ToolkitAgentConfig {
     }
 
     return $AgentConfig
+}
+
+function Sync-ToolkitEndpointAssignments {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [switch]$PreferAgentAssignments
+    )
+
+    $rawEndpoints = @(Get-ToolkitMutableEndpointsCollection -Config $Config)
+    if (@($rawEndpoints).Count -eq 0) {
+        return $Config
+    }
+
+    $validAgentIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
+        if ($null -eq $agent -or -not ($agent.PSObject.Properties.Name -contains "id")) {
+            continue
+        }
+
+        $agentId = [string]$agent.id
+        if (-not [string]::IsNullOrWhiteSpace($agentId)) {
+            [void]$validAgentIds.Add($agentId)
+        }
+    }
+
+    $endpointByKey = @{}
+    $assignedAgentIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($endpoint in @($rawEndpoints)) {
+        if ($null -eq $endpoint) {
+            continue
+        }
+
+        Set-ToolkitArrayDefaultProperty -Object $endpoint -PropertyName "agents"
+
+        $endpointKey = if ($endpoint.PSObject.Properties.Name -contains "key" -and $endpoint.key) {
+            [string]$endpoint.key
+        }
+        else {
+            ""
+        }
+        if (-not [string]::IsNullOrWhiteSpace($endpointKey)) {
+            $endpointByKey[$endpointKey] = $endpoint
+        }
+
+        if ($PreferAgentAssignments) {
+            $endpoint.agents = @()
+            continue
+        }
+
+        $cleanedAgentIds = New-Object System.Collections.Generic.List[string]
+        foreach ($rawAgentId in @($endpoint.agents)) {
+            $agentId = [string]$rawAgentId
+            if ([string]::IsNullOrWhiteSpace($agentId)) {
+                continue
+            }
+            if (-not $validAgentIds.Contains($agentId)) {
+                continue
+            }
+            if ($assignedAgentIds.Contains($agentId)) {
+                continue
+            }
+
+            $cleanedAgentIds.Add($agentId)
+            [void]$assignedAgentIds.Add($agentId)
+        }
+
+        $endpoint.agents = @($cleanedAgentIds.ToArray())
+    }
+
+    foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
+        if ($null -eq $agent -or -not ($agent.PSObject.Properties.Name -contains "id")) {
+            continue
+        }
+
+        $agentId = [string]$agent.id
+        if ([string]::IsNullOrWhiteSpace($agentId) -or $assignedAgentIds.Contains($agentId)) {
+            continue
+        }
+
+        if ($agent.PSObject.Properties.Name -contains "endpointKey" -and
+            -not [string]::IsNullOrWhiteSpace([string]$agent.endpointKey)) {
+            $endpointKey = [string]$agent.endpointKey
+            if ($endpointByKey.ContainsKey($endpointKey)) {
+                $endpoint = $endpointByKey[$endpointKey]
+                $endpoint.agents = @(@($endpoint.agents) + $agentId)
+                [void]$assignedAgentIds.Add($agentId)
+            }
+        }
+    }
+
+    return $Config
 }
 
 function Normalize-ToolkitConfigDefaults {
@@ -166,6 +274,7 @@ function Normalize-ToolkitConfigDefaults {
             }
 
             Set-ToolkitBooleanDefaultProperty -Object $endpoint -PropertyName "default" -DefaultValue $false
+            Set-ToolkitArrayDefaultProperty -Object $endpoint -PropertyName "agents"
             $hasRuntime = ($endpoint.PSObject.Properties.Name -contains "ollama" -and $null -ne $endpoint.ollama) -or
                 ($endpoint.PSObject.Properties.Name -contains "baseUrl" -and $endpoint.baseUrl) -or
                 ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) -or
@@ -194,6 +303,8 @@ function Normalize-ToolkitConfigDefaults {
 
         Normalize-ToolkitAgentConfig -AgentConfig $agent | Out-Null
     }
+
+    Sync-ToolkitEndpointAssignments -Config $Config | Out-Null
 
     if ($Config.PSObject.Properties.Name -contains "workspaces" -and $null -ne $Config.workspaces) {
         foreach ($workspace in @($Config.workspaces)) {
@@ -478,6 +589,49 @@ function Get-ToolkitWorkspaceForAgent {
     return $null
 }
 
+function Get-ToolkitAgentEndpointKey {
+    param(
+        $Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    if ($null -eq $AgentConfig) {
+        return $null
+    }
+
+    $agentId = if ($AgentConfig.PSObject.Properties.Name -contains "id" -and $AgentConfig.id) {
+        [string]$AgentConfig.id
+    }
+    else {
+        ""
+    }
+
+    if ($null -ne $Config -and -not [string]::IsNullOrWhiteSpace($agentId)) {
+        foreach ($endpoint in @(Get-ToolkitMutableEndpointsCollection -Config $Config)) {
+            if ($null -eq $endpoint) {
+                continue
+            }
+
+            foreach ($memberId in @($endpoint.agents)) {
+                if ([string]$memberId -eq $agentId) {
+                    if ($endpoint.PSObject.Properties.Name -contains "key") {
+                        return [string]$endpoint.key
+                    }
+
+                    return $null
+                }
+            }
+        }
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
+        return [string]$AgentConfig.endpointKey
+    }
+
+    return $null
+}
+
 function Get-ToolkitSharedWorkspaceList {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -543,10 +697,12 @@ function Test-ToolkitWorkspaceManagesAgentsMd {
 }
 
 function Test-ToolkitAgentAssigned {
-    param([Parameter(Mandatory = $true)]$AgentConfig)
+    param(
+        $Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
 
-    return $AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)
+    return -not [string]::IsNullOrWhiteSpace((Get-ToolkitAgentEndpointKey -Config $Config -AgentConfig $AgentConfig))
 }
 
 function Test-ToolkitAgentEnabled {
@@ -586,7 +742,7 @@ function Get-ToolkitAssignedAgentList {
                 continue
             }
 
-            if ((Test-ToolkitAgentEnabled -AgentConfig $agent) -and (Test-ToolkitAgentAssigned -AgentConfig $agent)) {
+            if ((Test-ToolkitAgentEnabled -AgentConfig $agent) -and (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $agent)) {
                 $agent
             }
         }
@@ -681,6 +837,10 @@ function Get-ToolkitLegacyMultiAgentConfig {
         }
 
         $legacyAgent = $agent.PSObject.Copy()
+        $derivedEndpointKey = Get-ToolkitAgentEndpointKey -Config $Config -AgentConfig $agent
+        if (-not [string]::IsNullOrWhiteSpace($derivedEndpointKey)) {
+            Add-Member -InputObject $legacyAgent -NotePropertyName "endpointKey" -NotePropertyValue $derivedEndpointKey -Force
+        }
         $workspace = Get-ToolkitWorkspaceForAgent -Config $Config -Agent $agent
         if ($null -ne $workspace) {
             $workspaceMode = if ($workspace.PSObject.Properties.Name -contains "mode" -and $workspace.mode) { [string]$workspace.mode } else { "shared" }
@@ -852,6 +1012,15 @@ function Convert-ToolkitConfigToPersistedSchema {
     }
     else {
         Add-Member -InputObject $Config -NotePropertyName "workspaces" -NotePropertyValue $workspacesArray -Force
+    }
+
+    Sync-ToolkitEndpointAssignments -Config $Config -PreferAgentAssignments | Out-Null
+    if ($Config.agents -and $Config.agents.PSObject.Properties.Name -contains "list") {
+        foreach ($persistedAgent in @($Config.agents.list)) {
+            if ($null -ne $persistedAgent -and $persistedAgent.PSObject.Properties.Name -contains "endpointKey") {
+                $persistedAgent.PSObject.Properties.Remove("endpointKey")
+            }
+        }
     }
 
     $Config.PSObject.Properties.Remove("multiAgent")

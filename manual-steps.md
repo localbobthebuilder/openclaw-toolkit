@@ -601,8 +601,8 @@ The current managed defaults are aimed at long-running chats with local models:
 - pruning TTL: `1h`
 - old oversized tool output is soft-trimmed first, then hard-cleared if needed
 
-It is controlled by enabled agents that also have an `endpointKey` assignment in
-the toolkit config.
+It is controlled by enabled agents that are assigned through an endpoint's
+`agents` list in the toolkit config.
 
 If enabled, bootstrap will apply the layout automatically near the end of the
 run. You can also re-apply it any time with:
@@ -777,7 +777,7 @@ Important:
   to another available local model instead of leaving the local agent unusable
 - Telegram only routes to `chat-local` when you explicitly turn on the routing
   flags under `multiAgent.localChatAgent`
-- disabling the relevant agent or clearing its `endpointKey` keeps it toolkit-only
+- disabling the relevant agent or removing it from its endpoint's `agents` list keeps it toolkit-only
   and removes it from future bootstrap runs
 
 Bootstrap-managed keys for this starter layout live in:

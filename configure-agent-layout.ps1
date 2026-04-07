@@ -237,8 +237,13 @@ function Resolve-ConfiguredLocalFallbackRef {
         return $null
     }
 
+    $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+    if ([string]::IsNullOrWhiteSpace($endpointKey)) {
+        return $null
+    }
+
     if ($candidateRefText.StartsWith("ollama/")) {
-        $candidateRefText = Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $candidateRefText -EndpointKey (Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig)
+        $candidateRefText = Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $candidateRefText -EndpointKey $endpointKey
     }
 
     if ($candidateRefText -in @($AvailableOllamaRefs)) {
@@ -1120,7 +1125,7 @@ function Add-DesiredAgentFromConfig {
         [bool]$IsDefault = $false
     )
 
-    if (-not (Test-ToolkitAgentAssigned -AgentConfig $AgentConfig)) {
+    if (-not (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $AgentConfig)) {
         return @($DesiredAgents)
     }
 
@@ -1312,18 +1317,12 @@ function Get-AgentOllamaEndpointKey {
         $AgentConfig
     )
 
-    if ($null -ne $AgentConfig -and
-        $AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
-        return [string]$AgentConfig.endpointKey
+    $resolvedEndpointKey = Get-ToolkitAgentEndpointKey -Config $Config -AgentConfig $AgentConfig
+    if (-not [string]::IsNullOrWhiteSpace($resolvedEndpointKey)) {
+        return $resolvedEndpointKey
     }
 
-    $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
-    if ($null -ne $defaultEndpoint) {
-        return [string]$defaultEndpoint.key
-    }
-
-    return "local"
+    return $null
 }
 
 function Resolve-OllamaModelRef {
@@ -1724,7 +1723,7 @@ $chatAgentId = $null
 if ($multi.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localChatAgent)) {
     $chatAgentId = [string]$multi.localChatAgent.id
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localChatAgent -ModelOverrideRef $LocalChatModelRef
-    if (-not (Test-ToolkitAgentAssigned -AgentConfig $multi.localChatAgent)) {
+    if (-not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $multi.localChatAgent)) {
         $chatAgentId = $null
     }
 }
@@ -1833,7 +1832,7 @@ elseif ($chatAgentId) {
 
 if ($telegramRouteTargetAgentId) {
     $targetAgent = Get-ToolkitAgentById -Config $config -AgentId $telegramRouteTargetAgentId
-    if ($null -eq $targetAgent -or -not (Test-ToolkitAgentEnabled -AgentConfig $targetAgent) -or -not (Test-ToolkitAgentAssigned -AgentConfig $targetAgent)) {
+    if ($null -eq $targetAgent -or -not (Test-ToolkitAgentEnabled -AgentConfig $targetAgent) -or -not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $targetAgent)) {
         $telegramRouteTargetAgentId = $null
         $routeTrustedTelegramGroups = $false
         $routeTrustedTelegramDms = $false

@@ -327,7 +327,25 @@ function Set-AgentLocalModel {
         throw "Config does not contain multiAgent.$propertyName"
     }
 
-    $agent.endpointKey = $EndpointKey
+    $targetEndpoint = $null
+    foreach ($endpoint in @(Get-ToolkitMutableEndpointsCollection -Config $Config)) {
+        if ($null -eq $endpoint) {
+            continue
+        }
+
+        Set-ToolkitArrayDefaultProperty -Object $endpoint -PropertyName "agents"
+        $endpoint.agents = @($endpoint.agents | Where-Object { [string]$_ -ne $TargetAgentId })
+
+        if ($endpoint.PSObject.Properties.Name -contains "key" -and [string]$endpoint.key -eq $EndpointKey) {
+            $targetEndpoint = $endpoint
+        }
+    }
+
+    if ($null -eq $targetEndpoint) {
+        throw "Config does not contain endpoint '$EndpointKey'"
+    }
+
+    $targetEndpoint.agents = @(@($targetEndpoint.agents) + $TargetAgentId)
     $agent.modelRef = "ollama/$ModelId"
     return $true
 }
