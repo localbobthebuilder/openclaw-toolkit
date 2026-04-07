@@ -14,6 +14,13 @@ const app = express();
 const port = 18791;
 const toolkitDir = path.resolve(__dirname, '..');
 const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
+const validBootstrapMarkdownFiles = [
+  'AGENTS.md',
+  'TOOLS.md',
+  'SOUL.md',
+  'IDENTITY.md',
+  'USER.md'
+];
 const defaultWhisperModels = [
   'tiny',
   'tiny.en',
@@ -90,6 +97,103 @@ function getWhisperModels() {
   };
 }
 
+function readToolkitConfig() {
+  return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+}
+
+function isSafeIdSegment(value) {
+  return typeof value === 'string' && value.trim().length > 0 && !value.includes('..') && !path.isAbsolute(value) && !/[\\/]/.test(value);
+}
+
+function normalizeTemplateFileName(fileName) {
+  if (typeof fileName !== 'string') {
+    return '';
+  }
+  const trimmed = fileName.trim();
+  if (!validBootstrapMarkdownFiles.includes(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
+function loadTemplateFileMap(baseDir) {
+  const files = {};
+  if (!fs.existsSync(baseDir)) {
+    return files;
+  }
+
+  for (const fileName of validBootstrapMarkdownFiles) {
+    const filePath = path.join(baseDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      continue;
+    }
+    files[fileName] = fs.readFileSync(filePath, 'utf8');
+  }
+
+  return files;
+}
+
+function writeTemplateFileMap(baseDir, fileMap) {
+  fs.mkdirSync(baseDir, { recursive: true });
+  const entries = fileMap && typeof fileMap === 'object' ? fileMap : {};
+
+  for (const fileName of validBootstrapMarkdownFiles) {
+    const normalizedName = normalizeTemplateFileName(fileName);
+    const rawContent = normalizedName ? entries[normalizedName] : '';
+    const content = typeof rawContent === 'string' ? rawContent.replace(/\r\n/g, '\n').trimEnd() : '';
+    const filePath = path.join(baseDir, fileName);
+
+    if (content.length > 0) {
+      fs.writeFileSync(filePath, content + '\n', 'utf8');
+    } else if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+}
+
+function loadToolkitTemplates(config) {
+  const templates = { agents: {}, workspaces: {} };
+  const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
+  const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
+
+  for (const agent of agents) {
+    if (!isSafeIdSegment(agent?.id)) {
+      continue;
+    }
+    templates.agents[agent.id] = loadTemplateFileMap(path.join(toolkitDir, 'agents', agent.id, 'bootstrap'));
+  }
+
+  for (const workspace of workspaces) {
+    if (!isSafeIdSegment(workspace?.id)) {
+      continue;
+    }
+    templates.workspaces[workspace.id] = loadTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'));
+  }
+
+  return templates;
+}
+
+function saveToolkitTemplates(config, templates) {
+  const agentTemplates = templates?.agents && typeof templates.agents === 'object' ? templates.agents : {};
+  const workspaceTemplates = templates?.workspaces && typeof templates.workspaces === 'object' ? templates.workspaces : {};
+  const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
+  const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
+
+  for (const agent of agents) {
+    if (!isSafeIdSegment(agent?.id)) {
+      continue;
+    }
+    writeTemplateFileMap(path.join(toolkitDir, 'agents', agent.id, 'bootstrap'), agentTemplates[agent.id]);
+  }
+
+  for (const workspace of workspaces) {
+    if (!isSafeIdSegment(workspace?.id)) {
+      continue;
+    }
+    writeTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), workspaceTemplates[workspace.id]);
+  }
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -108,8 +212,11 @@ app.use(express.static(uiDistPath));
 
 app.get('/api/config', (req, res) => {
   try {
-    const data = fs.readFileSync(configPath, 'utf8');
-    res.json(JSON.parse(data));
+    const config = readToolkitConfig();
+    res.json({
+      config,
+      templates: loadToolkitTemplates(config)
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to read config file', details: err.message });
   }
@@ -117,7 +224,9 @@ app.get('/api/config', (req, res) => {
 
 app.post('/api/config', (req, res) => {
   try {
-    const newConfig = req.body;
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const newConfig = payload.config && typeof payload.config === 'object' ? payload.config : payload;
+    const templates = payload.templates && typeof payload.templates === 'object' ? payload.templates : null;
     
     // Create backup before writing
     if (fs.existsSync(configPath)) {
@@ -125,6 +234,9 @@ app.post('/api/config', (req, res) => {
     }
     
     fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf8');
+    if (templates) {
+      saveToolkitTemplates(newConfig, templates);
+    }
     console.log('Configuration updated and backup created.');
     res.json({ success: true });
   } catch (err) {

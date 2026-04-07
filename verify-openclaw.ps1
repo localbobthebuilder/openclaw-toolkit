@@ -2273,115 +2273,64 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.manageWorkspaceAgentsMd) {
-            $overlayDirName = "bootstrap"
-            if ($config.PSObject.Properties.Name -contains "managedHooks" -and
-                $config.managedHooks -and
-                $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
-                $config.managedHooks.agentBootstrapOverlays -and
-                $config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
-                $config.managedHooks.agentBootstrapOverlays.overlayDirName) {
-                $overlayDirName = [string]$config.managedHooks.agentBootstrapOverlays.overlayDirName
-            }
+        $overlayDirName = "bootstrap"
+        if ($config.PSObject.Properties.Name -contains "managedHooks" -and
+            $config.managedHooks -and
+            $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
+            $config.managedHooks.agentBootstrapOverlays -and
+            $config.managedHooks.agentBootstrapOverlays.PSObject.Properties.Name -contains "overlayDirName" -and
+            $config.managedHooks.agentBootstrapOverlays.overlayDirName) {
+            $overlayDirName = [string]$config.managedHooks.agentBootstrapOverlays.overlayDirName
+        }
 
-            if ($config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled) {
-                $sharedAgentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$config.multiAgent.sharedWorkspace.path)) "AGENTS.md"
-                if (Test-Path $sharedAgentsFilePath) {
-                    $multiAgentVerification += "PASS: Shared workspace AGENTS.md exists at $sharedAgentsFilePath"
+        if ($config.PSObject.Properties.Name -contains "managedHooks" -and
+            $config.managedHooks -and
+            $config.managedHooks.PSObject.Properties.Name -contains "agentBootstrapOverlays" -and
+            $config.managedHooks.agentBootstrapOverlays -and
+            $config.managedHooks.agentBootstrapOverlays.enabled) {
+            foreach ($activeAgent in @(Get-ToolkitAssignedAgentList -Config $config)) {
+                if ([string]::IsNullOrWhiteSpace([string]$activeAgent.id)) {
+                    continue
+                }
+
+                $overlayAgentsPath = Join-Path (Join-Path (Join-Path (Join-Path (Get-HostConfigDir -Config $config) "agents") ([string]$activeAgent.id)) $overlayDirName) "AGENTS.md"
+                if (Test-Path $overlayAgentsPath) {
+                    $multiAgentVerification += "PASS: Agent bootstrap overlay AGENTS.md exists for $([string]$activeAgent.id) at $overlayAgentsPath"
                 }
                 else {
-                    $multiAgentVerification += "FAIL: Shared workspace AGENTS.md is missing at $sharedAgentsFilePath"
-                }
-
-                $overlayChecks = @(
-                    @{ Name = "main"; Enabled = [bool]($config.multiAgent.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.strongAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.strongAgent)); AgentId = if ($config.multiAgent.strongAgent) { [string]$config.multiAgent.strongAgent.id } else { "main" } },
-                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.researchAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.researchAgent)); AgentId = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.id } else { "research" } },
-                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localChatAgent)); AgentId = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" } },
-                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.hostedTelegramAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.hostedTelegramAgent)); AgentId = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.id } else { "chat-openai" } },
-                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localReviewAgent)); AgentId = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" } },
-                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localCoderAgent)); AgentId = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" } },
-                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteReviewAgent)); AgentId = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.id } else { "review-remote" } },
-                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteCoderAgent)); AgentId = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.id } else { "coder-remote" } }
-                )
-                foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
-                    if (-not [string]::IsNullOrWhiteSpace([string]$extraAgent.id) -and
-                        (Test-ToolkitAgentAssigned -AgentConfig $extraAgent) -and
-                        (Test-ConfiguredAgentUsesSharedWorkspace -MultiConfig $config.multiAgent -AgentConfig $extraAgent)) {
-                        $overlayChecks += @{ Name = [string]$extraAgent.id; Enabled = $true; AgentId = [string]$extraAgent.id }
-                    }
-                }
-
-                foreach ($overlayCheck in $overlayChecks) {
-                    if (-not $overlayCheck.Enabled) {
-                        continue
-                    }
-
-                    $overlayAgentsPath = Join-Path (Join-Path (Join-Path (Join-Path (Get-HostConfigDir -Config $config) "agents") ([string]$overlayCheck.AgentId)) $overlayDirName) "AGENTS.md"
-                    if (Test-Path $overlayAgentsPath) {
-                        $multiAgentVerification += "PASS: Agent bootstrap overlay AGENTS.md exists for $($overlayCheck.Name) at $overlayAgentsPath"
-                    }
-                    else {
-                        $multiAgentVerification += "FAIL: Agent bootstrap overlay AGENTS.md is missing for $($overlayCheck.Name) at $overlayAgentsPath"
-                    }
-                }
-
-                $privateWorkspaceChecks = @()
-                foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
-                    if ([string]::IsNullOrWhiteSpace([string]$extraAgent.id) -or
-                        (Test-ConfiguredAgentUsesSharedWorkspace -MultiConfig $config.multiAgent -AgentConfig $extraAgent)) {
-                        continue
-                    }
-
-                    $privateWorkspaceChecks += @{
-                        Name      = [string]$extraAgent.id
-                        Workspace = if ($extraAgent.workspace) { [string]$extraAgent.workspace } else { $null }
-                    }
-                }
-
-                foreach ($workspaceCheck in $privateWorkspaceChecks) {
-                    $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspaceCheck.Workspace)) "AGENTS.md"
-                    if (Test-Path $agentsFilePath) {
-                        $multiAgentVerification += "PASS: Managed AGENTS.md exists for $($workspaceCheck.Name) at $agentsFilePath"
-                    }
-                    else {
-                        $multiAgentVerification += "FAIL: Managed AGENTS.md is missing for $($workspaceCheck.Name) at $agentsFilePath"
-                    }
+                    $multiAgentVerification += "FAIL: Agent bootstrap overlay AGENTS.md is missing for $([string]$activeAgent.id) at $overlayAgentsPath"
                 }
             }
-            else {
-                $workspaceChecks = @(
-                    @{ Name = "main"; Enabled = [bool]($config.multiAgent.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.strongAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.strongAgent)); Workspace = $null },
-                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.researchAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.researchAgent)); Workspace = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.workspace } else { $null } },
-                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localChatAgent)); Workspace = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.workspace } else { $null } },
-                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.hostedTelegramAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.hostedTelegramAgent)); Workspace = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.workspace } else { $null } },
-                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localReviewAgent)); Workspace = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.workspace } else { $null } },
-                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localCoderAgent)); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } },
-                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteReviewAgent)); Workspace = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.workspace } else { $null } },
-                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteCoderAgent)); Workspace = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.workspace } else { $null } }
-                )
-                foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
-                    if (-not (Test-ToolkitAgentAssigned -AgentConfig $extraAgent)) {
-                        continue
-                    }
-                    $workspaceChecks += @{
-                        Name      = if ($extraAgent.id) { [string]$extraAgent.id } else { "extra-agent" }
-                        Enabled   = $true
-                        Workspace = if ($extraAgent.workspace) { [string]$extraAgent.workspace } else { $null }
-                    }
+        }
+
+        if ($config.multiAgent.manageWorkspaceAgentsMd) {
+            foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
+                if ($null -eq $workspace -or
+                    [string]::IsNullOrWhiteSpace([string]$workspace.id) -or
+                    [string]::IsNullOrWhiteSpace([string]$workspace.path)) {
+                    continue
                 }
 
-                foreach ($workspaceCheck in $workspaceChecks) {
-                    if (-not $workspaceCheck.Enabled) {
-                        continue
+                $activeWorkspaceAgents = @(
+                    foreach ($agentId in @($workspace.agents)) {
+                        $workspaceAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$agentId)
+                        if ($null -ne $workspaceAgent -and
+                            (Test-ToolkitAgentEnabled -AgentConfig $workspaceAgent) -and
+                            (Test-ToolkitAgentAssigned -AgentConfig $workspaceAgent)) {
+                            $workspaceAgent
+                        }
                     }
+                )
+                if (@($activeWorkspaceAgents).Count -eq 0) {
+                    continue
+                }
 
-                    $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspaceCheck.Workspace)) "AGENTS.md"
-                    if (Test-Path $agentsFilePath) {
-                        $multiAgentVerification += "PASS: Managed AGENTS.md exists for $($workspaceCheck.Name) at $agentsFilePath"
-                    }
-                    else {
-                        $multiAgentVerification += "FAIL: Managed AGENTS.md is missing for $($workspaceCheck.Name) at $agentsFilePath"
-                    }
+                $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspace.path)) "AGENTS.md"
+                if (Test-Path $agentsFilePath) {
+                    $multiAgentVerification += "PASS: Workspace AGENTS.md exists for $([string]$workspace.id) at $agentsFilePath"
+                }
+                else {
+                    $multiAgentVerification += "FAIL: Workspace AGENTS.md is missing for $([string]$workspace.id) at $agentsFilePath"
                 }
             }
         }

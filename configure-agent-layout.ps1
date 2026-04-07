@@ -404,6 +404,154 @@ function Remove-ManagedTextFileIfPresent {
     Remove-Item -LiteralPath $Path -Force
 }
 
+$script:ManagedBootstrapMarkdownFiles = @("AGENTS.md", "TOOLS.md", "SOUL.md", "IDENTITY.md", "USER.md")
+
+function Get-ToolkitAgentBootstrapTemplateDir {
+    param([Parameter(Mandatory = $true)][string]$AgentId)
+
+    return (Join-Path (Join-Path (Join-Path $PSScriptRoot "agents") $AgentId) "bootstrap")
+}
+
+function Get-ToolkitWorkspaceMarkdownTemplateDir {
+    param([Parameter(Mandatory = $true)][string]$WorkspaceId)
+
+    return (Join-Path (Join-Path (Join-Path $PSScriptRoot "workspaces") $WorkspaceId) "markdown")
+}
+
+function Get-ManagedMarkdownTemplateMap {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [string[]]$FileNames = $script:ManagedBootstrapMarkdownFiles
+    )
+
+    $templateMap = [ordered]@{}
+    if (-not (Test-Path -LiteralPath $SourceDir)) {
+        return $templateMap
+    }
+
+    foreach ($fileName in @($FileNames)) {
+        $filePath = Join-Path $SourceDir $fileName
+        if (-not (Test-Path -LiteralPath $filePath)) {
+            continue
+        }
+
+        $templateMap[$fileName] = @(Get-Content -LiteralPath $filePath)
+    }
+
+    return $templateMap
+}
+
+function Ensure-ManagedMarkdownFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir,
+        $TemplateMap,
+        [string[]]$AllowedFileNames = $script:ManagedBootstrapMarkdownFiles
+    )
+
+    $writtenPaths = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path -LiteralPath $TargetDir)) {
+        New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+    }
+
+    foreach ($fileName in @($AllowedFileNames)) {
+        $targetPath = Join-Path $TargetDir $fileName
+        $contentLines = @()
+        if ($null -ne $TemplateMap -and $TemplateMap.Contains($fileName)) {
+            $contentLines = @($TemplateMap[$fileName])
+        }
+
+        $hasMeaningfulContent = @($contentLines | Where-Object { $null -ne $_ }).Count -gt 0 -and -not [string]::IsNullOrWhiteSpace((@($contentLines) -join ""))
+        if ($hasMeaningfulContent) {
+            $writtenPath = Ensure-ManagedTextFile -Path $targetPath -ContentLines @($contentLines)
+            if ($writtenPath) {
+                $writtenPaths.Add($writtenPath)
+            }
+        }
+        else {
+            Remove-ManagedTextFileIfPresent -Path $targetPath
+        }
+    }
+
+    return @($writtenPaths.ToArray())
+}
+
+function Get-DefaultPrivateWorkspaceTemplateLines {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkspaceName,
+        [Parameter(Mandatory = $true)][string]$WorkspacePath,
+        [string]$AgentName,
+        [string]$SharedWorkspacePath
+    )
+
+    $displayAgentName = if ([string]::IsNullOrWhiteSpace($AgentName)) { "one agent" } else { $AgentName }
+    $lines = @(
+        "# AGENTS.md - $WorkspaceName",
+        "",
+        "## Workspace Role",
+        "- This is a private workspace used by $displayAgentName.",
+        "- Keep drafts, scratch work, temporary notes, and agent-specific artifacts here.",
+        "- Agent-specific bootstrap markdown files are injected separately from the agent bootstrap folder."
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($SharedWorkspacePath)) {
+        $lines += @(
+            "",
+            "## Shared Project Access",
+            "- This private workspace lives at ``$WorkspacePath``.",
+            "- A shared collaboration workspace also exists at ``$SharedWorkspacePath``.",
+            "- Use the shared workspace for durable repos, collaborative code, and handoff artifacts."
+        )
+    }
+
+    return @($lines)
+}
+
+function Get-AgentBootstrapTemplateMap {
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentId,
+        [string[]]$FallbackAgentsLines
+    )
+
+    $templateMap = Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitAgentBootstrapTemplateDir -AgentId $AgentId)
+    if ((-not $templateMap.Contains("AGENTS.md")) -and @($FallbackAgentsLines).Count -gt 0) {
+        $templateMap["AGENTS.md"] = @($FallbackAgentsLines)
+    }
+
+    return $templateMap
+}
+
+function Get-WorkspaceMarkdownTemplateMap {
+    param(
+        [Parameter(Mandatory = $true)]$Workspace,
+        [Parameter(Mandatory = $true)][string]$WorkspacePath,
+        [string[]]$FallbackAgentsLines,
+        [string]$AgentName,
+        [string]$SharedWorkspacePath
+    )
+
+    $workspaceId = if ($Workspace.PSObject.Properties.Name -contains "id" -and $Workspace.id) { [string]$Workspace.id } else { $null }
+    $templateMap = if ($workspaceId) {
+        Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitWorkspaceMarkdownTemplateDir -WorkspaceId $workspaceId)
+    }
+    else {
+        [ordered]@{}
+    }
+
+    if (-not $templateMap.Contains("AGENTS.md")) {
+        if ($Workspace.PSObject.Properties.Name -contains "mode" -and [string]$Workspace.mode -eq "shared") {
+            if (@($FallbackAgentsLines).Count -gt 0) {
+                $templateMap["AGENTS.md"] = @($FallbackAgentsLines)
+            }
+        }
+        else {
+            $workspaceName = if ($Workspace.PSObject.Properties.Name -contains "name" -and $Workspace.name) { [string]$Workspace.name } else { "Private Workspace" }
+            $templateMap["AGENTS.md"] = @(Get-DefaultPrivateWorkspaceTemplateLines -WorkspaceName $workspaceName -WorkspacePath $WorkspacePath -AgentName $AgentName -SharedWorkspacePath $SharedWorkspacePath)
+        }
+    }
+
+    return $templateMap
+}
+
 function Get-AgentBootstrapOverlayDir {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -1790,12 +1938,35 @@ foreach ($managedExtraAgentId in @($currentManagedExtraAgentIds)) {
     if ($markerPath) { $managedAgentsFiles += $markerPath }
 }
 
-if ($multi.manageWorkspaceAgentsMd) {
-    $sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $multi
-    foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
-        $staleOverlayPath = Join-Path (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName) "AGENTS.md"
-        Remove-ManagedTextFileIfPresent -Path $staleOverlayPath
+$sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $multi
+foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
+    $staleOverlayDir = Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName
+    foreach ($fileName in @($script:ManagedBootstrapMarkdownFiles)) {
+        Remove-ManagedTextFileIfPresent -Path (Join-Path $staleOverlayDir $fileName)
+    }
+}
 
+foreach ($desiredAgent in @($desiredAgents)) {
+    $agentRecord = Get-ManagedAgentConfigRecord -MultiConfig $multi -StrongAgentId $strongId -AgentId ([string]$desiredAgent.id)
+    if ($null -eq $agentRecord -or $null -eq $agentRecord.AgentConfig) {
+        continue
+    }
+
+    $agentConfig = $agentRecord.AgentConfig
+    $effectiveWorkspacePath = if ($desiredAgent.PSObject.Properties.Name -contains "workspace" -and $desiredAgent.workspace) {
+        [string]$desiredAgent.workspace
+    }
+    else {
+        Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $agentConfig
+    }
+    $policyKey = Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$agentRecord.DefaultPolicyKey)
+    $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -MultiConfig $multi -AgentConfig $agentConfig)
+    $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentId ([string]$desiredAgent.id) -FallbackAgentsLines $agentPolicyLines
+    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap)
+}
+
+if ($multi.manageWorkspaceAgentsMd) {
+    foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
         $staleExistingAgent = $currentAgents | Where-Object { $_.id -eq $staleExtraAgentId } | Select-Object -First 1
         if ($null -eq $staleExistingAgent) {
             $staleExistingAgent = $currentAgents | Where-Object { (Get-AgentEntryId -AgentEntry $_) -eq $staleExtraAgentId } | Select-Object -First 1
@@ -1803,13 +1974,16 @@ if ($multi.manageWorkspaceAgentsMd) {
         if ($null -ne $staleExistingAgent -and $staleExistingAgent.workspace) {
             $staleWorkspacePath = [string]$staleExistingAgent.workspace
             if ([string]::IsNullOrWhiteSpace($sharedWorkspacePath) -or $staleWorkspacePath -ne $sharedWorkspacePath) {
-                $staleWorkspaceAgentsPath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath $staleWorkspacePath) "AGENTS.md"
-                Remove-ManagedTextFileIfPresent -Path $staleWorkspaceAgentsPath
+                $staleWorkspaceDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $staleWorkspacePath
+                foreach ($fileName in @($script:ManagedBootstrapMarkdownFiles)) {
+                    Remove-ManagedTextFileIfPresent -Path (Join-Path $staleWorkspaceDir $fileName)
+                }
             }
         }
     }
 
-    if ($sharedWorkspacePath) {
+    $sharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $config
+    if ($sharedWorkspacePath -and $null -ne $sharedWorkspace) {
         $sharedPolicyKey = "sharedWorkspace"
         if ($multi.sharedWorkspace -and
             $multi.sharedWorkspace.PSObject.Properties.Name -contains "rolePolicyKey" -and
@@ -1817,8 +1991,8 @@ if ($multi.manageWorkspaceAgentsMd) {
             $sharedPolicyKey = [string]$multi.sharedWorkspace.rolePolicyKey
         }
 
-        $sharedAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $sharedWorkspacePath -ContentLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $sharedWorkspacePath -SharedWorkspacePath $sharedWorkspacePath)
-        if ($sharedAgentsPath) { $managedAgentsFiles += $sharedAgentsPath }
+        $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $sharedWorkspace -WorkspacePath $sharedWorkspacePath -FallbackAgentsLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $sharedWorkspacePath -SharedWorkspacePath $sharedWorkspacePath) -SharedWorkspacePath $sharedWorkspacePath
+        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $sharedWorkspacePath) -TemplateMap $sharedTemplateMap)
     }
 
     foreach ($desiredAgent in @($desiredAgents)) {
@@ -1835,17 +2009,14 @@ if ($multi.manageWorkspaceAgentsMd) {
             Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $agentConfig
         }
         $policyKey = Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$agentRecord.DefaultPolicyKey)
-        $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -MultiConfig $multi -AgentConfig $agentConfig)
 
-        if ($sharedWorkspacePath -and (Test-AgentUsesSharedWorkspace -MultiConfig $multi -AgentConfig $agentConfig)) {
-            $overlayAgentsPath = Ensure-AgentBootstrapOverlayFile -Config $config -AgentId ([string]$desiredAgent.id) -FileName "AGENTS.md" -OverlayDirName $overlayDirName -ContentLines $agentPolicyLines
-            if ($overlayAgentsPath) { $managedAgentsFiles += $overlayAgentsPath }
-        }
-        else {
-            $staleOverlayPath = Join-Path (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) "AGENTS.md"
-            Remove-ManagedTextFileIfPresent -Path $staleOverlayPath
-            $workspaceAgentsPath = Ensure-WorkspaceAgentsFile -Config $config -WorkspacePath $effectiveWorkspacePath -ContentLines $agentPolicyLines
-            if ($workspaceAgentsPath) { $managedAgentsFiles += $workspaceAgentsPath }
+        $workspace = Get-ToolkitWorkspaceForAgent -Config $config -Agent $agentConfig
+        if ($null -ne $workspace -and
+            (-not ($workspace.PSObject.Properties.Name -contains "mode") -or [string]$workspace.mode -ne "shared") -and
+            -not [string]::IsNullOrWhiteSpace($effectiveWorkspacePath)) {
+            $workspaceAgentName = if ($desiredAgent.PSObject.Properties.Name -contains "name" -and $desiredAgent.name) { [string]$desiredAgent.name } else { [string]$desiredAgent.id }
+            $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $effectiveWorkspacePath -AgentName $workspaceAgentName -SharedWorkspacePath $sharedWorkspacePath
+            $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $effectiveWorkspacePath) -TemplateMap $workspaceTemplateMap)
         }
     }
 }
