@@ -17,6 +17,10 @@ export class ToolkitDashboard extends LitElement {
   @state() private configSection: string = 'general';
   @state() private editingAgentKey: string | null = null;
   @state() private editingEndpointKey: string | null = null;
+  @state() private topologyLinkSourceAgentId: string | null = null;
+  @state() private topologyDraggedAgentKey: string | null = null;
+  @state() private topologyHoverEndpointKey: string | null = null;
+  @state() private topologyNotice: string = '';
   @state() private showModelSelector: boolean = false;
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   private ws: WebSocket | null = null;
@@ -104,6 +108,51 @@ export class ToolkitDashboard extends LitElement {
     .step-desc { font-size: 0.8rem; color: #888; }
     .step-done-badge { color: #4caf50; font-size: 0.75rem; font-weight: bold; }
     .setup-step .btn { white-space: nowrap; flex-shrink: 0; }
+    .topology-shell { display: flex; flex-direction: column; gap: 20px; }
+    .topology-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    .topology-legend { display: flex; flex-wrap: wrap; gap: 10px; color: #888; font-size: 0.8rem; }
+    .topology-legend-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #333; border-radius: 999px; background: #181818; }
+    .topology-notice { padding: 12px 14px; border-radius: 8px; border: 1px solid #3a3a3a; background: #151515; color: #ddd; }
+    .topology-notice strong { color: #fff; }
+    .topology-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; }
+    .topology-board { position: relative; min-height: 480px; }
+    .topology-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+    .topology-slot { position: absolute; top: 0; border: 1px solid #333; border-radius: 16px; background: linear-gradient(180deg, #191919 0%, #111 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+    .topology-slot.drop-target { border-color: #00bcd4; box-shadow: 0 0 0 2px rgba(0, 188, 212, 0.2); }
+    .topology-slot-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid #2e2e2e; }
+    .topology-slot-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .topology-slot-icon { font-size: 1.35rem; }
+    .topology-slot-heading { display: flex; flex-direction: column; min-width: 0; }
+    .topology-slot-heading strong { color: #fff; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topology-slot-heading span { color: #777; font-size: 0.76rem; }
+    .topology-slot-badge { color: #00bcd4; font-size: 0.74rem; border: 1px solid #24434a; border-radius: 999px; padding: 4px 8px; background: rgba(0,188,212,0.08); }
+    .topology-slot-body { position: relative; }
+    .topology-slot-empty { position: absolute; left: 16px; right: 16px; top: 82px; padding: 14px; border: 1px dashed #333; border-radius: 12px; color: #777; font-size: 0.82rem; text-align: center; background: rgba(255,255,255,0.01); }
+    .topology-agent { position: absolute; left: 16px; right: 16px; border: 1px solid #353535; border-radius: 14px; background: #202020; padding: 12px 12px 10px; cursor: pointer; user-select: none; box-shadow: 0 8px 18px rgba(0,0,0,0.2); }
+    .topology-agent:hover { border-color: #4a4a4a; }
+    .topology-agent.dragging { opacity: 0.55; border-style: dashed; }
+    .topology-agent.disabled { opacity: 0.6; }
+    .topology-agent.main-agent { border-color: #d4a514; box-shadow: 0 0 0 1px rgba(212,165,20,0.2), 0 8px 18px rgba(0,0,0,0.2); }
+    .topology-agent.link-source { border-color: #00bcd4; box-shadow: 0 0 0 2px rgba(0,188,212,0.2), 0 8px 18px rgba(0,0,0,0.2); }
+    .topology-agent-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .topology-agent-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .topology-agent-title strong { color: #fff; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topology-agent-avatar { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #2c2c2c; font-size: 0.95rem; flex-shrink: 0; }
+    .topology-agent-main { color: #ffc107; font-size: 1rem; }
+    .topology-agent-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .topology-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; border: 1px solid #3a3a3a; color: #bbb; background: #191919; }
+    .topology-pill.main { border-color: #7a6210; color: #ffd54f; }
+    .topology-pill.disabled { border-color: #6a2a2a; color: #ff8a80; }
+    .topology-pill.shared { border-color: #25583d; color: #81c784; }
+    .topology-pill.private { border-color: #234f6d; color: #90caf9; }
+    .topology-pill.local { border-color: #4b5b24; color: #c5e1a5; }
+    .topology-pill.hosted { border-color: #6b4d2c; color: #ffcc80; }
+    .topology-agent-meta { color: #8f8f8f; font-size: 0.74rem; line-height: 1.45; min-height: 32px; }
+    .topology-agent-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .topology-agent-actions .btn { flex: 1; padding: 7px 10px; font-size: 0.75rem; }
+    .topology-card-link-hint { margin-top: 8px; color: #00bcd4; font-size: 0.72rem; }
+    .topology-help { color: #888; font-size: 0.82rem; line-height: 1.55; }
+    .topology-help strong { color: #ddd; }
   `;
 
   async firstUpdated() {
@@ -271,13 +320,14 @@ export class ToolkitDashboard extends LitElement {
   async saveConfig() {
     try {
       this.syncAllAgentModelSources();
-      this.config = this.sanitizeConfigModelNames(this.config);
+      const persistedConfig = this.buildPersistedConfig(this.config);
       const res = await fetch(this.getBaseUrl() + '/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(this.config)
+        body: JSON.stringify(persistedConfig)
       });
       if (res.ok) {
+        this.config = this.sanitizeConfigModelNames(persistedConfig);
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         alert('Configuration saved successfully.');
       } else throw new Error('Failed to save');
@@ -306,6 +356,7 @@ export class ToolkitDashboard extends LitElement {
           </div>
           
           <div class="nav-item ${this.activeTab === 'status' ? 'active' : ''}" @click=${() => this.activeTab = 'status'}>Status</div>
+          <div class="nav-item ${this.activeTab === 'topology' ? 'active' : ''}" @click=${() => this.activeTab = 'topology'}>Topology</div>
           <div class="nav-item ${this.activeTab === 'config' ? 'active' : ''}" @click=${() => this.activeTab = 'config'}>Configuration</div>
           <div class="nav-item ${this.activeTab === 'ops' ? 'active' : ''}" @click=${() => this.activeTab = 'ops'}>Operations</div>
           <div class="nav-item ${this.activeTab === 'logs' ? 'active' : ''}" @click=${() => this.activeTab = 'logs'}>
@@ -338,6 +389,7 @@ export class ToolkitDashboard extends LitElement {
   renderContent() {
     switch (this.activeTab) {
       case 'status': return this.renderStatus();
+      case 'topology': return this.renderTopology();
       case 'config': return this.renderConfig();
       case 'ops': return this.renderOps();
       case 'logs': return this.renderLogs();
@@ -395,6 +447,9 @@ export class ToolkitDashboard extends LitElement {
       if (!this.config.telegram || typeof this.config.telegram !== 'object') {
           this.config.telegram = {};
       }
+      if (typeof this.config.telegram.enabled !== 'boolean') {
+          this.config.telegram.enabled = true;
+      }
       if (!Array.isArray(this.config.telegram.allowFrom)) {
           this.config.telegram.allowFrom = [];
       }
@@ -404,6 +459,7 @@ export class ToolkitDashboard extends LitElement {
       if (!Array.isArray(this.config.telegram.groups)) {
           this.config.telegram.groups = [];
       }
+      this.config.telegram.groups = this.config.telegram.groups.map((group: any) => this.normalizeTelegramGroupRecord(group));
       return this.config.telegram;
   }
 
@@ -435,6 +491,9 @@ export class ToolkitDashboard extends LitElement {
       if (!telegram.execApprovals || typeof telegram.execApprovals !== 'object') {
           telegram.execApprovals = {};
       }
+      if (typeof telegram.execApprovals.enabled !== 'boolean') {
+          telegram.execApprovals.enabled = false;
+      }
       if (!Array.isArray(telegram.execApprovals.approvers)) {
           telegram.execApprovals.approvers = [];
       }
@@ -452,6 +511,7 @@ export class ToolkitDashboard extends LitElement {
       const telegram = this.ensureTelegramConfig();
       telegram.groups.push({
           id: '',
+          enabled: true,
           requireMention: true,
           allowFrom: []
       });
@@ -462,6 +522,57 @@ export class ToolkitDashboard extends LitElement {
       const telegram = this.ensureTelegramConfig();
       telegram.groups.splice(index, 1);
       this.requestUpdate();
+  }
+
+  normalizeBoolean(value: any, defaultValue: boolean) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+      if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+      if (!normalized.length) return defaultValue;
+    }
+    if (value == null) {
+      return defaultValue;
+    }
+    return Boolean(value);
+  }
+
+  ensureSubagentsConfig(agent: any) {
+    if (!agent.subagents || typeof agent.subagents !== 'object') {
+      agent.subagents = {};
+    }
+    agent.subagents.enabled = this.normalizeBoolean(agent.subagents.enabled, true);
+    agent.subagents.requireAgentId = this.normalizeBoolean(agent.subagents.requireAgentId, true);
+    if (!Array.isArray(agent.subagents.allowAgents)) {
+      agent.subagents.allowAgents = [];
+    }
+    return agent.subagents;
+  }
+
+  normalizeTelegramGroupRecord(group: any) {
+    const normalized = JSON.parse(JSON.stringify(group || {}));
+    normalized.enabled = this.normalizeBoolean(normalized.enabled, true);
+    normalized.requireMention = this.normalizeBoolean(normalized.requireMention, true);
+    if (!Array.isArray(normalized.allowFrom)) {
+      normalized.allowFrom = [];
+    }
+    return normalized;
+  }
+
+  normalizeWorkspaceRecord(workspace: any) {
+    const normalized = JSON.parse(JSON.stringify(workspace || {}));
+    normalized.enableAgentToAgent = this.normalizeBoolean(normalized.enableAgentToAgent, false);
+    normalized.manageWorkspaceAgentsMd = this.normalizeBoolean(normalized.manageWorkspaceAgentsMd, false);
+    if (!Array.isArray(normalized.agents)) {
+      normalized.agents = [];
+    }
+    if (normalized.mode === 'private') {
+      normalized.allowSharedWorkspaceAccess = this.normalizeBoolean(normalized.allowSharedWorkspaceAccess, false);
+    }
+    return normalized;
   }
 
   renderStatus() {
@@ -644,6 +755,236 @@ export class ToolkitDashboard extends LitElement {
             </div>
           </div>
       ` : ''}
+    `;
+  }
+
+  renderTopology() {
+    if (!this.config) return html`<p>Loading topology...</p>`;
+
+    const slots = this.getTopologySlots();
+    const slotWidth = 308;
+    const slotGap = 28;
+    const slotHeaderHeight = 74;
+    const slotTopPadding = 22;
+    const agentHeight = 136;
+    const agentGap = 18;
+    const agentStep = agentHeight + agentGap;
+    const agentStartTop = slotHeaderHeight + slotTopPadding;
+    const maxRows = Math.max(1, ...slots.map((slot: any) => slot.agents.length));
+    const boardWidth = Math.max(1, slots.length) * slotWidth + Math.max(0, slots.length - 1) * slotGap;
+    const boardHeight = agentStartTop + maxRows * agentStep + 24;
+
+    const getAgentPosition = (agentId: string) => {
+      for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
+        const slot = slots[slotIndex];
+        const rowIndex = slot.agents.findIndex((entry: any) => entry.id === agentId);
+        if (rowIndex >= 0) {
+          const left = slotIndex * (slotWidth + slotGap) + 16;
+          const top = agentStartTop + rowIndex * agentStep;
+          return {
+            x: left + ((slotWidth - 32) / 2),
+            y: top + (agentHeight / 2)
+          };
+        }
+      }
+      return null;
+    };
+
+    const edges: any[] = [];
+    for (const sourceEntry of this.getTopologyAgentEntries()) {
+      for (const targetId of this.getAgentDelegationTargets(sourceEntry.agent)) {
+        const targetEntry = this.getTopologyAgentEntryById(targetId);
+        if (!targetEntry) {
+          continue;
+        }
+        const from = getAgentPosition(sourceEntry.id);
+        const to = getAgentPosition(targetId);
+        if (!from || !to) {
+          continue;
+        }
+        const deltaX = to.x - from.x;
+        const curve = deltaX === 0 ? 90 : Math.max(60, Math.abs(deltaX) * 0.35);
+        const c1x = from.x + (deltaX >= 0 ? curve : -curve);
+        const c2x = to.x - (deltaX >= 0 ? curve : -curve);
+        edges.push({
+          key: `${sourceEntry.id}->${targetId}`,
+          path: `M ${from.x} ${from.y} C ${c1x} ${from.y}, ${c2x} ${to.y}, ${to.x} ${to.y}`,
+          active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
+          main: sourceEntry.isMain
+        });
+      }
+    }
+
+    return html`
+      <header>
+        <h2>Agent Topology Workbench</h2>
+        <div style="display: flex; gap: 10px;">
+          ${this.topologyLinkSourceAgentId ? html`
+            <button class="btn btn-secondary" @click=${() => { this.topologyLinkSourceAgentId = null; this.clearTopologyNotice(); }}>Cancel Delegation Wiring</button>
+          ` : ''}
+          <button class="btn btn-secondary" @click=${() => this.activeTab = 'config'}>Open Full Configuration</button>
+        </div>
+      </header>
+
+      <div class="topology-shell">
+        <div class="card">
+          <div class="topology-toolbar">
+            <div>
+              <div style="color: #fff; font-weight: 600; margin-bottom: 6px;">Drag agents onto endpoint workbenches</div>
+              <div class="topology-help">
+                Drag a pawn onto a computer/workbench to change its <strong>endpoint assignment</strong>. Click <strong>Delegation</strong> on an agent, then click another agent to add or remove a dotted delegation arrow.
+              </div>
+            </div>
+            <div class="topology-legend">
+              <span class="topology-legend-item">💻 endpoint workbench</span>
+              <span class="topology-legend-item">👑 main agent</span>
+              <span class="topology-legend-item">⬈ dotted arrow = delegates to</span>
+              <span class="topology-legend-item">♻ cycles blocked</span>
+            </div>
+          </div>
+          <div class="topology-help" style="margin-top: 14px;">
+            The visual board edits the same config used elsewhere: <strong>endpointKey</strong> for placement and <strong>subagents.allowAgents</strong> for delegation.
+          </div>
+        </div>
+
+        ${this.topologyNotice ? html`
+          <div class="topology-notice"><strong>Workbench:</strong> ${this.topologyNotice}</div>
+        ` : ''}
+
+        <div class="card">
+          <div class="topology-scroll">
+            <div class="topology-board" style="width: ${boardWidth}px; height: ${boardHeight}px;">
+              <svg class="topology-links" width=${boardWidth} height=${boardHeight} viewBox=${`0 0 ${boardWidth} ${boardHeight}`} preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <marker id="topologyArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ec6ff"></path>
+                  </marker>
+                </defs>
+                ${edges.map((edge: any) => html`
+                  <path
+                    d=${edge.path}
+                    fill="none"
+                    stroke=${edge.active ? '#00bcd4' : edge.main ? '#ffd54f' : '#6ec6ff'}
+                    stroke-width=${edge.active ? '3' : '2'}
+                    stroke-dasharray="6 7"
+                    marker-end="url(#topologyArrow)"
+                    opacity=${edge.active ? '0.95' : '0.75'}></path>
+                `)}
+              </svg>
+
+              ${slots.map((slot: any, slotIndex: number) => {
+                const left = slotIndex * (slotWidth + slotGap);
+                const isDropTarget = this.topologyHoverEndpointKey === slot.key;
+                return html`
+                  <section
+                    class="topology-slot ${isDropTarget ? 'drop-target' : ''}"
+                    style="left: ${left}px; width: ${slotWidth}px; height: ${boardHeight}px;"
+                    @dragover=${(event: DragEvent) => {
+                      event.preventDefault();
+                      this.topologyHoverEndpointKey = slot.key;
+                    }}
+                    @dragleave=${() => {
+                      if (this.topologyHoverEndpointKey === slot.key) {
+                        this.topologyHoverEndpointKey = null;
+                      }
+                    }}
+                    @drop=${(event: DragEvent) => {
+                      event.preventDefault();
+                      this.handleTopologyDrop(slot.endpointKey);
+                    }}>
+                    <div class="topology-slot-header">
+                      <div class="topology-slot-title">
+                        <span class="topology-slot-icon">${slot.icon}</span>
+                        <div class="topology-slot-heading">
+                          <strong>${slot.title}</strong>
+                          <span>${slot.subtitle}</span>
+                        </div>
+                      </div>
+                      <span class="topology-slot-badge">${slot.agents.length} agent${slot.agents.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div class="topology-slot-body" style="height: ${boardHeight - slotHeaderHeight}px;">
+                      ${slot.agents.length === 0 ? html`
+                        <div class="topology-slot-empty">
+                          ${slot.endpointKey ? 'Drop an agent here to assign this endpoint.' : 'Agents without a resolved endpoint appear here.'}
+                        </div>
+                      ` : ''}
+                      ${slot.agents.map((entry: any, rowIndex: number) => {
+                        const top = agentStartTop + rowIndex * agentStep;
+                        const delegateCount = this.getAgentDelegationTargets(entry.agent).length;
+                        const isLinkSource = this.topologyLinkSourceAgentId === entry.id;
+                        const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
+                        return html`
+                          <div
+                            class="topology-agent ${entry.enabled ? '' : 'disabled'} ${entry.isMain ? 'main-agent' : ''} ${isLinkSource ? 'link-source' : ''} ${this.topologyDraggedAgentKey === entry.key ? 'dragging' : ''}"
+                            style="top: ${top}px; height: ${agentHeight}px;"
+                            draggable="true"
+                            @dragstart=${(event: DragEvent) => {
+                              this.startTopologyDrag(entry.key);
+                              event.dataTransfer?.setData('text/plain', entry.key);
+                              if (event.dataTransfer) {
+                                event.dataTransfer.effectAllowed = 'move';
+                              }
+                            }}
+                            @dragend=${() => this.endTopologyDrag()}
+                            @click=${() => this.handleTopologyAgentClick(entry.id)}>
+                            <div class="topology-agent-header">
+                              <div class="topology-agent-title">
+                                <span class="topology-agent-avatar">${entry.isMain ? '👑' : '🧍'}</span>
+                                <div style="min-width: 0;">
+                                  <strong>${entry.name}</strong>
+                                  <div style="color: #777; font-size: 0.72rem;">${entry.id}</div>
+                                </div>
+                              </div>
+                              ${entry.isMain ? html`<span class="topology-agent-main">👑</span>` : ''}
+                            </div>
+
+                            <div class="topology-agent-badges">
+                              ${entry.isMain ? html`<span class="topology-pill main">Main</span>` : ''}
+                              ${!entry.enabled ? html`<span class="topology-pill disabled">Disabled</span>` : ''}
+                              <span class="topology-pill ${entry.workspaceMode === 'shared' ? 'shared' : 'private'}">${entry.workspaceMode}</span>
+                              <span class="topology-pill ${entry.modelSource === 'local' ? 'local' : 'hosted'}">${entry.modelSource}</span>
+                              <span class="topology-pill">${delegateCount} delegate${delegateCount === 1 ? '' : 's'}</span>
+                              ${hasSubagentsDisabled ? html`<span class="topology-pill disabled">delegation off</span>` : ''}
+                            </div>
+
+                            <div class="topology-agent-meta">
+                              Role: ${entry.agent.rolePolicyKey || 'default'}<br>
+                              Model: ${entry.agent.modelRef || 'unassigned'}
+                            </div>
+
+                            <div class="topology-agent-actions">
+                              <button class="btn btn-ghost" @click=${(event: Event) => {
+                                event.stopPropagation();
+                                this.selectTopologyDelegationSource(entry.id);
+                              }}>
+                                ${isLinkSource ? 'Cancel' : 'Delegation'}
+                              </button>
+                              <button class="btn btn-ghost" @click=${(event: Event) => {
+                                event.stopPropagation();
+                                this.openTopologyAgentEditor(entry.key);
+                              }}>
+                                Details
+                              </button>
+                            </div>
+
+                            ${this.topologyLinkSourceAgentId && this.topologyLinkSourceAgentId !== entry.id ? html`
+                              <div class="topology-card-link-hint">
+                                ${this.hasDelegationEdge(this.topologyLinkSourceAgentId, entry.id)
+                                  ? 'Click to remove delegation'
+                                  : 'Click to delegate here'}
+                              </div>
+                            ` : ''}
+                          </div>
+                        `;
+                      })}
+                    </div>
+                  </section>
+                `;
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -914,30 +1255,6 @@ export class ToolkitDashboard extends LitElement {
       }
     }
 
-    const refsToCheck: string[] = [];
-    if (typeof agent?.modelRef === 'string' && agent.modelRef.length > 0) {
-      refsToCheck.push(agent.modelRef);
-    }
-    if (Array.isArray(agent?.candidateModelRefs)) {
-      for (const ref of agent.candidateModelRefs) {
-        if (typeof ref === 'string' && ref.length > 0 && !refsToCheck.includes(ref)) {
-          refsToCheck.push(ref);
-        }
-      }
-    }
-
-    const defaultEndpoint = this.getDefaultEndpoint();
-    for (const ref of refsToCheck) {
-      const matches = this.getEndpointsForModelRef(ref);
-      if (matches.length === 0) {
-        continue;
-      }
-      if (defaultEndpoint && matches.some((endpoint: any) => endpoint.key === defaultEndpoint.key)) {
-        return defaultEndpoint;
-      }
-      return matches[0];
-    }
-
     return null;
   }
 
@@ -1000,9 +1317,244 @@ export class ToolkitDashboard extends LitElement {
     });
   }
 
+  getLegacyManagedAgentKeys() {
+    return [
+      'strongAgent',
+      'researchAgent',
+      'localChatAgent',
+      'hostedTelegramAgent',
+      'localReviewAgent',
+      'localCoderAgent',
+      'remoteReviewAgent',
+      'remoteCoderAgent'
+    ];
+  }
+
+  inferModelSourceFromAgent(agent: any) {
+    const refs: string[] = [];
+    if (typeof agent?.modelRef === 'string' && agent.modelRef.length > 0) {
+      refs.push(agent.modelRef);
+    }
+    if (Array.isArray(agent?.candidateModelRefs)) {
+      for (const ref of agent.candidateModelRefs) {
+        if (typeof ref === 'string' && ref.length > 0 && !refs.includes(ref)) {
+          refs.push(ref);
+        }
+      }
+    }
+    for (const ref of refs) {
+      if (ref.startsWith('ollama/')) {
+        return 'local';
+      }
+    }
+    for (const ref of refs) {
+      if (ref.includes('/')) {
+        return 'hosted';
+      }
+    }
+    return 'hosted';
+  }
+
+  sanitizeAgentRecord(agent: any, key?: string) {
+    const clone = JSON.parse(JSON.stringify(agent || {}));
+    if (key) clone.key = key;
+    delete clone.modelSource;
+    clone.enabled = this.normalizeBoolean(clone.enabled, true);
+    if (typeof clone.endpointKey !== 'string' || !clone.endpointKey.trim()) {
+      delete clone.endpointKey;
+    }
+    if (!Array.isArray(clone.candidateModelRefs)) {
+      clone.candidateModelRefs = [];
+    }
+    clone.subagents = this.ensureSubagentsConfig(clone);
+    if (typeof clone.modelRef !== 'string') {
+      clone.modelRef = '';
+    }
+    clone.modelSource = this.inferModelSourceFromAgent(clone);
+    return clone;
+  }
+
+  buildAgentsSchemaFromLegacy(config: any) {
+    const multi = (config?.multiAgent && typeof config.multiAgent === 'object') ? config.multiAgent : {};
+    const agentsList: any[] = [];
+    const privateWorkspaces: any[] = [];
+    const sharedAgentIds: string[] = [];
+
+    const pushAgent = (agent: any, key?: string) => {
+      if (!agent || typeof agent !== 'object' || typeof agent.id !== 'string' || !agent.id.trim()) return;
+      const normalized = this.sanitizeAgentRecord(agent, key);
+      delete normalized.workspaceMode;
+      delete normalized.workspace;
+      delete normalized.sharedWorkspaceAccess;
+      if (key === 'strongAgent') {
+        normalized.isMain = true;
+      }
+      agentsList.push(normalized);
+
+      const isPrivate = agent.workspaceMode === 'private' || typeof agent.workspace === 'string' && agent.workspace.trim().length > 0;
+      if (isPrivate) {
+        privateWorkspaces.push({
+          id: `workspace-${normalized.id}`,
+          name: `${normalized.name || normalized.id} Workspace`,
+          mode: 'private',
+          path: typeof agent.workspace === 'string' && agent.workspace.trim().length > 0 ? agent.workspace : `/home/node/.openclaw/workspace-${normalized.id}`,
+          allowSharedWorkspaceAccess: this.normalizeBoolean(agent.sharedWorkspaceAccess, false),
+          enableAgentToAgent: this.normalizeBoolean(multi.enableAgentToAgent, false),
+          manageWorkspaceAgentsMd: this.normalizeBoolean(multi.manageWorkspaceAgentsMd, false),
+          agents: [normalized.id]
+        });
+      } else {
+        sharedAgentIds.push(normalized.id);
+      }
+    };
+
+    for (const key of this.getLegacyManagedAgentKeys()) {
+      pushAgent(multi[key], key);
+    }
+    for (const agent of (Array.isArray(multi.extraAgents) ? multi.extraAgents : [])) {
+      pushAgent(agent);
+    }
+
+    const workspaces: any[] = [];
+    if ((multi.sharedWorkspace && this.normalizeBoolean(multi.sharedWorkspace.enabled, true)) || sharedAgentIds.length > 0) {
+      workspaces.push({
+        id: 'shared-main',
+        name: 'Shared Workspace',
+        mode: 'shared',
+        path: multi.sharedWorkspace?.path || '/home/node/.openclaw/workspace',
+        rolePolicyKey: multi.sharedWorkspace?.rolePolicyKey || 'sharedWorkspace',
+        enableAgentToAgent: this.normalizeBoolean(multi.enableAgentToAgent, false),
+        manageWorkspaceAgentsMd: this.normalizeBoolean(multi.manageWorkspaceAgentsMd, false),
+        agents: sharedAgentIds
+      });
+    }
+    workspaces.push(...privateWorkspaces);
+
+    return {
+      agents: {
+        rolePolicies: JSON.parse(JSON.stringify(multi.rolePolicies || {})),
+        telegramRouting: JSON.parse(JSON.stringify(multi.telegramRouting || {})),
+        list: agentsList
+      },
+      workspaces
+    };
+  }
+
+  buildLegacyMultiAgentView(config: any) {
+    const agentsRoot = (config?.agents && typeof config.agents === 'object') ? config.agents : {};
+    const agentsList = Array.isArray(agentsRoot.list) ? agentsRoot.list : [];
+    const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
+    const workspaceByAgentId = new Map<string, any>();
+
+    for (const workspace of workspaces) {
+      for (const agentId of (Array.isArray(workspace?.agents) ? workspace.agents : [])) {
+        if (typeof agentId === 'string' && agentId.length > 0) {
+          workspaceByAgentId.set(agentId, workspace);
+        }
+      }
+    }
+
+    const multi: any = {
+      enableAgentToAgent: workspaces.some((workspace: any) => this.normalizeBoolean(workspace?.enableAgentToAgent, false)),
+      manageWorkspaceAgentsMd: workspaces.some((workspace: any) => this.normalizeBoolean(workspace?.manageWorkspaceAgentsMd, false)),
+      sharedWorkspace: { enabled: false },
+      rolePolicies: JSON.parse(JSON.stringify(agentsRoot.rolePolicies || {})),
+      telegramRouting: JSON.parse(JSON.stringify(agentsRoot.telegramRouting || {})),
+      extraAgents: []
+    };
+
+    const primarySharedWorkspace = workspaces.find((workspace: any) => workspace?.mode === 'shared');
+    if (primarySharedWorkspace) {
+      multi.sharedWorkspace = {
+        enabled: true,
+        path: primarySharedWorkspace.path || '/home/node/.openclaw/workspace',
+        rolePolicyKey: primarySharedWorkspace.rolePolicyKey || 'sharedWorkspace'
+      };
+    }
+
+    const legacyKeys = new Set(this.getLegacyManagedAgentKeys());
+    let inferredMainAssigned = false;
+    for (const rawAgent of agentsList) {
+      const workspace = workspaceByAgentId.get(rawAgent?.id);
+      const agent = this.sanitizeAgentRecord(rawAgent, rawAgent?.key);
+      if (workspace?.mode === 'private') {
+        agent.workspaceMode = 'private';
+        if (workspace.path) {
+          agent.workspace = workspace.path;
+        }
+        if (workspace.allowSharedWorkspaceAccess) {
+          agent.sharedWorkspaceAccess = true;
+        }
+      }
+
+      const targetKey = typeof agent.key === 'string' && legacyKeys.has(agent.key)
+        ? agent.key
+        : (!inferredMainAssigned && agent.isMain ? 'strongAgent' : '');
+
+      if (targetKey) {
+        multi[targetKey] = agent;
+        if (targetKey === 'strongAgent') {
+          inferredMainAssigned = true;
+        }
+      } else {
+        multi.extraAgents.push(agent);
+      }
+    }
+
+    return multi;
+  }
+
+  buildPersistedConfig(config: any) {
+    const clone = JSON.parse(JSON.stringify(config));
+    const migrated = clone.multiAgent ? this.buildAgentsSchemaFromLegacy(clone) : {
+      agents: clone.agents,
+      workspaces: clone.workspaces
+    };
+
+    clone.agents = migrated.agents || { rolePolicies: {}, telegramRouting: {}, list: [] };
+    clone.workspaces = Array.isArray(migrated.workspaces) ? migrated.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
+    if (Array.isArray(clone.agents?.list)) {
+      clone.agents.list = clone.agents.list.map((agent: any) => {
+        const normalized = this.sanitizeAgentRecord(agent, agent?.key);
+        delete normalized.modelSource;
+        delete normalized.workspaceMode;
+        delete normalized.workspace;
+        delete normalized.sharedWorkspaceAccess;
+        if (typeof normalized.endpointKey !== 'string' || !normalized.endpointKey.trim()) {
+          delete normalized.endpointKey;
+        }
+        return normalized;
+      });
+    }
+    delete clone.multiAgent;
+    return clone;
+  }
+
   sanitizeConfigModelNames(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
     if (!clone) return clone;
+    if (!clone.agents && clone.multiAgent) {
+      const migrated = this.buildAgentsSchemaFromLegacy(clone);
+      clone.agents = migrated.agents;
+      clone.workspaces = migrated.workspaces;
+    }
+    if (!clone.agents || typeof clone.agents !== 'object') {
+      clone.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
+    }
+    if (!Array.isArray(clone.agents.list)) {
+      clone.agents.list = [];
+    }
+    if (!Array.isArray(clone.workspaces)) {
+      clone.workspaces = [];
+    }
+    clone.workspaces = clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace));
+    clone.agents.list = clone.agents.list.map((agent: any) => {
+      const normalized = this.sanitizeAgentRecord(agent, agent?.key);
+      delete normalized.workspaceMode;
+      delete normalized.workspace;
+      delete normalized.sharedWorkspaceAccess;
+      return normalized;
+    });
     if (!clone.ollama) clone.ollama = {};
     if (!clone.skills || typeof clone.skills !== 'object') clone.skills = {};
     if (!clone.voiceNotes || typeof clone.voiceNotes !== 'object') clone.voiceNotes = {};
@@ -1024,6 +1576,18 @@ export class ToolkitDashboard extends LitElement {
     if (clone.telegram && typeof clone.telegram === 'object') {
       delete clone.telegram.botToken;
       delete clone.telegram.tokenFile;
+      clone.telegram.enabled = this.normalizeBoolean(clone.telegram.enabled, true);
+      if (Array.isArray(clone.telegram.groups)) {
+        clone.telegram.groups = clone.telegram.groups.map((group: any) => this.normalizeTelegramGroupRecord(group));
+      } else {
+        clone.telegram.groups = [];
+      }
+      if (clone.telegram.execApprovals && typeof clone.telegram.execApprovals === 'object') {
+        clone.telegram.execApprovals.enabled = this.normalizeBoolean(clone.telegram.execApprovals.enabled, false);
+        if (!Array.isArray(clone.telegram.execApprovals.approvers)) {
+          clone.telegram.execApprovals.approvers = [];
+        }
+      }
     }
     if (typeof clone.ollama.pullVramBudgetFraction !== 'number' || !Number.isFinite(clone.ollama.pullVramBudgetFraction) || clone.ollama.pullVramBudgetFraction <= 0 || clone.ollama.pullVramBudgetFraction > 1) {
       const parsedBudget = Number(clone.ollama.pullVramBudgetFraction);
@@ -1037,7 +1601,7 @@ export class ToolkitDashboard extends LitElement {
     const normalizeEndpoint = (endpoint: any) => {
       const normalized: any = {
         key: endpoint?.key || 'local',
-        default: !!endpoint?.default
+        default: this.normalizeBoolean(endpoint?.default, false)
       };
 
       if (endpoint?.name) normalized.name = endpoint.name;
@@ -1057,14 +1621,12 @@ export class ToolkitDashboard extends LitElement {
 
       if (hasRuntime) {
         const runtime: any = {};
-        if (rawRuntime?.enabled === false) runtime.enabled = false;
+        runtime.enabled = this.normalizeBoolean(rawRuntime?.enabled, true);
         if (rawRuntime?.providerId) runtime.providerId = rawRuntime.providerId;
         if (rawRuntime?.baseUrl) runtime.baseUrl = rawRuntime.baseUrl;
         if (rawRuntime?.hostBaseUrl) runtime.hostBaseUrl = rawRuntime.hostBaseUrl;
         if (rawRuntime?.apiKey) runtime.apiKey = rawRuntime.apiKey;
-        if (typeof rawRuntime?.autoPullMissingModels === 'boolean') {
-          runtime.autoPullMissingModels = rawRuntime.autoPullMissingModels;
-        }
+        runtime.autoPullMissingModels = this.normalizeBoolean(rawRuntime?.autoPullMissingModels, true);
         if (Array.isArray(rawRuntime?.models)) {
           runtime.models = this.sanitizeModelEntries(rawRuntime.models);
         } else if (Array.isArray(rawRuntime?.modelOverrides)) {
@@ -1091,6 +1653,8 @@ export class ToolkitDashboard extends LitElement {
     } else {
       clone.endpoints = [];
     }
+
+    clone.multiAgent = this.buildLegacyMultiAgentView(clone);
 
     return clone;
   }
@@ -1283,6 +1847,30 @@ export class ToolkitDashboard extends LitElement {
     return entries;
   }
 
+  isMainAgentEntry(key: string, agent: any) {
+    return key === 'strongAgent' || agent?.isMain === true;
+  }
+
+  canRemoveAgent(key: string, agent: any) {
+    return !this.isMainAgentEntry(key, agent);
+  }
+
+  removeAgentReferences(agentId: string) {
+    for (const { agent } of this.getManagedAgentEntries()) {
+      const subagents = this.ensureSubagentsConfig(agent);
+      subagents.allowAgents = subagents.allowAgents.filter((candidateId: string) => candidateId !== agentId);
+    }
+
+    const telegramRouting = this.config?.multiAgent?.telegramRouting;
+    if (telegramRouting && telegramRouting.targetAgentId === agentId) {
+      delete telegramRouting.targetAgentId;
+    }
+
+    if (this.topologyLinkSourceAgentId === agentId) {
+      this.topologyLinkSourceAgentId = null;
+    }
+  }
+
   getAllowedAgentChoices(currentAgentId?: string) {
     return this.getManagedAgentEntries()
       .filter(({ agent }: any) => agent.id !== currentAgentId)
@@ -1290,6 +1878,208 @@ export class ToolkitDashboard extends LitElement {
         id: agent.id,
         label: agent.name ? `${agent.name} (${agent.id})` : agent.id
       }));
+  }
+
+  getAgentEnabledState(_key: string, agent: any) {
+    return !!agent?.enabled;
+  }
+
+  getAgentEffectiveWorkspaceMode(agent: any) {
+    return agent?.workspaceMode || (this.config?.multiAgent?.sharedWorkspace?.enabled ? 'shared' : 'private');
+  }
+
+  getTopologyAgentEntries() {
+    return this.getManagedAgentEntries().map(({ key, agent }: any) => ({
+      key,
+      agent,
+      id: String(agent?.id || key),
+      name: String(agent?.name || agent?.id || key),
+      enabled: this.getAgentEnabledState(key, agent),
+      isMain: key === 'strongAgent',
+      endpoint: this.resolveAgentEndpoint(agent),
+      workspaceMode: this.getAgentEffectiveWorkspaceMode(agent),
+      modelSource: agent?.modelSource || (this.isLocalModelRef(agent?.modelRef) ? 'local' : 'hosted')
+    }));
+  }
+
+  getTopologyAgentEntryById(agentId: string | null | undefined) {
+    if (!agentId) return null;
+    return this.getTopologyAgentEntries().find((entry: any) => entry.id === agentId) || null;
+  }
+
+  getTopologyAgentEntryByKey(agentKey: string | null | undefined) {
+    if (!agentKey) return null;
+    return this.getTopologyAgentEntries().find((entry: any) => entry.key === agentKey) || null;
+  }
+
+  getAgentDelegationTargets(agent: any) {
+    const subagents = this.ensureSubagentsConfig(agent);
+    return subagents.allowAgents;
+  }
+
+  hasDelegationEdge(sourceAgentId: string, targetAgentId: string) {
+    const sourceEntry = this.getTopologyAgentEntryById(sourceAgentId);
+    if (!sourceEntry) return false;
+    return this.getAgentDelegationTargets(sourceEntry.agent).includes(targetAgentId);
+  }
+
+  getTopologyReachableAgents(startAgentId: string, visited = new Set<string>()) {
+    if (visited.has(startAgentId)) {
+      return visited;
+    }
+    visited.add(startAgentId);
+    const sourceEntry = this.getTopologyAgentEntryById(startAgentId);
+    if (!sourceEntry) {
+      return visited;
+    }
+    for (const targetId of this.getAgentDelegationTargets(sourceEntry.agent)) {
+      if (this.getTopologyAgentEntryById(targetId)) {
+        this.getTopologyReachableAgents(targetId, visited);
+      }
+    }
+    return visited;
+  }
+
+  wouldCreateDelegationCycle(sourceAgentId: string, targetAgentId: string) {
+    if (!sourceAgentId || !targetAgentId) return false;
+    if (sourceAgentId === targetAgentId) return true;
+    const reachable = this.getTopologyReachableAgents(targetAgentId, new Set<string>());
+    return reachable.has(sourceAgentId);
+  }
+
+  setTopologyNotice(message: string) {
+    this.topologyNotice = message;
+  }
+
+  clearTopologyNotice() {
+    this.topologyNotice = '';
+  }
+
+  selectTopologyDelegationSource(agentId: string) {
+    if (this.topologyLinkSourceAgentId === agentId) {
+      this.topologyLinkSourceAgentId = null;
+      this.clearTopologyNotice();
+      return;
+    }
+    this.topologyLinkSourceAgentId = agentId;
+    const sourceEntry = this.getTopologyAgentEntryById(agentId);
+    if (sourceEntry) {
+      this.setTopologyNotice(`Wiring delegation from ${sourceEntry.name}. Click another agent to add or remove a delegation arrow.`);
+    }
+  }
+
+  toggleTopologyDelegation(sourceAgentId: string, targetAgentId: string) {
+    if (sourceAgentId === targetAgentId) {
+      this.setTopologyNotice('An agent cannot delegate to itself.');
+      return;
+    }
+
+    const sourceEntry = this.getTopologyAgentEntryById(sourceAgentId);
+    const targetEntry = this.getTopologyAgentEntryById(targetAgentId);
+    if (!sourceEntry || !targetEntry) {
+      this.setTopologyNotice('Could not find one of the selected agents.');
+      return;
+    }
+
+    const subagents = this.ensureSubagentsConfig(sourceEntry.agent);
+    const allowedAgents = this.getAgentDelegationTargets(sourceEntry.agent);
+    const existingIndex = allowedAgents.indexOf(targetAgentId);
+    if (existingIndex >= 0) {
+      allowedAgents.splice(existingIndex, 1);
+      this.setTopologyNotice(`${sourceEntry.name} no longer delegates to ${targetEntry.name}.`);
+      this.requestUpdate();
+      return;
+    }
+
+    if (this.wouldCreateDelegationCycle(sourceAgentId, targetAgentId)) {
+      this.setTopologyNotice(`Blocked circular delegation: ${targetEntry.name} already leads back to ${sourceEntry.name}.`);
+      return;
+    }
+
+    subagents.enabled = true;
+    allowedAgents.push(targetAgentId);
+    this.setTopologyNotice(`${sourceEntry.name} can now delegate to ${targetEntry.name}.`);
+    this.requestUpdate();
+  }
+
+  handleTopologyAgentClick(agentId: string) {
+    if (!this.topologyLinkSourceAgentId) {
+      return;
+    }
+    if (this.topologyLinkSourceAgentId === agentId) {
+      this.topologyLinkSourceAgentId = null;
+      this.clearTopologyNotice();
+      return;
+    }
+    this.toggleTopologyDelegation(this.topologyLinkSourceAgentId, agentId);
+  }
+
+  assignTopologyAgentToEndpoint(agentKey: string, endpointKey: string | null) {
+    const entry = this.getTopologyAgentEntryByKey(agentKey);
+    if (!entry) return;
+    if (endpointKey && endpointKey.length > 0) {
+      entry.agent.endpointKey = endpointKey;
+    } else {
+      delete entry.agent.endpointKey;
+    }
+    const endpoint = endpointKey ? this.getConfigEndpoints().find((candidate: any) => candidate.key === endpointKey) : null;
+    this.syncAgentEndpointModelSelection(entry.agent, endpoint);
+    this.clearTopologyNotice();
+    this.requestUpdate();
+  }
+
+  startTopologyDrag(agentKey: string) {
+    this.topologyDraggedAgentKey = agentKey;
+    this.clearTopologyNotice();
+  }
+
+  endTopologyDrag() {
+    this.topologyDraggedAgentKey = null;
+    this.topologyHoverEndpointKey = null;
+  }
+
+  handleTopologyDrop(endpointKey: string | null) {
+    if (!this.topologyDraggedAgentKey) return;
+    this.assignTopologyAgentToEndpoint(this.topologyDraggedAgentKey, endpointKey);
+    this.topologyDraggedAgentKey = null;
+    this.topologyHoverEndpointKey = null;
+  }
+
+  openTopologyAgentEditor(agentKey: string) {
+    this.editingAgentKey = agentKey;
+    this.activeTab = 'config';
+    this.configSection = 'agents';
+  }
+
+  getTopologySlots() {
+    const slots = this.getConfigEndpoints().map((endpoint: any) => ({
+      key: endpoint.key,
+      endpointKey: endpoint.key,
+      title: this.getEndpointLabel(endpoint),
+      subtitle: endpoint.default ? 'Default workbench' : 'Endpoint workbench',
+      icon: endpoint.default ? '💻' : '🖥️',
+      endpoint,
+      agents: [] as any[]
+    }));
+
+    const roamingSlot = {
+      key: '__roaming__',
+      endpointKey: null,
+      title: 'Roaming Bench',
+      subtitle: 'Agents without a resolved endpoint',
+      icon: '🧰',
+      endpoint: null,
+      agents: [] as any[]
+    };
+
+    for (const entry of this.getTopologyAgentEntries()) {
+      const slot = entry.endpoint
+        ? slots.find((candidate: any) => candidate.endpointKey === entry.endpoint.key)
+        : roamingSlot;
+      (slot || roamingSlot).agents.push(entry);
+    }
+
+    return [...slots, roamingSlot];
   }
 
   syncAgentModelSource(agent: any) {
@@ -1441,7 +2231,7 @@ export class ToolkitDashboard extends LitElement {
                 </div>
                 <div class="form-group">
                     <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${runtime.autoPullMissingModels !== false} @change=${(e: any) => { runtime.autoPullMissingModels = e.target.checked; this.requestUpdate(); }}>
+                        <input type="checkbox" ?checked=${!!runtime.autoPullMissingModels} @change=${(e: any) => { runtime.autoPullMissingModels = e.target.checked; this.requestUpdate(); }}>
                         Auto-pull missing local models when they fit
                     </label>
                 </div>
@@ -1680,25 +2470,20 @@ export class ToolkitDashboard extends LitElement {
         return this.renderAgentEditor(this.editingAgentKey);
     }
 
-    const builtInAgents = Object.keys(this.config.multiAgent)
-      .filter(k => k.endsWith('Agent'))
-      .map(k => ({ key: k, ...this.config.multiAgent[k] }));
+    const agents = this.getManagedAgentEntries().map(({ key, agent }: any) => ({
+      key,
+      ...agent,
+      enabled: this.getAgentEnabledState(key, agent)
+    }));
     const sharedWorkspace = this.config.multiAgent.sharedWorkspace || (this.config.multiAgent.sharedWorkspace = { enabled: false });
 
     return html`
       <div class="card">
         <div class="card-header">
             <h3>Agents Configuration</h3>
-            <button class="btn btn-ghost" @click=${() => this.addExtraAgent()}>+ Add Custom Agent</button>
+            <button class="btn btn-ghost" @click=${() => this.addExtraAgent()}>+ Add Agent</button>
         </div>
         
-        <div class="form-group" style="margin-bottom: 25px;">
-            <label class="toggle-switch">
-                <input type="checkbox" ?checked=${this.config.multiAgent.enabled} @change=${(e: any) => this.config.multiAgent.enabled = e.target.checked}>
-                Enable Multi-Agent Orchestration
-            </label>
-        </div>
-
         <div class="grid-2" style="margin-bottom: 25px;">
             <div class="card" style="margin-bottom: 0;">
                 <div class="card-header"><h3>Workspace Collaboration</h3></div>
@@ -1748,36 +2533,25 @@ export class ToolkitDashboard extends LitElement {
             </div>
         </div>
 
-        <h4 style="color: #666; margin-bottom: 10px;">Built-in Roles</h4>
-        ${builtInAgents.map(agent => html`
-          <div class="item-row" style="${!agent.enabled && agent.key !== 'strongAgent' ? 'opacity: 0.5;' : ''}">
+        <h4 style="color: #666; margin-bottom: 10px;">All Agents</h4>
+        ${agents.map(agent => html`
+          <div class="item-row" style="${!agent.enabled ? 'opacity: 0.5;' : ''}">
             <div class="item-info">
               <span class="item-title">
                 ${agent.name} 
                 ${agent.key === 'strongAgent' ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
-                ${!agent.enabled && agent.key !== 'strongAgent' ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
+                ${!agent.enabled ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
               </span>
               <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef} | Workspace: ${agent.workspaceMode || (sharedWorkspace.enabled ? 'shared' : 'private')} | Sandbox: ${agent.sandboxMode || 'default'}</span>
             </div>
-            <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
+              ${this.canRemoveAgent(agent.key, agent) ? html`
+                <button class="btn btn-danger" @click=${() => this.removeAgentByKey(agent.key)}>Remove</button>
+              ` : ''}
+            </div>
           </div>
         `)}
-
-        ${this.config.multiAgent.extraAgents && this.config.multiAgent.extraAgents.length > 0 ? html`
-            <h4 style="color: #666; margin-top: 25px; margin-bottom: 10px;">Custom Agents</h4>
-            ${this.config.multiAgent.extraAgents.map((agent: any, idx: number) => html`
-                <div class="item-row">
-                    <div class="item-info">
-                        <span class="item-title">${agent.name}</span>
-                        <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef} | Workspace: ${agent.workspaceMode || (sharedWorkspace.enabled ? 'shared' : 'private')} | Sandbox: ${agent.sandboxMode || 'default'}</span>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="btn btn-secondary" @click=${() => this.editingAgentKey = `extra:${idx}`}>Configure</button>
-                        <button class="btn btn-danger" @click=${() => this.removeExtraAgent(idx)}>Remove</button>
-                    </div>
-                </div>
-            `)}
-        ` : ''}
       </div>
     `;
   }
@@ -1794,11 +2568,11 @@ export class ToolkitDashboard extends LitElement {
   renderAgentEditor(key: string) {
     const agent = this.getEditingAgent();
     if (!agent) return html`Agent not found`;
-    const isExtra = key.startsWith('extra:');
+    const isMain = this.isMainAgentEntry(key, agent);
 
     const endpoints = this.getConfigEndpoints();
     const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
-    const subagents = agent.subagents || (agent.subagents = {});
+    const subagents = this.ensureSubagentsConfig(agent);
     const effectiveWorkspaceMode = agent.workspaceMode || (this.config.multiAgent.sharedWorkspace?.enabled ? 'shared' : 'private');
     const selectedEndpoint = this.resolveAgentEndpoint(agent);
     const effectiveEndpointKey = (typeof agent.endpointKey === 'string' && agent.endpointKey.length > 0)
@@ -1825,7 +2599,7 @@ export class ToolkitDashboard extends LitElement {
                 </div>
                 <div class="form-group">
                     <label>Agent ID</label>
-                    <input type="text" .value=${agent.id} ?disabled=${!isExtra} @input=${(e: any) => { agent.id = e.target.value; this.requestUpdate(); }}>
+                    <input type="text" .value=${agent.id} ?disabled=${isMain} @input=${(e: any) => { agent.id = e.target.value; this.requestUpdate(); }}>
                 </div>
             </div>
 
@@ -1922,12 +2696,8 @@ export class ToolkitDashboard extends LitElement {
                 <div class="card-header"><h3>Subagents</h3></div>
                 <div class="form-group">
                     <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${subagents.enabled !== false} @change=${(e: any) => {
-                            if (e.target.checked) {
-                                delete subagents.enabled;
-                            } else {
-                                subagents.enabled = false;
-                            }
+                        <input type="checkbox" ?checked=${!!subagents.enabled} @change=${(e: any) => {
+                            subagents.enabled = e.target.checked;
                             this.requestUpdate();
                         }}>
                         Enable spawning subagents from this agent
@@ -2002,14 +2772,12 @@ export class ToolkitDashboard extends LitElement {
                 </div>
             </div>
 
-            ${key !== 'strongAgent' ? html`
-                <div class="form-group">
-                    <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${agent.enabled} @change=${(e: any) => { agent.enabled = e.target.checked; this.requestUpdate(); }}>
-                        Enable this Agent
-                    </label>
-                </div>
-            ` : ''}
+            <div class="form-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" ?checked=${!!agent.enabled} @change=${(e: any) => { agent.enabled = e.target.checked; this.requestUpdate(); }}>
+                    Enable this Agent
+                </label>
+            </div>
         </div>
     `;
   }
@@ -2135,7 +2903,7 @@ export class ToolkitDashboard extends LitElement {
                 </div>
                 <div class="form-group">
                   <label class="toggle-switch">
-                    <input type="checkbox" ?checked=${group.requireMention !== false} @change=${(e: any) => { group.requireMention = e.target.checked; this.requestUpdate(); }}>
+                    <input type="checkbox" ?checked=${!!group.requireMention} @change=${(e: any) => { group.requireMention = e.target.checked; this.requestUpdate(); }}>
                     Require mention
                   </label>
                 </div>
@@ -2167,7 +2935,7 @@ export class ToolkitDashboard extends LitElement {
       const newAgent = {
           enabled: true,
           id: 'new-agent-' + Date.now(),
-          name: 'New Custom Agent',
+          name: 'New Agent',
           rolePolicyKey: 'codingDelegate',
           modelSource: 'local',
           workspaceMode: 'private',
@@ -2184,11 +2952,48 @@ export class ToolkitDashboard extends LitElement {
       this.editingAgentKey = `extra:${this.config.multiAgent.extraAgents.length - 1}`;
   }
 
-  removeExtraAgent(idx: number) {
-      if (confirm('Remove this custom agent?')) {
-          this.config.multiAgent.extraAgents.splice(idx, 1);
-          this.requestUpdate();
+  removeAgentByKey(key: string) {
+      const entry = this.getManagedAgentEntries().find((candidate: any) => candidate.key === key);
+      if (!entry?.agent?.id) {
+          return;
       }
+
+      if (!this.canRemoveAgent(key, entry.agent)) {
+          alert('The main agent cannot be removed from the dashboard.');
+          return;
+      }
+
+      const label = entry.agent.name ? `${entry.agent.name} (${entry.agent.id})` : entry.agent.id;
+      if (!confirm(`Remove agent ${label}?`)) {
+          return;
+      }
+
+      this.removeAgentReferences(entry.agent.id);
+
+      if (key.startsWith('extra:')) {
+          const idx = parseInt(key.split(':')[1], 10);
+          if (!Number.isNaN(idx)) {
+              this.config.multiAgent.extraAgents.splice(idx, 1);
+              if (this.editingAgentKey?.startsWith('extra:')) {
+                  const editingIdx = parseInt(this.editingAgentKey.split(':')[1], 10);
+                  if (!Number.isNaN(editingIdx)) {
+                      if (editingIdx === idx) {
+                          this.editingAgentKey = null;
+                      } else if (editingIdx > idx) {
+                          this.editingAgentKey = `extra:${editingIdx - 1}`;
+                      }
+                  }
+              }
+          }
+      } else if (this.config.multiAgent && Object.prototype.hasOwnProperty.call(this.config.multiAgent, key)) {
+          delete this.config.multiAgent[key];
+      }
+
+      if (this.editingAgentKey === key) {
+          this.editingAgentKey = null;
+      }
+
+      this.requestUpdate();
   }
 
   addEndpoint() {

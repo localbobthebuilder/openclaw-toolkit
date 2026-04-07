@@ -319,6 +319,7 @@ function Replace-ManagedModelRefs {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Add-ToolkitLegacyMultiAgentView -Config $config
 
 $currentIds = @(Get-LocalModelIds -Config $config)
 $assignedEndpoints = @(Get-EndpointModelAssignments -Config $config -ModelId $Model)
@@ -367,6 +368,7 @@ if ($isManagedModel) {
         $replacementModelRef = if ($replacementId) { "ollama/$replacementId" } else { $null }
         $changedRefs = @(Replace-ManagedModelRefs -Config $config -RemovedModelRef $removedModelRef -ReplacementModelRef $replacementModelRef)
 
+        $config = Convert-ToolkitConfigToPersistedSchema -Config $config
         $json = $config | ConvertTo-Json -Depth 50
         Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 

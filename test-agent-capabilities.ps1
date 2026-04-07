@@ -421,6 +421,7 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Add-ToolkitLegacyMultiAgentView -Config $config
 
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 if (-not (Test-Path $hostConfigPath)) {

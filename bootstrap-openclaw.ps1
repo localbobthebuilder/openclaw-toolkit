@@ -1385,7 +1385,7 @@ function Get-ManagedModelRefs {
         return @(Add-UniqueString -List $List -Value $modelRefText)
     }
 
-    if ($Config.multiAgent -and $Config.multiAgent.enabled) {
+    if ($Config.multiAgent) {
         foreach ($ref in @(
                 $ResolvedStrongModelRef,
                 $ResolvedResearchModelRef,
@@ -1414,7 +1414,7 @@ function Get-ManagedModelRefs {
             if ($null -eq $agentConfig) {
                 continue
             }
-            if ($agentConfig.PSObject.Properties.Name -contains "enabled" -and -not [bool]$agentConfig.enabled) {
+            if (-not (Test-ToolkitAgentEnabled -AgentConfig $agentConfig)) {
                 continue
             }
             if ($agentConfig.modelRef) {
@@ -1764,15 +1764,13 @@ function Ensure-OllamaState {
             $Config.multiAgent.remoteReviewAgent,
             $Config.multiAgent.remoteCoderAgent
         )) {
-        if ($null -eq $agentConfig -or -not ($agentConfig.PSObject.Properties.Name -contains "enabled") -or -not $agentConfig.enabled) {
+        if ($null -eq $agentConfig -or -not (Test-ToolkitAgentEnabled -AgentConfig $agentConfig)) {
             continue
         }
-        $modelSource = if ($agentConfig.PSObject.Properties.Name -contains "modelSource" -and $agentConfig.modelSource) {
-            ([string]$agentConfig.modelSource).ToLowerInvariant()
+        if (-not (Test-ToolkitAgentAssigned -AgentConfig $agentConfig)) {
+            continue
         }
-        else {
-            "static"
-        }
+        $modelSource = Get-ToolkitAgentModelPreference -Config $Config -AgentConfig $agentConfig
         if ($modelSource -ne "local") {
             continue
         }
@@ -1923,19 +1921,19 @@ function Ensure-OllamaState {
         }
     }
 
-    if ($Config.multiAgent -and $Config.multiAgent.localChatAgent -and $Config.multiAgent.localChatAgent.enabled) {
+    if ($Config.multiAgent -and $Config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $Config.multiAgent.localChatAgent)) {
         $state.ResolvedLocalChatModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localChatAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "chat-local" -FallbackToFirstCandidate
     }
-    if ($Config.multiAgent -and $Config.multiAgent.localReviewAgent -and $Config.multiAgent.localReviewAgent.enabled) {
+    if ($Config.multiAgent -and $Config.multiAgent.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.localReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $Config.multiAgent.localReviewAgent)) {
         $state.ResolvedLocalReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localReviewAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-local" -FallbackToFirstCandidate
     }
-    if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and $Config.multiAgent.localCoderAgent.enabled) {
+    if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.localCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $Config.multiAgent.localCoderAgent)) {
         $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-local" -FallbackToFirstCandidate
     }
-    if ($Config.multiAgent -and $Config.multiAgent.remoteReviewAgent -and $Config.multiAgent.remoteReviewAgent.enabled) {
+    if ($Config.multiAgent -and $Config.multiAgent.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.remoteReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $Config.multiAgent.remoteReviewAgent)) {
         $state.ResolvedRemoteReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.remoteReviewAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-remote" -FallbackToFirstCandidate
     }
-    if ($Config.multiAgent -and $Config.multiAgent.remoteCoderAgent -and $Config.multiAgent.remoteCoderAgent.enabled) {
+    if ($Config.multiAgent -and $Config.multiAgent.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.remoteCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $Config.multiAgent.remoteCoderAgent)) {
         $state.ResolvedRemoteCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.remoteCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-remote" -FallbackToFirstCandidate
     }
 
@@ -2081,12 +2079,11 @@ function Resolve-AgentPreferredModelRef {
         $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$AgentConfig.modelRef)
     }
 
-    $modelSource = if ($AgentConfig.PSObject.Properties.Name -contains "modelSource" -and $AgentConfig.modelSource) {
-        ([string]$AgentConfig.modelSource).ToLowerInvariant()
+    if (-not (Test-ToolkitAgentAssigned -AgentConfig $AgentConfig)) {
+        return $null
     }
-    else {
-        "static"
-    }
+
+    $modelSource = Get-ToolkitAgentModelPreference -Config $Config -AgentConfig $AgentConfig
 
     if ($modelSource -eq "hosted") {
         $authReadyProviders = Get-AuthReadyHostedProviders
@@ -2573,6 +2570,7 @@ $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $configBaseDir = Split-Path -Parent $ConfigPath
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir $configBaseDir
+$config = Add-ToolkitLegacyMultiAgentView -Config $config
 $managedUpstreamPatches = @(Get-ManagedUpstreamPatches -Config $config -BaseDir $configBaseDir)
 
 Write-Step "Preparing Windows prerequisites"
@@ -2680,17 +2678,17 @@ if ($config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)
 }
 
 $resolvedStrongModelRef = $null
-if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.strongAgent) {
+if ($config.multiAgent -and $config.multiAgent.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.strongAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.strongAgent)) {
     $resolvedStrongModelRef = Resolve-StrongModelRef -Config $config -AvailableOllamaRefs $ollamaState.AvailableRefs
 }
 
 $resolvedResearchModelRef = $null
-if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
+if ($config.multiAgent -and $config.multiAgent.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.researchAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.researchAgent)) {
     $resolvedResearchModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.researchAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "research agent" -FallbackToFirstCandidate
 }
 
 $resolvedHostedTelegramModelRef = $null
-if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled) {
+if ($config.multiAgent -and $config.multiAgent.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.hostedTelegramAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.hostedTelegramAgent)) {
     $resolvedHostedTelegramModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.hostedTelegramAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
 }
 
@@ -2713,10 +2711,33 @@ if ($resolvedStrongModelRef) {
     Set-OpenClawConfigJson -Path "agents.defaults.model" -Value $strongPrimary
     Write-Host "Configured strong default model: $resolvedStrongModelRef" -ForegroundColor Green
 }
+else {
+    Remove-OpenClawConfigValue -Path "agents.defaults.model"
+}
 
-if ($config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled -and $config.multiAgent.sharedWorkspace.path) {
-    Set-OpenClawConfigValue -Path "agents.defaults.workspace" -Value ([string]$config.multiAgent.sharedWorkspace.path)
-    Write-Host "Configured shared default agent workspace: $($config.multiAgent.sharedWorkspace.path)" -ForegroundColor Green
+$activeSharedWorkspace = $null
+foreach ($workspace in @(Get-ToolkitSharedWorkspaceList -Config $config)) {
+    $hasActiveAssignedMember = $false
+    foreach ($workspaceAgentId in @($workspace.agents)) {
+        $workspaceAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$workspaceAgentId)
+        if ($null -ne $workspaceAgent -and (Test-ToolkitAgentEnabled -AgentConfig $workspaceAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $workspaceAgent)) {
+            $hasActiveAssignedMember = $true
+            break
+        }
+    }
+
+    if ($hasActiveAssignedMember) {
+        $activeSharedWorkspace = $workspace
+        break
+    }
+}
+
+if ($null -ne $activeSharedWorkspace -and $activeSharedWorkspace.path) {
+    Set-OpenClawConfigValue -Path "agents.defaults.workspace" -Value ([string]$activeSharedWorkspace.path)
+    Write-Host "Configured shared default agent workspace: $($activeSharedWorkspace.path)" -ForegroundColor Green
+}
+else {
+    Remove-OpenClawConfigValue -Path "agents.defaults.workspace"
 }
 
 if ($config.contextManagement) {

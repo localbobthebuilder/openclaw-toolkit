@@ -121,6 +121,7 @@
     "groups": [
       {
         "id": "-1003770800252",
+        "enabled": true,
         "requireMention": false,
         "allowFrom": [
           "8674459047"
@@ -377,6 +378,7 @@
         }
       ],
       "ollama": {
+        "enabled": true,
         "providerId": "ollama",
         "baseUrl": "http://host.docker.internal:11434",
         "hostBaseUrl": "http://127.0.0.1:11434",
@@ -570,6 +572,7 @@
       },
       "hostedModels": [],
       "ollama": {
+        "enabled": true,
         "providerId": "ollama-review-pc",
         "baseUrl": "http://100.96.119.26:11434",
         "hostBaseUrl": "http://100.96.119.26:11434",
@@ -672,183 +675,181 @@
     "toolsFsWorkspaceOnly": true,
     "applyPatchWorkspaceOnly": true
   },
-  "multiAgent": {
-    "enabled": true,
-    "enableAgentToAgent": true,
-    "manageWorkspaceAgentsMd": true,
-    "sharedWorkspace": {
-      "enabled": true,
-      "path": "/home/node/.openclaw/workspace",
-      "rolePolicyKey": "sharedWorkspace"
-    },
-    "strongAgent": {
-      "id": "main",
-      "name": "Strong Coder",
-      "rolePolicyKey": "orchestrator",
-      "default": true,
-      "modelSource": "local",
-      "endpointKey": "local",
-      "sandboxMode": "off",
-      "subagents": {
-        "enabled": false,
-        "requireAgentId": true,
-        "allowAgents": [
-          "research",
-          "review-local",
-          "review-remote",
-          "coder-local",
-          "coder-remote"
-        ]
-      },
-      "modelRef": "ollama/gemma4:latest",
-      "candidateModelRefs": [
-        "ollama/gemma4:latest",
-        "ollama/gemma4:26b",
-        "ollama/qwen3-coder:30b",
-        "ollama/qwen3.5:35b-a3b",
-        "openai-codex/gpt-5.4",
-        "anthropic/claude-sonnet-4-6",
-        "google/gemini-3.1-flash-lite-preview"
-      ],
-      "allowLocalFallback": true
-    },
-    "researchAgent": {
-      "enabled": true,
-      "id": "research",
-      "name": "Gemini Research",
-      "rolePolicyKey": "research",
-      "modelSource": "hosted",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "google/gemini-3.1-flash-lite-preview",
-      "candidateModelRefs": [
-        "google/gemini-3.1-flash-lite-preview"
-      ]
-    },
-    "localChatAgent": {
-      "enabled": true,
-      "id": "chat-local",
-      "name": "Local Chat",
-      "rolePolicyKey": "trustedChat",
-      "modelSource": "local",
-      "endpointKey": "local",
-      "sandboxMode": "off",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "ollama/glm-4.7-flash:latest",
-      "routeTrustedTelegramGroups": true,
-      "routeTrustedTelegramDms": true
-    },
-    "hostedTelegramAgent": {
-      "enabled": false,
-      "id": "chat-openai",
-      "name": "Telegram OpenAI",
-      "rolePolicyKey": "trustedChat",
-      "modelSource": "hosted",
-      "sandboxMode": "off",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "openai-codex/gpt-5.4",
-      "candidateModelRefs": [
-        "openai-codex/gpt-5.4"
-      ]
-    },
-    "localReviewAgent": {
-      "enabled": true,
-      "id": "review-local",
-      "name": "Local Reviewer",
-      "rolePolicyKey": "review",
-      "modelSource": "local",
-      "endpointKey": "local",
-      "sandboxMode": "off",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "ollama/qwen3-coder:30b"
-    },
-    "localCoderAgent": {
-      "enabled": true,
-      "id": "coder-local",
-      "name": "Coder Delegate",
-      "rolePolicyKey": "codingDelegate",
-      "modelSource": "hosted",
-      "endpointKey": "local",
-      "sandboxMode": "off",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "openai-codex/gpt-5.4",
-      "candidateModelRefs": [
-        "openai-codex/gpt-5.4",
-        "anthropic/claude-sonnet-4-6",
-        "google/gemini-3.1-flash-lite-preview",
-        "ollama/qwen3-coder:30b",
-        "ollama/qwen3.5:35b-a3b"
-      ],
-      "allowLocalFallback": true
-    },
-    "remoteReviewAgent": {
-      "enabled": true,
-      "id": "review-remote",
-      "name": "Remote Reviewer",
-      "rolePolicyKey": "review",
-      "modelSource": "local",
-      "endpointKey": "review-pc",
-      "sandboxMode": "off",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "ollama/qwen2.5-coder:3b",
-      "candidateModelRefs": [
-        "ollama/qwen2.5-coder:3b",
-        "ollama/qwen2.5-coder:1.5b",
-        "ollama/qwen3:4b",
-        "ollama/qwen3:8b",
-        "ollama/qwen2.5:7b"
-      ]
-    },
-    "remoteCoderAgent": {
-      "enabled": true,
-      "id": "coder-remote",
-      "name": "Remote Coder",
-      "rolePolicyKey": "codingDelegate",
-      "modelSource": "local",
-      "endpointKey": "review-pc",
-      "sandboxMode": "off",
-      "subagents": {
-        "requireAgentId": true,
-        "allowAgents": []
-      },
-      "modelRef": "ollama/qwen2.5-coder:3b",
-      "candidateModelRefs": [
-        "ollama/qwen2.5-coder:3b",
-        "ollama/qwen2.5-coder:1.5b",
-        "ollama/qwen3:4b",
-        "ollama/qwen3:8b",
-        "ollama/qwen2.5:7b"
-      ]
-    },
-    "extraAgents": [
+  "agents": {
+    "list": [
       {
+        "key": "strongAgent",
+        "id": "main",
+        "name": "Strong Coder",
         "enabled": true,
-        "id": "notes-helper",
-        "name": "Notes Helper",
-        "rolePolicyKey": "research",
-        "modelSource": "hosted",
-        "workspaceMode": "private",
-        "sharedWorkspaceAccess": true,
-        "workspace": "/home/node/.openclaw/workspace-notes-helper",
+        "rolePolicyKey": "orchestrator",
+        "isMain": true,
+        "default": true,
+        "endpointKey": "local",
         "sandboxMode": "off",
         "subagents": {
+          "enabled": false,
+          "requireAgentId": true,
+          "allowAgents": [
+            "research",
+            "review-local",
+            "review-remote",
+            "coder-local",
+            "coder-remote"
+          ]
+        },
+        "modelRef": "ollama/gemma4:latest",
+        "candidateModelRefs": [
+          "ollama/gemma4:latest",
+          "ollama/gemma4:26b",
+          "ollama/qwen3-coder:30b",
+          "ollama/qwen3.5:35b-a3b",
+          "openai-codex/gpt-5.4",
+          "anthropic/claude-sonnet-4-6",
+          "google/gemini-3.1-flash-lite-preview"
+        ],
+        "allowLocalFallback": true
+      },
+      {
+        "key": "researchAgent",
+        "id": "research",
+        "name": "Gemini Research",
+        "enabled": true,
+        "rolePolicyKey": "research",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "candidateModelRefs": [
+          "google/gemini-3.1-flash-lite-preview"
+        ]
+      },
+      {
+        "key": "localChatAgent",
+        "id": "chat-local",
+        "name": "Local Chat",
+        "enabled": true,
+        "rolePolicyKey": "trustedChat",
+        "endpointKey": "local",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/glm-4.7-flash:latest",
+        "routeTrustedTelegramGroups": true,
+        "routeTrustedTelegramDms": true
+      },
+      {
+        "key": "hostedTelegramAgent",
+        "id": "chat-openai",
+        "name": "Telegram OpenAI",
+        "enabled": false,
+        "rolePolicyKey": "trustedChat",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "openai-codex/gpt-5.4",
+        "candidateModelRefs": [
+          "openai-codex/gpt-5.4"
+        ]
+      },
+      {
+        "key": "localReviewAgent",
+        "id": "review-local",
+        "name": "Local Reviewer",
+        "enabled": true,
+        "rolePolicyKey": "review",
+        "endpointKey": "local",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/qwen3-coder:30b"
+      },
+      {
+        "key": "localCoderAgent",
+        "id": "coder-local",
+        "name": "Coder Delegate",
+        "enabled": true,
+        "rolePolicyKey": "codingDelegate",
+        "endpointKey": "local",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "openai-codex/gpt-5.4",
+        "candidateModelRefs": [
+          "openai-codex/gpt-5.4",
+          "anthropic/claude-sonnet-4-6",
+          "google/gemini-3.1-flash-lite-preview",
+          "ollama/qwen3-coder:30b",
+          "ollama/qwen3.5:35b-a3b"
+        ],
+        "allowLocalFallback": true
+      },
+      {
+        "key": "remoteReviewAgent",
+        "id": "review-remote",
+        "name": "Remote Reviewer",
+        "enabled": true,
+        "rolePolicyKey": "review",
+        "endpointKey": "review-pc",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/qwen2.5-coder:3b",
+        "candidateModelRefs": [
+          "ollama/qwen2.5-coder:3b",
+          "ollama/qwen2.5-coder:1.5b",
+          "ollama/qwen3:4b",
+          "ollama/qwen3:8b",
+          "ollama/qwen2.5:7b"
+        ]
+      },
+      {
+        "key": "remoteCoderAgent",
+        "id": "coder-remote",
+        "name": "Remote Coder",
+        "enabled": true,
+        "rolePolicyKey": "codingDelegate",
+        "endpointKey": "review-pc",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/qwen2.5-coder:3b",
+        "candidateModelRefs": [
+          "ollama/qwen2.5-coder:3b",
+          "ollama/qwen2.5-coder:1.5b",
+          "ollama/qwen3:4b",
+          "ollama/qwen3:8b",
+          "ollama/qwen2.5:7b"
+        ]
+      },
+      {
+        "id": "notes-helper",
+        "name": "Notes Helper",
+        "enabled": true,
+        "rolePolicyKey": "research",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
           "requireAgentId": true,
           "allowAgents": []
         },
@@ -971,6 +972,39 @@
       "routeTrustedTelegramDms": true
     }
   },
+  "workspaces": [
+    {
+      "id": "shared-main",
+      "name": "Shared Workspace",
+      "mode": "shared",
+      "path": "/home/node/.openclaw/workspace",
+      "rolePolicyKey": "sharedWorkspace",
+      "enableAgentToAgent": true,
+      "manageWorkspaceAgentsMd": true,
+      "agents": [
+        "main",
+        "research",
+        "chat-local",
+        "chat-openai",
+        "review-local",
+        "coder-local",
+        "review-remote",
+        "coder-remote"
+      ]
+    },
+    {
+      "id": "workspace-notes-helper",
+      "name": "Notes Helper Workspace",
+      "mode": "private",
+      "path": "/home/node/.openclaw/workspace-notes-helper",
+      "allowSharedWorkspaceAccess": true,
+      "enableAgentToAgent": true,
+      "manageWorkspaceAgentsMd": true,
+      "agents": [
+        "notes-helper"
+      ]
+    }
+  ],
   "verification": {
     "healthUrl": "http://127.0.0.1:18789/healthz",
     "reportPath": "bootstrap-report.txt"

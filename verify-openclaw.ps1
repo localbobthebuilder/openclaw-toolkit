@@ -1578,6 +1578,7 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Add-ToolkitLegacyMultiAgentView -Config $config
 $requiredConfigPaths = @(
     @{ Name = "repoPath"; Value = [string]$config.repoPath },
     @{ Name = "verification.healthUrl"; Value = [string]$config.verification.healthUrl },
@@ -1689,7 +1690,7 @@ if ((Test-CheckRequested -Names @("local-model")) -and $config.ollama.enabled -a
     $localModelSmokeTestOutput = Invoke-LoggedScript -Label "Local model smoke test" -ScriptPath $localModelScript -SkipMessage "Local model smoke test skipped: script not found."
 }
 $agentCapabilitiesSmokeTestOutput = "Agent capability smoke test skipped."
-if ((Test-CheckRequested -Names @("agent")) -and $config.multiAgent -and $config.multiAgent.enabled) {
+if ((Test-CheckRequested -Names @("agent")) -and @((Get-ToolkitAssignedAgentList -Config $config)).Count -gt 0) {
     $agentCapabilitiesScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-agent-capabilities.ps1"
     $agentCapabilitiesParams = @{
         ConfigPath = $ConfigPath
@@ -1702,7 +1703,7 @@ if ((Test-CheckRequested -Names @("sandbox")) -and $config.sandbox.enabled) {
     $sandboxSmokeTestOutput = Invoke-LoggedScript -Label "Sandbox smoke test" -ScriptPath $sandboxScript -SkipMessage "Sandbox smoke test skipped: script not found."
 }
 $chatWorkspaceWriteSmokeTestOutput = "Chat workspace write smoke test skipped."
-if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $config.multiAgent.enabled -and $config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled) {
+if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localChatAgent)) {
     $chatWorkspaceScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-chat-workspace-write.ps1"
     $chatWorkspaceParams = @{}
     if ($config.multiAgent.localChatAgent.id) {
@@ -1738,44 +1739,22 @@ if (Test-CheckRequested -Names @("git")) {
 
 $multiAgentVerification = @()
 if (Test-CheckRequested -Names @("multi-agent")) {
-    if ($config.multiAgent -and $config.multiAgent.enabled) {
-        $multiAgentVerification += "Multi-agent starter layout: enabled"
+    if ($config.multiAgent) {
+        $activeAssignedAgentIds = @(
+            foreach ($agent in @(Get-ToolkitAssignedAgentList -Config $config)) {
+                if ($null -ne $agent -and $agent.id) {
+                    [string]$agent.id
+                }
+            }
+        )
+        $multiAgentVerification += "Multi-agent starter layout: $(@($activeAssignedAgentIds).Count) active assigned agent(s)"
 
         if ($null -eq $liveConfig) {
             $multiAgentVerification += "FAIL: Could not read live host config at $hostConfigPath"
         }
         else {
         $authReadyProviders = @(Get-AuthReadyProvidersFromLiveConfig -LiveConfig $liveConfig)
-        $expectedAgentIds = @()
-        if ($config.multiAgent.strongAgent -and $config.multiAgent.strongAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.strongAgent.id)
-        }
-        if ($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled -and $config.multiAgent.researchAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.researchAgent.id)
-        }
-        if ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled -and $config.multiAgent.localChatAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.localChatAgent.id)
-        }
-        if ($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled -and $config.multiAgent.hostedTelegramAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.hostedTelegramAgent.id)
-        }
-        if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled -and $config.multiAgent.localReviewAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.localReviewAgent.id)
-        }
-        if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled -and $config.multiAgent.localCoderAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.localCoderAgent.id)
-        }
-        if ($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled -and $config.multiAgent.remoteReviewAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.remoteReviewAgent.id)
-        }
-        if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled -and $config.multiAgent.remoteCoderAgent.id) {
-            $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$config.multiAgent.remoteCoderAgent.id)
-        }
-        foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
-            if ($extraAgent.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$extraAgent.id)) {
-                $expectedAgentIds = Add-UniqueString -List $expectedAgentIds -Value ([string]$extraAgent.id)
-            }
-        }
+        $expectedAgentIds = @($activeAssignedAgentIds)
 
         $actualAgents = @($liveConfig.agents.list)
         $actualAgentIds = @($actualAgents | ForEach-Object { [string]$_.id })
@@ -2315,17 +2294,18 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
 
                 $overlayChecks = @(
-                    @{ Name = "main"; Enabled = $true; AgentId = if ($config.multiAgent.strongAgent) { [string]$config.multiAgent.strongAgent.id } else { "main" } },
-                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled); AgentId = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.id } else { "research" } },
-                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); AgentId = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" } },
-                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); AgentId = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.id } else { "chat-openai" } },
-                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); AgentId = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" } },
-                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); AgentId = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" } },
-                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled); AgentId = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.id } else { "review-remote" } },
-                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled); AgentId = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.id } else { "coder-remote" } }
+                    @{ Name = "main"; Enabled = [bool]($config.multiAgent.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.strongAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.strongAgent)); AgentId = if ($config.multiAgent.strongAgent) { [string]$config.multiAgent.strongAgent.id } else { "main" } },
+                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.researchAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.researchAgent)); AgentId = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.id } else { "research" } },
+                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localChatAgent)); AgentId = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" } },
+                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.hostedTelegramAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.hostedTelegramAgent)); AgentId = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.id } else { "chat-openai" } },
+                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localReviewAgent)); AgentId = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" } },
+                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localCoderAgent)); AgentId = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" } },
+                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteReviewAgent)); AgentId = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.id } else { "review-remote" } },
+                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteCoderAgent)); AgentId = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.id } else { "coder-remote" } }
                 )
                 foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
                     if (-not [string]::IsNullOrWhiteSpace([string]$extraAgent.id) -and
+                        (Test-ToolkitAgentAssigned -AgentConfig $extraAgent) -and
                         (Test-ConfiguredAgentUsesSharedWorkspace -MultiConfig $config.multiAgent -AgentConfig $extraAgent)) {
                         $overlayChecks += @{ Name = [string]$extraAgent.id; Enabled = $true; AgentId = [string]$extraAgent.id }
                     }
@@ -2370,16 +2350,19 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
             else {
                 $workspaceChecks = @(
-                    @{ Name = "main"; Enabled = $true; Workspace = $null },
-                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled); Workspace = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.workspace } else { $null } },
-                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled); Workspace = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.workspace } else { $null } },
-                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled); Workspace = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.workspace } else { $null } },
-                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled); Workspace = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.workspace } else { $null } },
-                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } },
-                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled); Workspace = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.workspace } else { $null } },
-                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled); Workspace = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.workspace } else { $null } }
+                    @{ Name = "main"; Enabled = [bool]($config.multiAgent.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.strongAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.strongAgent)); Workspace = $null },
+                    @{ Name = "research"; Enabled = [bool]($config.multiAgent.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.researchAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.researchAgent)); Workspace = if ($config.multiAgent.researchAgent) { [string]$config.multiAgent.researchAgent.workspace } else { $null } },
+                    @{ Name = "chat-local"; Enabled = [bool]($config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localChatAgent)); Workspace = if ($config.multiAgent.localChatAgent) { [string]$config.multiAgent.localChatAgent.workspace } else { $null } },
+                    @{ Name = "chat-openai"; Enabled = [bool]($config.multiAgent.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.hostedTelegramAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.hostedTelegramAgent)); Workspace = if ($config.multiAgent.hostedTelegramAgent) { [string]$config.multiAgent.hostedTelegramAgent.workspace } else { $null } },
+                    @{ Name = "review-local"; Enabled = [bool]($config.multiAgent.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localReviewAgent)); Workspace = if ($config.multiAgent.localReviewAgent) { [string]$config.multiAgent.localReviewAgent.workspace } else { $null } },
+                    @{ Name = "coder-local"; Enabled = [bool]($config.multiAgent.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.localCoderAgent)); Workspace = if ($config.multiAgent.localCoderAgent) { [string]$config.multiAgent.localCoderAgent.workspace } else { $null } },
+                    @{ Name = "review-remote"; Enabled = [bool]($config.multiAgent.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteReviewAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteReviewAgent)); Workspace = if ($config.multiAgent.remoteReviewAgent) { [string]$config.multiAgent.remoteReviewAgent.workspace } else { $null } },
+                    @{ Name = "coder-remote"; Enabled = [bool]($config.multiAgent.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.remoteCoderAgent) -and (Test-ToolkitAgentAssigned -AgentConfig $config.multiAgent.remoteCoderAgent)); Workspace = if ($config.multiAgent.remoteCoderAgent) { [string]$config.multiAgent.remoteCoderAgent.workspace } else { $null } }
                 )
                 foreach ($extraAgent in @(Get-EnabledExtraAgentConfigs -MultiConfig $config.multiAgent)) {
+                    if (-not (Test-ToolkitAgentAssigned -AgentConfig $extraAgent)) {
+                        continue
+                    }
                     $workspaceChecks += @{
                         Name      = if ($extraAgent.id) { [string]$extraAgent.id } else { "extra-agent" }
                         Enabled   = $true

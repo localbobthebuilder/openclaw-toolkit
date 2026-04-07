@@ -972,6 +972,10 @@ function Add-DesiredAgentFromConfig {
         [bool]$IsDefault = $false
     )
 
+    if (-not (Test-ToolkitAgentAssigned -AgentConfig $AgentConfig)) {
+        return @($DesiredAgents)
+    }
+
     $agentId = [string]$AgentConfig.id
     $agentName = if ($AgentConfig.PSObject.Properties.Name -contains "name" -and $AgentConfig.name) { [string]$AgentConfig.name } else { $agentId }
     $useAvailableRefsOnly = $false
@@ -1312,12 +1316,7 @@ function Resolve-PreferredAgentModelRef {
         [Parameter(Mandatory = $true)][string]$Purpose
     )
 
-    $modelSource = if ($AgentConfig.PSObject.Properties.Name -contains "modelSource" -and $AgentConfig.modelSource) {
-        ([string]$AgentConfig.modelSource).ToLowerInvariant()
-    }
-    else {
-        "static"
-    }
+    $modelSource = Get-ToolkitAgentModelPreference -Config $Config -AgentConfig $AgentConfig
 
     if (-not [string]::IsNullOrWhiteSpace($ExplicitRef)) {
         if ($modelSource -eq "local" -and ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $ExplicitRef) -or $ExplicitRef.StartsWith("ollama/"))) {
@@ -1427,12 +1426,7 @@ function Resolve-AgentFallbackModelRefs {
     $availableOllamaRefs = @(Get-OllamaAvailableModelRefs -Config $Config)
     $candidateRefs = @(Get-AgentCandidateModelRefs -AgentConfig $AgentConfig)
 
-    $modelSource = if ($AgentConfig.PSObject.Properties.Name -contains "modelSource" -and $AgentConfig.modelSource) {
-        ([string]$AgentConfig.modelSource).ToLowerInvariant()
-    }
-    else {
-        "static"
-    }
+    $modelSource = Get-ToolkitAgentModelPreference -Config $Config -AgentConfig $AgentConfig
 
     $fallbacks = @()
     if ($modelSource -eq "hosted") {
@@ -1542,11 +1536,12 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Add-ToolkitLegacyMultiAgentView -Config $config
 $multi = $config.multiAgent
 $rolePolicies = if ($multi -and $multi.PSObject.Properties.Name -contains "rolePolicies") { $multi.rolePolicies } else { $null }
 
-if ($null -eq $multi -or -not $multi.enabled) {
-    Write-Host "Multi-agent starter layout is disabled in openclaw-bootstrap.config.json." -ForegroundColor Yellow
+if ($null -eq $multi) {
+    Write-Host "Multi-agent starter layout is not configured in openclaw-bootstrap.config.json." -ForegroundColor Yellow
     exit 0
 }
 
@@ -1567,36 +1562,42 @@ if ($existingBindingsRaw) {
 $overlayDirName = Get-AgentOverlayDirName -Config $config
 
 $desiredAgents = @()
+$configuredManagedAgentIds = @(Get-ToolkitConfiguredAgentIds -Config $config)
 $strongId = [string]$multi.strongAgent.id
-$desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.strongAgent -ModelOverrideRef $StrongModelRef -IsDefault ([bool]$multi.strongAgent.default)
+if ($multi.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.strongAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.strongAgent -ModelOverrideRef $StrongModelRef -IsDefault ([bool]$multi.strongAgent.default)
+}
 
-if ($multi.researchAgent -and $multi.researchAgent.enabled) {
+if ($multi.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.researchAgent)) {
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.researchAgent -ModelOverrideRef $ResearchModelRef
 }
 
 $chatAgentId = $null
-if ($multi.localChatAgent.enabled) {
+if ($multi.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localChatAgent)) {
     $chatAgentId = [string]$multi.localChatAgent.id
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localChatAgent -ModelOverrideRef $LocalChatModelRef
+    if (-not (Test-ToolkitAgentAssigned -AgentConfig $multi.localChatAgent)) {
+        $chatAgentId = $null
+    }
 }
 
-if ($multi.localReviewAgent.enabled) {
+if ($multi.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localReviewAgent)) {
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localReviewAgent -ModelOverrideRef $LocalReviewModelRef
 }
 
-if ($multi.hostedTelegramAgent -and $multi.hostedTelegramAgent.enabled) {
+if ($multi.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.hostedTelegramAgent)) {
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent -ModelOverrideRef $HostedTelegramModelRef
 }
 
-if ($multi.localCoderAgent -and $multi.localCoderAgent.enabled) {
+if ($multi.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localCoderAgent)) {
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localCoderAgent -ModelOverrideRef $LocalCoderModelRef
 }
 
-if ($multi.remoteReviewAgent -and $multi.remoteReviewAgent.enabled) {
+if ($multi.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.remoteReviewAgent)) {
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.remoteReviewAgent -ModelOverrideRef $RemoteReviewModelRef
 }
 
-if ($multi.remoteCoderAgent -and $multi.remoteCoderAgent.enabled) {
+if ($multi.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.remoteCoderAgent)) {
     $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.remoteCoderAgent -ModelOverrideRef $RemoteCoderModelRef
 }
 
@@ -1653,7 +1654,7 @@ foreach ($desired in $desiredAgents) {
 
 foreach ($existing in $currentAgents) {
     $existingAgentId = Get-AgentEntryId -AgentEntry $existing
-    if ($existingAgentId -in @($staleManagedExtraAgentIds)) {
+    if ($existingAgentId -in @($staleManagedExtraAgentIds) -or $existingAgentId -in @($configuredManagedAgentIds)) {
         continue
     }
 
@@ -1683,13 +1684,22 @@ elseif ($chatAgentId) {
 }
 
 if ($telegramRouteTargetAgentId) {
-    $telegramConfig = Get-OpenClawConfigJsonValue -Path "channels.telegram"
-    if ($null -ne $telegramConfig) {
-        $trustedGroupIds = @($telegramConfig.groups.PSObject.Properties.Name | ForEach-Object { [string]$_ })
-        $trustedDirectIds = @($telegramConfig.allowFrom | ForEach-Object { [string]$_ })
+    $targetAgent = Get-ToolkitAgentById -Config $config -AgentId $telegramRouteTargetAgentId
+    if ($null -eq $targetAgent -or -not (Test-ToolkitAgentEnabled -AgentConfig $targetAgent) -or -not (Test-ToolkitAgentAssigned -AgentConfig $targetAgent)) {
+        $telegramRouteTargetAgentId = $null
+        $routeTrustedTelegramGroups = $false
+        $routeTrustedTelegramDms = $false
+    }
+}
 
-        $currentBindings = @(Remove-TelegramTrustedBindings -Bindings $currentBindings -TrustedGroupIds $trustedGroupIds -TrustedDirectIds $trustedDirectIds)
+$telegramConfig = Get-OpenClawConfigJsonValue -Path "channels.telegram"
+if ($null -ne $telegramConfig) {
+    $trustedGroupIds = @($telegramConfig.groups.PSObject.Properties.Name | ForEach-Object { [string]$_ })
+    $trustedDirectIds = @($telegramConfig.allowFrom | ForEach-Object { [string]$_ })
 
+    $currentBindings = @(Remove-TelegramTrustedBindings -Bindings $currentBindings -TrustedGroupIds $trustedGroupIds -TrustedDirectIds $trustedDirectIds)
+
+    if ($telegramRouteTargetAgentId) {
         if ($routeTrustedTelegramGroups) {
             foreach ($groupId in @($telegramConfig.groups.PSObject.Properties.Name)) {
                 $binding = [ordered]@{

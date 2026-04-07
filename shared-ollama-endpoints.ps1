@@ -532,12 +532,7 @@ function Get-AgentOllamaEndpointKey {
         }
     }
 
-    $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
-    if ($null -ne $defaultEndpoint) {
-        return [string]$defaultEndpoint.key
-    }
-
-    return "local"
+    return $null
 }
 
 function Merge-ToolkitConfigObjects {

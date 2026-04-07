@@ -249,6 +249,7 @@ if (-not (Test-ContainerRunning -Name $ContainerName)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $script:BootstrapConfig = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $script:BootstrapConfig = Resolve-PortableConfigPaths -Config $script:BootstrapConfig -BaseDir (Split-Path -Parent $ConfigPath)
+$script:BootstrapConfig = Add-ToolkitLegacyMultiAgentView -Config $script:BootstrapConfig
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $script:BootstrapConfig) "openclaw.json"
 if (-not (Test-Path $hostConfigPath)) {
     throw "Live OpenClaw config not found at $hostConfigPath"

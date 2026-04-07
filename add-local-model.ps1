@@ -327,7 +327,6 @@ function Set-AgentLocalModel {
         throw "Config does not contain multiAgent.$propertyName"
     }
 
-    $agent.modelSource = "local"
     $agent.endpointKey = $EndpointKey
     $agent.modelRef = "ollama/$ModelId"
     return $true
@@ -583,6 +582,7 @@ if (-not (Get-Command "pwsh" -ErrorAction SilentlyContinue)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
+$config = Add-ToolkitLegacyMultiAgentView -Config $config
 if (-not $PSBoundParameters.ContainsKey("HeadroomMiB")) {
     $HeadroomMiB = Get-ToolkitOllamaVramHeadroomMiB -Config $config
 }
@@ -655,6 +655,7 @@ if ($AssignTo) {
     $assigned = Set-AgentLocalModel -Config $config -TargetAgentId $AssignTo -ModelId $plan.ModelId -EndpointKey $endpoint.key
 }
 
+$config = Convert-ToolkitConfigToPersistedSchema -Config $config
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 

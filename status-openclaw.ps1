@@ -22,6 +22,7 @@ if (Test-Path $configFile) {
     . ([System.IO.Path]::Combine($PSScriptRoot, "shared-config-paths.ps1"))
     $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
     $cfg = Resolve-PortableConfigPaths -Config $cfg -BaseDir $PSScriptRoot
+    $cfg = Add-ToolkitLegacyMultiAgentView -Config $cfg
     $bootstrapConfig = $cfg
     if (-not $RepoPath)  { $RepoPath  = $cfg.repoPath }
     if (-not $HealthUrl) { $HealthUrl = "http://127.0.0.1:$($cfg.gatewayPort)/healthz" }
