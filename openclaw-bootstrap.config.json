@@ -824,6 +824,9 @@
         "name": "Strong Coder",
         "enabled": true,
         "rolePolicyKey": "orchestrator",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "orchestrator"
+        },
         "isMain": true,
         "default": true,
         "sandboxMode": "off",
@@ -856,6 +859,9 @@
         "name": "Gemini Research",
         "enabled": true,
         "rolePolicyKey": "research",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "research"
+        },
         "subagents": {
           "enabled": true,
           "requireAgentId": true,
@@ -872,6 +878,9 @@
         "name": "Local Chat",
         "enabled": true,
         "rolePolicyKey": "trustedChat",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "trustedChat"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -889,6 +898,9 @@
         "name": "Telegram OpenAI",
         "enabled": false,
         "rolePolicyKey": "trustedChat",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "trustedChat"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -906,6 +918,9 @@
         "name": "Local Reviewer",
         "enabled": true,
         "rolePolicyKey": "review",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "review"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -921,6 +936,9 @@
         "name": "Coder Delegate",
         "enabled": true,
         "rolePolicyKey": "codingDelegate",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "codingDelegate"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -943,6 +961,9 @@
         "name": "Remote Reviewer",
         "enabled": true,
         "rolePolicyKey": "review",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "review"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -964,6 +985,9 @@
         "name": "Remote Coder",
         "enabled": true,
         "rolePolicyKey": "codingDelegate",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "codingDelegate"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -984,6 +1008,9 @@
         "name": "Notes Helper",
         "enabled": true,
         "rolePolicyKey": "research",
+        "markdownTemplateKeys": {
+          "AGENTS.md": "research"
+        },
         "sandboxMode": "off",
         "subagents": {
           "enabled": true,
@@ -1004,6 +1031,9 @@
       "mode": "shared",
       "path": "/home/node/.openclaw/workspace",
       "rolePolicyKey": "sharedWorkspace",
+      "markdownTemplateKeys": {
+        "AGENTS.md": "sharedWorkspace"
+      },
       "enableAgentToAgent": true,
       "manageWorkspaceAgentsMd": true,
       "agents": [

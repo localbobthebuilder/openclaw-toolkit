@@ -33,6 +33,9 @@ export class ToolkitDashboard extends LitElement {
   @state() private isRunning: boolean = false;
   @state() private activeTab: string = 'status';
   @state() private configSection: string = 'general';
+  @state() private markdownTemplateScope: 'agents' | 'workspaces' = 'agents';
+  @state() private markdownTemplateAgentFile: string = 'AGENTS.md';
+  @state() private markdownTemplateWorkspaceFile: string = 'AGENTS.md';
   @state() private editingAgentKey: string | null = null;
   @state() private editingAgentDraft: any = null;
   @state() private editingAgentTemplateDraft: any = null;
@@ -209,9 +212,10 @@ export class ToolkitDashboard extends LitElement {
       const res = await fetch(this.getBaseUrl() + '/api/config');
       const data = await res.json();
       this.config = this.sanitizeConfigModelNames(data?.config ?? data);
-      this.savedConfig = JSON.parse(JSON.stringify(this.config));
       this.templateFiles = this.cloneTemplateState(data?.templates);
+      this.hydrateLegacyMarkdownTemplateSelections(this.config);
       this.ensureAllTemplateFiles(this.config);
+      this.savedConfig = JSON.parse(JSON.stringify(this.config));
       this.savedTemplateFiles = this.cloneTemplateState(this.templateFiles);
     } catch (err) {
       console.error('Failed to fetch config', err);
@@ -713,6 +717,7 @@ export class ToolkitDashboard extends LitElement {
     normalized.mode = normalized.mode === 'private' ? 'private' : 'shared';
     normalized.enableAgentToAgent = this.normalizeBoolean(normalized.enableAgentToAgent, false);
     normalized.manageWorkspaceAgentsMd = this.normalizeBoolean(normalized.manageWorkspaceAgentsMd, false);
+    normalized.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(normalized, VALID_WORKSPACE_MARKDOWN_FILES);
     if (!Array.isArray(normalized.agents)) {
       normalized.agents = [];
     }
@@ -828,7 +833,14 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getEmptyTemplateState() {
-    return { agents: {}, workspaces: {} };
+    return {
+      agents: {},
+      workspaces: {},
+      libraries: {
+        agents: {},
+        workspaces: {}
+      }
+    };
   }
 
   cloneTemplateState(templates: any) {
@@ -836,26 +848,166 @@ export class ToolkitDashboard extends LitElement {
     const clone = JSON.parse(JSON.stringify(base));
     if (!clone.agents || typeof clone.agents !== 'object') clone.agents = {};
     if (!clone.workspaces || typeof clone.workspaces !== 'object') clone.workspaces = {};
+    if (!clone.libraries || typeof clone.libraries !== 'object') {
+      clone.libraries = { agents: {}, workspaces: {} };
+    }
+    if (!clone.libraries.agents || typeof clone.libraries.agents !== 'object') clone.libraries.agents = {};
+    if (!clone.libraries.workspaces || typeof clone.libraries.workspaces !== 'object') clone.libraries.workspaces = {};
     return clone;
   }
 
-  getRolePolicyLines(policyKey: string | null | undefined) {
-    if (!policyKey) {
-      return [];
+  normalizeMarkdownTemplateSelections(record: any, validFileNames: readonly string[]) {
+    if (!record || typeof record !== 'object') {
+      return {};
     }
-    const roles = this.getRolePoliciesRoot();
-    const lines = roles[policyKey];
-    return Array.isArray(lines) ? lines.map((line: any) => String(line)) : [];
+    if (!record.markdownTemplateKeys || typeof record.markdownTemplateKeys !== 'object') {
+      record.markdownTemplateKeys = {};
+    }
+    const normalized: Record<string, string> = {};
+    for (const fileName of validFileNames) {
+      const key = typeof record.markdownTemplateKeys[fileName] === 'string'
+        ? record.markdownTemplateKeys[fileName].trim()
+        : '';
+      if (key) {
+        normalized[fileName] = key;
+      }
+    }
+    record.markdownTemplateKeys = normalized;
+    return normalized;
   }
 
-  getRolePoliciesRoot() {
-    if (!this.config?.agents || typeof this.config.agents !== 'object') {
-      this.config.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
+  getMarkdownTemplateSelection(record: any, fileName: string, validFileNames: readonly string[]) {
+    const selections = this.normalizeMarkdownTemplateSelections(record, validFileNames);
+    return typeof selections[fileName] === 'string' ? selections[fileName] : '';
+  }
+
+  setMarkdownTemplateSelection(record: any, fileName: string, templateKey: string | null, validFileNames: readonly string[]) {
+    const selections = this.normalizeMarkdownTemplateSelections(record, validFileNames);
+    const normalizedKey = typeof templateKey === 'string' ? templateKey.trim() : '';
+    if (normalizedKey) {
+      selections[fileName] = normalizedKey;
+    } else {
+      delete selections[fileName];
     }
-    if (!this.config.agents.rolePolicies || typeof this.config.agents.rolePolicies !== 'object') {
-      this.config.agents.rolePolicies = {};
+    record.markdownTemplateKeys = selections;
+  }
+
+  ensureTemplateLibrariesRoot() {
+    if (!this.templateFiles?.libraries || typeof this.templateFiles.libraries !== 'object') {
+      this.templateFiles = this.cloneTemplateState(this.templateFiles);
     }
-    return this.config.agents.rolePolicies;
+    if (!this.templateFiles.libraries.agents || typeof this.templateFiles.libraries.agents !== 'object') {
+      this.templateFiles.libraries.agents = {};
+    }
+    if (!this.templateFiles.libraries.workspaces || typeof this.templateFiles.libraries.workspaces !== 'object') {
+      this.templateFiles.libraries.workspaces = {};
+    }
+    return this.templateFiles.libraries;
+  }
+
+  ensureMarkdownTemplateLibrary(scope: 'agents' | 'workspaces', fileName: string) {
+    const libraries = this.ensureTemplateLibrariesRoot();
+    if (!libraries[scope][fileName] || typeof libraries[scope][fileName] !== 'object') {
+      libraries[scope][fileName] = {};
+    }
+    return libraries[scope][fileName];
+  }
+
+  getMarkdownTemplateKeys(scope: 'agents' | 'workspaces', fileName: string) {
+    return Object.keys(this.ensureMarkdownTemplateLibrary(scope, fileName)).sort((left, right) => left.localeCompare(right));
+  }
+
+  getMarkdownTemplateContent(scope: 'agents' | 'workspaces', fileName: string, templateKey: string | null | undefined) {
+    const normalizedKey = typeof templateKey === 'string' ? templateKey.trim() : '';
+    if (!normalizedKey) {
+      return '';
+    }
+    const library = this.ensureMarkdownTemplateLibrary(scope, fileName);
+    return typeof library[normalizedKey] === 'string' ? library[normalizedKey] : '';
+  }
+
+  hydrateLegacyMarkdownTemplateSelections(sourceConfig: any = this.config) {
+    if (!sourceConfig) {
+      return;
+    }
+
+    for (const agent of Array.isArray(sourceConfig?.agents?.list) ? sourceConfig.agents.list : []) {
+      const customFiles = this.ensureAgentTemplateFiles(agent);
+      const selectedAgentsTemplate = this.getMarkdownTemplateSelection(agent, 'AGENTS.md', VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
+      const legacyRoleKey = typeof agent?.rolePolicyKey === 'string' ? agent.rolePolicyKey.trim() : '';
+      if (!selectedAgentsTemplate && !customFiles['AGENTS.md'] && legacyRoleKey && this.getMarkdownTemplateContent('agents', 'AGENTS.md', legacyRoleKey)) {
+        this.setMarkdownTemplateSelection(agent, 'AGENTS.md', legacyRoleKey, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
+      }
+    }
+
+    for (const workspace of Array.isArray(sourceConfig?.workspaces) ? sourceConfig.workspaces : []) {
+      const customFiles = this.ensureWorkspaceTemplateFiles(workspace);
+      const selectedAgentsTemplate = this.getMarkdownTemplateSelection(workspace, 'AGENTS.md', VALID_WORKSPACE_MARKDOWN_FILES);
+      const legacyRoleKey = typeof workspace?.rolePolicyKey === 'string' ? workspace.rolePolicyKey.trim() : '';
+      if (!selectedAgentsTemplate && !customFiles['AGENTS.md'] && legacyRoleKey && this.getMarkdownTemplateContent('workspaces', 'AGENTS.md', legacyRoleKey)) {
+        this.setMarkdownTemplateSelection(workspace, 'AGENTS.md', legacyRoleKey, VALID_WORKSPACE_MARKDOWN_FILES);
+      }
+    }
+  }
+
+  getSelectedTemplateMarkdownFile() {
+    return this.markdownTemplateScope === 'agents'
+      ? this.markdownTemplateAgentFile
+      : this.markdownTemplateWorkspaceFile;
+  }
+
+  setSelectedTemplateMarkdownFile(fileName: string) {
+    if (this.markdownTemplateScope === 'agents') {
+      this.markdownTemplateAgentFile = fileName;
+    } else {
+      this.markdownTemplateWorkspaceFile = fileName;
+    }
+  }
+
+  getMarkdownTemplateFileOptions(scope: 'agents' | 'workspaces') {
+    return scope === 'agents' ? [...VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES] : [...VALID_WORKSPACE_MARKDOWN_FILES];
+  }
+
+  clearMarkdownTemplateSelectionMatches(scope: 'agents' | 'workspaces', fileName: string, templateKey: string) {
+    const validFileNames = scope === 'agents' ? VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES : VALID_WORKSPACE_MARKDOWN_FILES;
+    const collection = scope === 'agents'
+      ? (Array.isArray(this.config?.agents?.list) ? this.config.agents.list : [])
+      : (Array.isArray(this.config?.workspaces) ? this.config.workspaces : []);
+
+    for (const record of collection) {
+      if (this.getMarkdownTemplateSelection(record, fileName, validFileNames) === templateKey) {
+        this.setMarkdownTemplateSelection(record, fileName, null, validFileNames);
+      }
+    }
+
+    if (scope === 'agents' && this.editingAgentDraft && this.getMarkdownTemplateSelection(this.editingAgentDraft, fileName, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) === templateKey) {
+      this.setMarkdownTemplateSelection(this.editingAgentDraft, fileName, null, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
+    }
+  }
+
+  addMarkdownTemplate(scope: 'agents' | 'workspaces', fileName: string) {
+    const key = prompt(`New ${scope === 'agents' ? 'agent' : 'workspace'} ${fileName} template key:`);
+    const normalizedKey = typeof key === 'string' ? key.trim() : '';
+    if (!normalizedKey) {
+      return;
+    }
+    const library = this.ensureMarkdownTemplateLibrary(scope, fileName);
+    if (library[normalizedKey]) {
+      alert(`Template "${normalizedKey}" already exists for ${fileName}.`);
+      return;
+    }
+    library[normalizedKey] = '';
+    this.requestUpdate();
+  }
+
+  removeMarkdownTemplate(scope: 'agents' | 'workspaces', fileName: string, templateKey: string) {
+    if (!confirm(`Delete template "${templateKey}" from ${fileName}?`)) {
+      return;
+    }
+    const library = this.ensureMarkdownTemplateLibrary(scope, fileName);
+    delete library[templateKey];
+    this.clearMarkdownTemplateSelectionMatches(scope, fileName, templateKey);
+    this.requestUpdate();
   }
 
   getTelegramRoutingRoot() {
@@ -872,14 +1024,10 @@ export class ToolkitDashboard extends LitElement {
     return lines.join('\n').trimEnd();
   }
 
-  buildDefaultAgentBootstrapFile(agent: any, fileName: string) {
+  buildDefaultAgentBootstrapFile(_agent: any, fileName: string) {
     switch (fileName) {
-      case 'AGENTS.md': {
-        const lines = this.getRolePolicyLines(agent?.rolePolicyKey);
-        return lines.length > 0
-          ? lines.join('\n')
-          : '';
-      }
+      case 'AGENTS.md':
+        return '';
       case 'TOOLS.md':
         return '';
       case 'SOUL.md':
@@ -950,22 +1098,14 @@ export class ToolkitDashboard extends LitElement {
     }
   }
 
-  buildDefaultWorkspaceAgentsFile(workspace: any) {
-    if (workspace?.mode === 'shared') {
-      const lines = this.getRolePolicyLines(workspace?.rolePolicyKey || 'sharedWorkspace');
-      if (lines.length > 0) {
-        return lines.join('\n');
-      }
-      return '';
-    }
-
+  buildDefaultWorkspaceAgentsFile() {
     return '';
   }
 
-  buildDefaultWorkspaceBootstrapFile(workspace: any, fileName: string) {
+  buildDefaultWorkspaceBootstrapFile(_workspace: any, fileName: string) {
     switch (fileName) {
       case 'AGENTS.md':
-        return this.buildDefaultWorkspaceAgentsFile(workspace);
+        return this.buildDefaultWorkspaceAgentsFile();
       case 'TOOLS.md':
         return '';
       case 'SOUL.md':
@@ -1219,6 +1359,7 @@ export class ToolkitDashboard extends LitElement {
       id: 'new-agent-' + Date.now(),
       name: 'New Agent',
       rolePolicyKey: 'codingDelegate',
+      markdownTemplateKeys: this.getMarkdownTemplateContent('agents', 'AGENTS.md', 'codingDelegate') ? { 'AGENTS.md': 'codingDelegate' } : {},
       sandboxMode: 'off',
       modelRef: 'ollama/qwen2.5-coder:3b',
       candidateModelRefs: [],
@@ -1953,7 +2094,7 @@ export class ToolkitDashboard extends LitElement {
                             </div>
 
                             <div class="topology-agent-meta">
-                              Role: ${entry.agent.rolePolicyKey || 'default'}<br>
+                              AGENTS.md: ${this.getMarkdownTemplateSelection(entry.agent, 'AGENTS.md', VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) || 'custom'}<br>
                               Model: ${entry.agent.modelRef || 'unassigned'}
                             </div>
 
@@ -2048,7 +2189,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</div>
           <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
           <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
-          <div class="tab ${this.configSection === 'roles' ? 'active' : ''}" @click=${() => this.configSection = 'roles'}>Role Policies</div>
+          <div class="tab ${this.configSection === 'markdownTemplates' ? 'active' : ''}" @click=${() => this.configSection = 'markdownTemplates'}>Template Markdowns</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
           <div class="tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</div>
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
@@ -2075,7 +2216,7 @@ export class ToolkitDashboard extends LitElement {
       case 'sandbox': return this.renderSandboxConfig();
       case 'endpoints': return this.renderEndpointsConfig();
       case 'models': return this.renderModelsConfig();
-      case 'roles': return this.renderRolesConfig();
+      case 'markdownTemplates': return this.renderTemplateMarkdownsConfig();
       case 'agents': return this.renderAgentsConfig();
       case 'workspaces': return this.renderWorkspacesConfig();
       case 'features': return this.renderFeaturesConfig();
@@ -2484,6 +2625,7 @@ export class ToolkitDashboard extends LitElement {
     delete clone.modelSource;
     clone.enabled = this.normalizeBoolean(clone.enabled, true);
     delete clone.endpointKey;
+    clone.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(clone, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
     if (!Array.isArray(clone.candidateModelRefs)) {
       clone.candidateModelRefs = [];
     }
@@ -3609,41 +3751,50 @@ export class ToolkitDashboard extends LitElement {
     `;
   }
 
-  renderRolesConfig() {
-      const roles = this.getRolePoliciesRoot();
+  renderTemplateMarkdownsConfig() {
+      const scope = this.markdownTemplateScope;
+      const fileNames = this.getMarkdownTemplateFileOptions(scope) as string[];
+      const selectedTemplateFile = this.getSelectedTemplateMarkdownFile();
+      const selectedFileName = fileNames.includes(selectedTemplateFile)
+        ? selectedTemplateFile
+        : fileNames[0];
+      const library = this.ensureMarkdownTemplateLibrary(scope, selectedFileName);
+      const templateKeys = Object.keys(library).sort((left, right) => left.localeCompare(right));
+
       return html`
         <div class="card">
             <div class="card-header">
-                <h3>Role Policies</h3>
-                <button class="btn btn-ghost" @click=${() => this.addRole()}>+ Add Role</button>
+                <h3>Template Markdowns</h3>
+                <button class="btn btn-ghost" @click=${() => this.addMarkdownTemplate(scope, selectedFileName)}>+ Add Template</button>
             </div>
-            <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Role policies now act as shared AGENTS.md defaults. The full per-agent bootstrap markdown set is edited on each agent page and stored as toolkit-managed files.</p>
-            ${Object.keys(roles).map(roleKey => html`
-                <div class="form-group" style="margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <span style="font-weight: bold; color: #00bcd4;">${roleKey}</span>
-                        <button class="btn btn-danger btn-small" style="padding: 4px 10px;" @click=${() => this.removeRole(roleKey)}>Delete Role</button>
-                    </div>
-                    <textarea rows="8" @input=${(e: any) => { this.getRolePoliciesRoot()[roleKey] = e.target.value.split('\n'); this.requestUpdate(); }}>${roles[roleKey].join('\n')}</textarea>
-                </div>
+            <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Define reusable markdown templates by scope and file type. Agents and workspaces can either reference one of these named templates or keep their own custom markdown files.</p>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+              <div class="tab ${scope === 'agents' ? 'active' : ''}" @click=${() => this.markdownTemplateScope = 'agents'}>Agents</div>
+              <div class="tab ${scope === 'workspaces' ? 'active' : ''}" @click=${() => this.markdownTemplateScope = 'workspaces'}>Workspaces</div>
+            </div>
+
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+              ${fileNames.map((fileName) => html`
+                <div class="tab ${selectedFileName === fileName ? 'active' : ''}" @click=${() => this.setSelectedTemplateMarkdownFile(fileName)}>${fileName.replace('.md', '')}</div>
+              `)}
+            </div>
+
+            <p class="help-text" style="margin-bottom: 20px;">Stored under <code>openclaw-toolkit\\markdown-templates\\${scope}\\${selectedFileName.replace('.md', '')}\\&lt;key&gt;.md</code>.</p>
+
+            ${templateKeys.length === 0 ? html`
+              <div class="help-text">No templates defined for ${scope} ${selectedFileName} yet.</div>
+            ` : templateKeys.map((templateKey) => html`
+              <div class="form-group" style="margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 20px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                      <span style="font-weight: bold; color: #00bcd4;">${templateKey}</span>
+                      <button class="btn btn-danger btn-small" style="padding: 4px 10px;" @click=${() => this.removeMarkdownTemplate(scope, selectedFileName, templateKey)}>Delete Template</button>
+                  </div>
+                  <textarea rows="10" .value=${library[templateKey] || ''} @input=${(e: any) => { library[templateKey] = e.target.value; this.requestUpdate(); }}></textarea>
+              </div>
             `)}
         </div>
       `;
-  }
-
-  addRole() {
-      const key = prompt('New Role Key (e.g. specializedCoder):');
-      if (key) {
-          this.getRolePoliciesRoot()[key] = ["# AGENTS.md - New Role", "", "## Role", "- Instruction 1"];
-          this.requestUpdate();
-      }
-  }
-
-  removeRole(key: string) {
-      if (confirm(`Delete role policy "${key}"?`)) {
-          delete this.getRolePoliciesRoot()[key];
-          this.requestUpdate();
-      }
   }
 
   renderAgentsConfig() {
@@ -3698,7 +3849,6 @@ export class ToolkitDashboard extends LitElement {
     const isMain = this.isMainAgentEntry(key, agent);
 
     const endpoints = this.getSortedConfigEndpoints();
-    const roles = Object.keys(this.getRolePoliciesRoot());
     const subagents = this.ensureSubagentsConfig(agent);
     const agentTemplateFiles = this.ensureEditingAgentTemplateFiles();
     const agentIdValidationError = this.getEditingAgentValidationError();
@@ -3748,24 +3898,16 @@ export class ToolkitDashboard extends LitElement {
                 </div>
             </div>
 
-            <div class="grid-2">
-                <div class="form-group">
-                    <label>Role Policy</label>
-                    <select @change=${(e: any) => { agent.rolePolicyKey = e.target.value; this.requestUpdate(); }}>
-                        ${roles.map(r => html`<option value=${r} ?selected=${agent.rolePolicyKey === r}>${r}</option>`)}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Endpoint</label>
-                    <select @change=${(e: any) => {
-                        const endpointKey = e.target.value || null;
-                        this.setAgentEndpointAssignment(agent, endpointKey);
-                        this.requestUpdate();
-                    }}>
-                        <option value="">Select Endpoint</option>
-                        ${endpoints.map((ep: any) => html`<option value=${ep.key} ?selected=${effectiveEndpointKey === ep.key}>${ep.key}</option>`)}
-                    </select>
-                </div>
+            <div class="form-group">
+                <label>Endpoint</label>
+                <select @change=${(e: any) => {
+                    const endpointKey = e.target.value || null;
+                    this.setAgentEndpointAssignment(agent, endpointKey);
+                    this.requestUpdate();
+                }}>
+                    <option value="">Select Endpoint</option>
+                    ${endpoints.map((ep: any) => html`<option value=${ep.key} ?selected=${effectiveEndpointKey === ep.key}>${ep.key}</option>`)}
+                </select>
             </div>
 
             <div class="grid-2">
@@ -3907,17 +4049,36 @@ export class ToolkitDashboard extends LitElement {
 
             <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
                 <div class="card-header"><h3>Agent Bootstrap Markdown</h3></div>
-                <p class="help-text">These files are stored in <code>openclaw-toolkit\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> and copied into <code>.openclaw\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> as agent-specific bootstrap overlays. Workspace-only lifecycle files such as <code>BOOT.md</code> and one-time <code>BOOTSTRAP.md</code> live on the workspace page instead.</p>
-                ${VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => html`
-                    <div class="form-group">
-                        <label>${fileName}</label>
-                        <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'agent')}</div>
-                        <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${agentTemplateFiles[fileName] || ''} placeholder=${this.buildAgentBootstrapPlaceholder(agent, fileName)} @input=${(e: any) => {
-                            agentTemplateFiles[fileName] = e.target.value;
-                            this.requestUpdate();
-                        }}></textarea>
-                    </div>
-                `)}
+                <p class="help-text">Custom markdown for this agent is stored in <code>openclaw-toolkit\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\agents\\&lt;TYPE&gt;\\</code>. The selected effective files are copied into <code>.openclaw\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> as agent-specific bootstrap overlays. Workspace-only lifecycle files such as <code>BOOT.md</code> and one-time <code>BOOTSTRAP.md</code> live on the workspace page instead.</p>
+                ${VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => {
+                    const selectedTemplateKey = this.getMarkdownTemplateSelection(agent, fileName, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
+                    const templateKeys = this.getMarkdownTemplateKeys('agents', fileName);
+                    const isTemplateMode = selectedTemplateKey.length > 0;
+                    const effectiveValue = isTemplateMode
+                      ? this.getMarkdownTemplateContent('agents', fileName, selectedTemplateKey)
+                      : (agentTemplateFiles[fileName] || '');
+                    return html`
+                      <div class="form-group">
+                          <label>${fileName}</label>
+                          <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'agent')}</div>
+                          <select style="margin-bottom: 8px;" @change=${(e: any) => {
+                              const value = e.target.value;
+                              this.setMarkdownTemplateSelection(agent, fileName, value || null, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
+                              this.requestUpdate();
+                          }}>
+                              <option value="">Custom markdown</option>
+                              ${templateKeys.map((templateKey) => html`<option value=${templateKey} ?selected=${selectedTemplateKey === templateKey}>Template: ${templateKey}</option>`)}
+                          </select>
+                          ${isTemplateMode ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 6px;">Using template <code>${selectedTemplateKey}</code>. Switch to Custom markdown to edit agent-specific content without changing the shared template.</div>` : ''}
+                          <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${effectiveValue} ?readonly=${isTemplateMode} placeholder=${isTemplateMode ? '' : this.buildAgentBootstrapPlaceholder(agent, fileName)} @input=${(e: any) => {
+                              if (!isTemplateMode) {
+                                agentTemplateFiles[fileName] = e.target.value;
+                                this.requestUpdate();
+                              }
+                          }}></textarea>
+                      </div>
+                    `;
+                })}
             </div>
         </div>
     `;
@@ -4120,7 +4281,6 @@ export class ToolkitDashboard extends LitElement {
     if (!workspace) return html`Workspace not found`;
 
     const previousWorkspaceId = String(workspace?.id || '');
-    const roles = Object.keys(this.getRolePoliciesRoot());
     const occupantIds = this.getWorkspaceAgentIds(workspace);
     const occupantEntries = this.getManagedAgentEntries().filter(({ agent }: any) => occupantIds.includes(String(agent?.id || '')));
     const sharedWorkspaces = this.getSharedWorkspaces().filter((candidate: any) => candidate.id !== workspace.id);
@@ -4221,21 +4381,6 @@ export class ToolkitDashboard extends LitElement {
 
         ${workspace.mode === 'shared' ? html`
           <div class="form-group">
-            <label>Shared Workspace Role Policy</label>
-            <select @change=${(e: any) => {
-              const value = e.target.value;
-              if (value) {
-                workspace.rolePolicyKey = value;
-              } else {
-                delete workspace.rolePolicyKey;
-              }
-              this.requestUpdate();
-            }}>
-              <option value="">Default sharedWorkspace policy</option>
-              ${roles.map((role: string) => html`<option value=${role} ?selected=${workspace.rolePolicyKey === role}>${role}</option>`)}
-            </select>
-          </div>
-          <div class="form-group">
             <label>Primary Agents in this Shared Workspace</label>
             <div class="help-text" style="margin-bottom: 10px;">Assigning an agent here makes this shared workspace the agent's home base and forces sandbox off so collaboration is not blocked by a private workspace restriction.</div>
             <div class="tag-list">
@@ -4318,17 +4463,37 @@ export class ToolkitDashboard extends LitElement {
 
         <div class="card" style="margin-top: 20px;">
           <div class="card-header"><h3>Workspace Markdown</h3></div>
-          <p class="help-text">These files are stored in <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code> and synced into the live workspace home base. <code>BOOT.md</code> is a startup checklist. <code>BOOTSTRAP.md</code> is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.</p>
-          ${VALID_WORKSPACE_MARKDOWN_FILES.map((fileName) => html`
-            <div class="form-group" style="margin-bottom: 20px;">
-              <label>${fileName}</label>
-              <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'workspace')}</div>
-              <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${this.ensureWorkspaceTemplateFiles(workspace)[fileName] || ''} placeholder=${this.buildWorkspaceBootstrapPlaceholder(workspace, fileName)} @input=${(e: any) => {
-                this.templateFiles.workspaces[workspace.id][fileName] = e.target.value;
-                this.requestUpdate();
-              }}></textarea>
-            </div>
-          `)}
+          <p class="help-text">Custom markdown for this workspace is stored in <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\workspaces\\&lt;TYPE&gt;\\</code>. The selected effective files are synced into the live workspace home base. <code>BOOT.md</code> is a startup checklist. <code>BOOTSTRAP.md</code> is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.</p>
+          ${VALID_WORKSPACE_MARKDOWN_FILES.map((fileName) => {
+            const selectedTemplateKey = this.getMarkdownTemplateSelection(workspace, fileName, VALID_WORKSPACE_MARKDOWN_FILES);
+            const templateKeys = this.getMarkdownTemplateKeys('workspaces', fileName);
+            const isTemplateMode = selectedTemplateKey.length > 0;
+            const workspaceFiles = this.ensureWorkspaceTemplateFiles(workspace);
+            const effectiveValue = isTemplateMode
+              ? this.getMarkdownTemplateContent('workspaces', fileName, selectedTemplateKey)
+              : (workspaceFiles[fileName] || '');
+            return html`
+              <div class="form-group" style="margin-bottom: 20px;">
+                <label>${fileName}</label>
+                <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'workspace')}</div>
+                <select style="margin-bottom: 8px;" @change=${(e: any) => {
+                  const value = e.target.value;
+                  this.setMarkdownTemplateSelection(workspace, fileName, value || null, VALID_WORKSPACE_MARKDOWN_FILES);
+                  this.requestUpdate();
+                }}>
+                  <option value="">Custom markdown</option>
+                  ${templateKeys.map((templateKey) => html`<option value=${templateKey} ?selected=${selectedTemplateKey === templateKey}>Template: ${templateKey}</option>`)}
+                </select>
+                ${isTemplateMode ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 6px;">Using template <code>${selectedTemplateKey}</code>. Switch to Custom markdown to edit workspace-specific content without changing the shared template.</div>` : ''}
+                <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${effectiveValue} ?readonly=${isTemplateMode} placeholder=${isTemplateMode ? '' : this.buildWorkspaceBootstrapPlaceholder(workspace, fileName)} @input=${(e: any) => {
+                  if (!isTemplateMode) {
+                    workspaceFiles[fileName] = e.target.value;
+                    this.requestUpdate();
+                  }
+                }}></textarea>
+              </div>
+            `;
+          })}
         </div>
       </div>
     `;
@@ -4391,6 +4556,9 @@ export class ToolkitDashboard extends LitElement {
         ? '/home/node/.openclaw/workspace'
         : `/home/node/.openclaw/${workspaceId}`,
       rolePolicyKey: mode === 'shared' ? 'sharedWorkspace' : undefined,
+      markdownTemplateKeys: mode === 'shared' && this.getMarkdownTemplateContent('workspaces', 'AGENTS.md', 'sharedWorkspace')
+        ? { 'AGENTS.md': 'sharedWorkspace' }
+        : {},
       enableAgentToAgent: false,
       manageWorkspaceAgentsMd: false,
       sharedWorkspaceIds: [],

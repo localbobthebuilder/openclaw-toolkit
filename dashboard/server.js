@@ -28,6 +28,7 @@ const validWorkspaceMarkdownFiles = [
   'BOOTSTRAP.md',
   'BOOT.md'
 ];
+const templateLibraryScopes = ['agents', 'workspaces'];
 const defaultWhisperModels = [
   'tiny',
   'tiny.en',
@@ -124,6 +125,14 @@ function normalizeTemplateFileName(fileName, validFileNames) {
   return trimmed;
 }
 
+function getMarkdownTemplateTypeName(fileName) {
+  return normalizeTemplateFileName(fileName, [...validWorkspaceMarkdownFiles]).replace(/\.md$/i, '');
+}
+
+function getMarkdownTemplateLibraryDir(scope, fileName) {
+  return path.join(toolkitDir, 'markdown-templates', scope, getMarkdownTemplateTypeName(fileName));
+}
+
 function loadTemplateFileMap(baseDir, validFileNames) {
   const files = {};
   if (!fs.existsSync(baseDir)) {
@@ -139,6 +148,103 @@ function loadTemplateFileMap(baseDir, validFileNames) {
   }
 
   return files;
+}
+
+function loadMarkdownTemplateLibrary(scope, validFileNames) {
+  const library = {};
+  for (const fileName of validFileNames) {
+    library[fileName] = {};
+    const baseDir = getMarkdownTemplateLibraryDir(scope, fileName);
+    if (!fs.existsSync(baseDir)) {
+      continue;
+    }
+
+    for (const entry of fs.readdirSync(baseDir, { withFileTypes: true })) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.md') {
+        continue;
+      }
+      const key = path.basename(entry.name, '.md');
+      if (!isSafeIdSegment(key)) {
+        continue;
+      }
+      library[fileName][key] = fs.readFileSync(path.join(baseDir, entry.name), 'utf8');
+    }
+  }
+  return library;
+}
+
+function writeMarkdownTemplateLibrary(scope, validFileNames, library) {
+  const scopeLibrary = library && typeof library === 'object' ? library : {};
+
+  for (const fileName of validFileNames) {
+    const normalizedFileName = normalizeTemplateFileName(fileName, validFileNames);
+    if (!normalizedFileName) {
+      continue;
+    }
+
+    const baseDir = getMarkdownTemplateLibraryDir(scope, normalizedFileName);
+    fs.mkdirSync(baseDir, { recursive: true });
+    const entries = scopeLibrary[normalizedFileName] && typeof scopeLibrary[normalizedFileName] === 'object'
+      ? scopeLibrary[normalizedFileName]
+      : {};
+    const desiredKeys = new Set();
+
+    for (const [key, rawContent] of Object.entries(entries)) {
+      if (!isSafeIdSegment(key)) {
+        continue;
+      }
+      const content = typeof rawContent === 'string' ? rawContent.replace(/\r\n/g, '\n').trimEnd() : '';
+      const filePath = path.join(baseDir, `${key}.md`);
+      desiredKeys.add(key);
+      if (content.length > 0) {
+        fs.writeFileSync(filePath, content + '\n', 'utf8');
+      } else if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    for (const entry of fs.readdirSync(baseDir, { withFileTypes: true })) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.md') {
+        continue;
+      }
+      const key = path.basename(entry.name, '.md');
+      if (!desiredKeys.has(key) && isSafeIdSegment(key)) {
+        fs.unlinkSync(path.join(baseDir, entry.name));
+      }
+    }
+  }
+}
+
+function applyLegacyRolePolicyTemplates(config, libraries) {
+  const rolePolicies = config?.agents?.rolePolicies && typeof config.agents.rolePolicies === 'object'
+    ? config.agents.rolePolicies
+    : {};
+  const agentLibrary = libraries.agents?.['AGENTS.md'] && typeof libraries.agents['AGENTS.md'] === 'object'
+    ? libraries.agents['AGENTS.md']
+    : (libraries.agents['AGENTS.md'] = {});
+  const workspaceLibrary = libraries.workspaces?.['AGENTS.md'] && typeof libraries.workspaces['AGENTS.md'] === 'object'
+    ? libraries.workspaces['AGENTS.md']
+    : (libraries.workspaces['AGENTS.md'] = {});
+
+  for (const [key, value] of Object.entries(rolePolicies)) {
+    if (!isSafeIdSegment(key)) {
+      continue;
+    }
+    const content = Array.isArray(value)
+      ? value.map((line) => String(line ?? '')).join('\n').trimEnd()
+      : typeof value === 'string'
+        ? value.trimEnd()
+        : '';
+    if (!content) {
+      continue;
+    }
+    if (!agentLibrary[key]) {
+      agentLibrary[key] = content;
+    }
+    if (key === 'sharedWorkspace' && !workspaceLibrary[key]) {
+      workspaceLibrary[key] = content;
+    }
+  }
 }
 
 function writeTemplateFileMap(baseDir, fileMap, validFileNames) {
@@ -160,7 +266,14 @@ function writeTemplateFileMap(baseDir, fileMap, validFileNames) {
 }
 
 function loadToolkitTemplates(config) {
-  const templates = { agents: {}, workspaces: {} };
+  const templates = {
+    agents: {},
+    workspaces: {},
+    libraries: {
+      agents: loadMarkdownTemplateLibrary('agents', validAgentBootstrapMarkdownFiles),
+      workspaces: loadMarkdownTemplateLibrary('workspaces', validWorkspaceMarkdownFiles)
+    }
+  };
   const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
   const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
 
@@ -178,12 +291,14 @@ function loadToolkitTemplates(config) {
     templates.workspaces[workspace.id] = loadTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), validWorkspaceMarkdownFiles);
   }
 
+  applyLegacyRolePolicyTemplates(config, templates.libraries);
   return templates;
 }
 
 function saveToolkitTemplates(config, templates) {
   const agentTemplates = templates?.agents && typeof templates.agents === 'object' ? templates.agents : {};
   const workspaceTemplates = templates?.workspaces && typeof templates.workspaces === 'object' ? templates.workspaces : {};
+  const libraries = templates?.libraries && typeof templates.libraries === 'object' ? templates.libraries : {};
   const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
   const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
 
@@ -200,6 +315,9 @@ function saveToolkitTemplates(config, templates) {
     }
     writeTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), workspaceTemplates[workspace.id], validWorkspaceMarkdownFiles);
   }
+
+  writeMarkdownTemplateLibrary('agents', validAgentBootstrapMarkdownFiles, libraries.agents);
+  writeMarkdownTemplateLibrary('workspaces', validWorkspaceMarkdownFiles, libraries.workspaces);
 }
 
 app.use(cors());

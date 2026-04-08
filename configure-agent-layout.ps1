@@ -425,6 +425,94 @@ function Get-ToolkitWorkspaceMarkdownTemplateDir {
     return (Join-Path (Join-Path (Join-Path $PSScriptRoot "workspaces") $WorkspaceId) "markdown")
 }
 
+function Get-ToolkitMarkdownTemplateLibraryDir {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("agents", "workspaces")][string]$Scope,
+        [Parameter(Mandatory = $true)][string]$FileName
+    )
+
+    $folderName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+    return (Join-Path (Join-Path (Join-Path $PSScriptRoot "markdown-templates") $Scope) $folderName)
+}
+
+function Get-MarkdownTemplateSelectionKey {
+    param(
+        [Parameter(Mandatory = $true)]$OwnerConfig,
+        [Parameter(Mandatory = $true)][string]$FileName
+    )
+
+    if ($null -eq $OwnerConfig -or -not ($OwnerConfig.PSObject.Properties.Name -contains "markdownTemplateKeys")) {
+        return $null
+    }
+
+    $selectionRoot = $OwnerConfig.markdownTemplateKeys
+    if ($null -eq $selectionRoot -or -not ($selectionRoot.PSObject.Properties.Name -contains $FileName)) {
+        return $null
+    }
+
+    $selectedKey = [string]$selectionRoot.$FileName
+    if ([string]::IsNullOrWhiteSpace($selectedKey)) {
+        return $null
+    }
+
+    return $selectedKey.Trim()
+}
+
+function Get-MarkdownTemplateLibraryLines {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("agents", "workspaces")][string]$Scope,
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [Parameter(Mandatory = $true)][string]$TemplateKey,
+        $RolePolicies
+    )
+
+    $libraryDir = Get-ToolkitMarkdownTemplateLibraryDir -Scope $Scope -FileName $FileName
+    $templatePath = Join-Path $libraryDir "$TemplateKey.md"
+    if (Test-Path -LiteralPath $templatePath) {
+        return @(Get-Content -LiteralPath $templatePath)
+    }
+
+    if ($FileName -eq "AGENTS.md" -and $null -ne $RolePolicies -and $RolePolicies.PSObject.Properties.Name -contains $TemplateKey) {
+        return @($RolePolicies.$TemplateKey | ForEach-Object { [string]$_ })
+    }
+
+    return @()
+}
+
+function Resolve-EffectiveManagedMarkdownTemplateMap {
+    param(
+        $OwnerConfig,
+        [Parameter(Mandatory = $true)][ValidateSet("agents", "workspaces")][string]$Scope,
+        $CustomTemplateMap,
+        [string[]]$AllowedFileNames,
+        $RolePolicies
+    )
+
+    $effectiveTemplateMap = [ordered]@{}
+    foreach ($fileName in @($AllowedFileNames)) {
+        $selectedTemplateKey = if ($null -ne $OwnerConfig) {
+            Get-MarkdownTemplateSelectionKey -OwnerConfig $OwnerConfig -FileName $fileName
+        }
+        else {
+            $null
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$selectedTemplateKey)) {
+            $templateLines = @(Get-MarkdownTemplateLibraryLines -Scope $Scope -FileName $fileName -TemplateKey ([string]$selectedTemplateKey) -RolePolicies $RolePolicies)
+            if (@($templateLines).Count -gt 0) {
+                $effectiveTemplateMap[$fileName] = @($templateLines)
+                continue
+            }
+        }
+
+        if ($null -ne $CustomTemplateMap -and $CustomTemplateMap.Contains($fileName)) {
+            $effectiveTemplateMap[$fileName] = @($CustomTemplateMap[$fileName])
+        }
+    }
+
+    return $effectiveTemplateMap
+}
+
 function Get-ManagedMarkdownTemplateMap {
     param(
         [Parameter(Mandatory = $true)][string]$SourceDir,
@@ -672,11 +760,14 @@ function Get-DefaultPrivateWorkspaceTemplateLines {
 
 function Get-AgentBootstrapTemplateMap {
     param(
+        $AgentConfig,
         [Parameter(Mandatory = $true)][string]$AgentId,
+        $RolePolicies,
         [string[]]$FallbackAgentsLines
     )
 
-    $templateMap = Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitAgentBootstrapTemplateDir -AgentId $AgentId) -FileNames $script:ManagedAgentBootstrapOverlayFiles
+    $customTemplateMap = Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitAgentBootstrapTemplateDir -AgentId $AgentId) -FileNames $script:ManagedAgentBootstrapOverlayFiles
+    $templateMap = Resolve-EffectiveManagedMarkdownTemplateMap -OwnerConfig $AgentConfig -Scope "agents" -CustomTemplateMap $customTemplateMap -AllowedFileNames $script:ManagedAgentBootstrapOverlayFiles -RolePolicies $RolePolicies
     if ((-not $templateMap.Contains("AGENTS.md")) -and @($FallbackAgentsLines).Count -gt 0) {
         $templateMap["AGENTS.md"] = @($FallbackAgentsLines)
     }
@@ -688,18 +779,20 @@ function Get-WorkspaceMarkdownTemplateMap {
     param(
         [Parameter(Mandatory = $true)]$Workspace,
         [Parameter(Mandatory = $true)][string]$WorkspacePath,
+        $RolePolicies,
         [string[]]$FallbackAgentsLines,
         [string]$AgentName,
         [string[]]$SharedWorkspacePaths = @()
     )
 
     $workspaceId = if ($Workspace.PSObject.Properties.Name -contains "id" -and $Workspace.id) { [string]$Workspace.id } else { $null }
-    $templateMap = if ($workspaceId) {
+    $customTemplateMap = if ($workspaceId) {
         Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitWorkspaceMarkdownTemplateDir -WorkspaceId $workspaceId) -FileNames @($script:ManagedWorkspaceMarkdownFiles + $script:ManagedWorkspaceSeedOnceMarkdownFiles)
     }
     else {
         [ordered]@{}
     }
+    $templateMap = Resolve-EffectiveManagedMarkdownTemplateMap -OwnerConfig $Workspace -Scope "workspaces" -CustomTemplateMap $customTemplateMap -AllowedFileNames @($script:ManagedWorkspaceMarkdownFiles + $script:ManagedWorkspaceSeedOnceMarkdownFiles) -RolePolicies $RolePolicies
 
     if (-not $templateMap.Contains("AGENTS.md")) {
         if ($Workspace.PSObject.Properties.Name -contains "mode" -and [string]$Workspace.mode -eq "shared") {
@@ -2153,7 +2246,7 @@ foreach ($desiredAgent in @($desiredAgents)) {
     $policyKey = Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$agentRecord.DefaultPolicyKey)
     $agentSharedWorkspacePaths = @(Get-AgentAccessibleSharedWorkspacePaths -Config $config -AgentConfig $agentConfig)
     $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -SharedWorkspacePaths $agentSharedWorkspacePaths -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -Config $config -MultiConfig $multi -AgentConfig $agentConfig)
-    $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentId ([string]$desiredAgent.id) -FallbackAgentsLines $agentPolicyLines
+    $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentConfig $desiredAgent -AgentId ([string]$desiredAgent.id) -RolePolicies $rolePolicies -FallbackAgentsLines $agentPolicyLines
     $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap -AllowedFileNames $script:ManagedAgentBootstrapOverlayFiles)
 }
 
@@ -2200,7 +2293,7 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
         else {
             "sharedWorkspace"
         }
-        $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -FallbackAgentsLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $workspacePath -SharedWorkspacePath $workspacePath -SharedWorkspacePaths @($workspacePath)) -SharedWorkspacePaths @()
+        $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -RolePolicies $rolePolicies -FallbackAgentsLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $workspacePath -SharedWorkspacePath $workspacePath -SharedWorkspacePaths @($workspacePath)) -SharedWorkspacePaths @()
         $workspaceHostDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath
         $managedAgentsFiles += @(Ensure-ManagedSeedOnceMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceSeedOnceMarkdownFiles)
         $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles)
@@ -2223,7 +2316,7 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
             Get-ToolkitWorkspacePathValue -Workspace $sharedWorkspace -DefaultPath "/home/node/.openclaw/workspace"
         }
     )
-    $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -AgentName $workspaceAgentName -SharedWorkspacePaths $sharedWorkspacePathsForPrivateWorkspace
+    $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -RolePolicies $rolePolicies -AgentName $workspaceAgentName -SharedWorkspacePaths $sharedWorkspacePathsForPrivateWorkspace
     $workspaceHostDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath
     $managedAgentsFiles += @(Ensure-ManagedSeedOnceMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceSeedOnceMarkdownFiles)
     $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles)
