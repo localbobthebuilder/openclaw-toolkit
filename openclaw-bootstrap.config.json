@@ -1001,7 +1001,9 @@
       "name": "Notes Helper Workspace",
       "mode": "private",
       "path": "/home/node/.openclaw/workspace-notes-helper",
-      "allowSharedWorkspaceAccess": true,
+      "sharedWorkspaceIds": [
+        "shared-main"
+      ],
       "enableAgentToAgent": true,
       "manageWorkspaceAgentsMd": true,
       "agents": [

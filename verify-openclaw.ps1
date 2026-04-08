@@ -1478,21 +1478,15 @@ function Get-EnabledExtraAgentConfigs {
 
 function Test-ConfiguredAgentUsesSharedWorkspace {
     param(
-        $MultiConfig,
+        $Config,
         $AgentConfig
     )
 
-    if ($null -eq $MultiConfig -or -not ($MultiConfig.sharedWorkspace -and $MultiConfig.sharedWorkspace.enabled)) {
+    if ($null -eq $Config -or $null -eq $AgentConfig) {
         return $false
     }
 
-    if ($null -ne $AgentConfig -and
-        $AgentConfig.PSObject.Properties.Name -contains "workspaceMode" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.workspaceMode)) {
-        return ([string]$AgentConfig.workspaceMode).ToLowerInvariant() -eq "shared"
-    }
-
-    return $true
+    return (Get-ToolkitAgentWorkspaceMode -Config $Config -AgentConfig $AgentConfig) -eq "shared"
 }
 
 function Get-ExpectedManagedModelRefs {
@@ -1714,13 +1708,7 @@ if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $c
     if ($config.multiAgent.localChatAgent.id) {
         $chatWorkspaceParams.AgentId = [string]$config.multiAgent.localChatAgent.id
     }
-    $chatWorkspacePath = $null
-    if ($config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled) {
-        $chatWorkspacePath = if ($config.multiAgent.sharedWorkspace.path) { [string]$config.multiAgent.sharedWorkspace.path } else { "/home/node/.openclaw/workspace" }
-    }
-    elseif ($config.multiAgent.localChatAgent.workspace) {
-        $chatWorkspacePath = [string]$config.multiAgent.localChatAgent.workspace
-    }
+    $chatWorkspacePath = Get-ToolkitAgentWorkspacePath -Config $config -AgentConfig $config.multiAgent.localChatAgent
     if ($chatWorkspacePath) {
         $chatWorkspaceHostPath = Resolve-HostWorkspacePath -Config $config -WorkspacePath $chatWorkspacePath
         $chatWorkspaceParams.WorkspaceHostPath = $chatWorkspaceHostPath
@@ -1764,8 +1752,9 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         $actualAgents = @($liveConfig.agents.list)
         $actualAgentIds = @($actualAgents | ForEach-Object { [string]$_.id })
         $expectedSharedWorkspace = $null
-        if ($config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled) {
-            $expectedSharedWorkspace = if ($config.multiAgent.sharedWorkspace.path) { [string]$config.multiAgent.sharedWorkspace.path } else { "/home/node/.openclaw/workspace" }
+        $primarySharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $config
+        if ($null -ne $primarySharedWorkspace) {
+            $expectedSharedWorkspace = Get-ToolkitWorkspacePathValue -Workspace $primarySharedWorkspace -DefaultPath "/home/node/.openclaw/workspace"
             $actualDefaultWorkspace = [string]$liveConfig.agents.defaults.workspace
             if ($actualDefaultWorkspace -eq $expectedSharedWorkspace) {
                 $multiAgentVerification += "PASS: Shared default workspace is $actualDefaultWorkspace"
@@ -2308,35 +2297,37 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.manageWorkspaceAgentsMd) {
-            foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
-                if ($null -eq $workspace -or
-                    [string]::IsNullOrWhiteSpace([string]$workspace.id) -or
-                    [string]::IsNullOrWhiteSpace([string]$workspace.path)) {
-                    continue
-                }
+        foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
+            if (-not (Test-ToolkitWorkspaceManagesAgentsMd -Config $config -Workspace $workspace)) {
+                continue
+            }
 
-                $activeWorkspaceAgents = @(
-                    foreach ($agentId in @($workspace.agents)) {
-                        $workspaceAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$agentId)
-                        if ($null -ne $workspaceAgent -and
-                            (Test-ToolkitAgentEnabled -AgentConfig $workspaceAgent) -and
-                            (Test-ToolkitAgentAssigned -Config $config -AgentConfig $workspaceAgent)) {
-                            $workspaceAgent
-                        }
+            if ($null -eq $workspace -or
+                [string]::IsNullOrWhiteSpace([string]$workspace.id) -or
+                [string]::IsNullOrWhiteSpace([string]$workspace.path)) {
+                continue
+            }
+
+            $activeWorkspaceAgents = @(
+                foreach ($agentId in @($workspace.agents)) {
+                    $workspaceAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$agentId)
+                    if ($null -ne $workspaceAgent -and
+                        (Test-ToolkitAgentEnabled -AgentConfig $workspaceAgent) -and
+                        (Test-ToolkitAgentAssigned -Config $config -AgentConfig $workspaceAgent)) {
+                        $workspaceAgent
                     }
-                )
-                if (@($activeWorkspaceAgents).Count -eq 0) {
-                    continue
                 }
+            )
+            if (@($activeWorkspaceAgents).Count -eq 0) {
+                continue
+            }
 
-                $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspace.path)) "AGENTS.md"
-                if (Test-Path $agentsFilePath) {
-                    $multiAgentVerification += "PASS: Workspace AGENTS.md exists for $([string]$workspace.id) at $agentsFilePath"
-                }
-                else {
-                    $multiAgentVerification += "FAIL: Workspace AGENTS.md is missing for $([string]$workspace.id) at $agentsFilePath"
-                }
+            $agentsFilePath = Join-Path (Resolve-HostWorkspacePath -Config $config -WorkspacePath ([string]$workspace.path)) "AGENTS.md"
+            if (Test-Path $agentsFilePath) {
+                $multiAgentVerification += "PASS: Workspace AGENTS.md exists for $([string]$workspace.id) at $agentsFilePath"
+            }
+            else {
+                $multiAgentVerification += "FAIL: Workspace AGENTS.md is missing for $([string]$workspace.id) at $agentsFilePath"
             }
         }
 

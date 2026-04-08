@@ -434,8 +434,9 @@ if (-not (Test-ContainerRunning -Name $ContainerName)) {
 }
 
 if (-not $WorkspaceHostPath) {
-    $workspacePath = if ($config.multiAgent -and $config.multiAgent.sharedWorkspace -and $config.multiAgent.sharedWorkspace.enabled -and $config.multiAgent.sharedWorkspace.path) {
-        [string]$config.multiAgent.sharedWorkspace.path
+    $primarySharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $config
+    $workspacePath = if ($null -ne $primarySharedWorkspace) {
+        Get-ToolkitWorkspacePathValue -Workspace $primarySharedWorkspace -DefaultPath "/home/node/.openclaw/workspace"
     }
     else {
         "/home/node/.openclaw/workspace"

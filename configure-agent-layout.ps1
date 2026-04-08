@@ -485,7 +485,7 @@ function Get-DefaultPrivateWorkspaceTemplateLines {
         [Parameter(Mandatory = $true)][string]$WorkspaceName,
         [Parameter(Mandatory = $true)][string]$WorkspacePath,
         [string]$AgentName,
-        [string]$SharedWorkspacePath
+        [string[]]$SharedWorkspacePaths = @()
     )
 
     $displayAgentName = if ([string]::IsNullOrWhiteSpace($AgentName)) { "one agent" } else { $AgentName }
@@ -498,14 +498,27 @@ function Get-DefaultPrivateWorkspaceTemplateLines {
         "- Agent-specific bootstrap markdown files are injected separately from the agent bootstrap folder."
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($SharedWorkspacePath)) {
+    $accessibleSharedPaths = @($SharedWorkspacePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($accessibleSharedPaths.Count -eq 1) {
         $lines += @(
             "",
             "## Shared Project Access",
             "- This private workspace lives at ``$WorkspacePath``.",
-            "- A shared collaboration workspace also exists at ``$SharedWorkspacePath``.",
+            "- A shared collaboration workspace also exists at ``$($accessibleSharedPaths[0])``.",
             "- Use the shared workspace for durable repos, collaborative code, and handoff artifacts."
         )
+    }
+    elseif ($accessibleSharedPaths.Count -gt 1) {
+        $lines += @(
+            "",
+            "## Shared Project Access",
+            "- This private workspace lives at ``$WorkspacePath``.",
+            "- Shared collaboration workspaces available from here:"
+        )
+        foreach ($sharedWorkspacePath in $accessibleSharedPaths) {
+            $lines += "- ``$sharedWorkspacePath``"
+        }
+        $lines += "- Use those shared workspaces for durable repos, collaborative code, and handoff artifacts."
     }
 
     return @($lines)
@@ -531,7 +544,7 @@ function Get-WorkspaceMarkdownTemplateMap {
         [Parameter(Mandatory = $true)][string]$WorkspacePath,
         [string[]]$FallbackAgentsLines,
         [string]$AgentName,
-        [string]$SharedWorkspacePath
+        [string[]]$SharedWorkspacePaths = @()
     )
 
     $workspaceId = if ($Workspace.PSObject.Properties.Name -contains "id" -and $Workspace.id) { [string]$Workspace.id } else { $null }
@@ -550,7 +563,7 @@ function Get-WorkspaceMarkdownTemplateMap {
         }
         else {
             $workspaceName = if ($Workspace.PSObject.Properties.Name -contains "name" -and $Workspace.name) { [string]$Workspace.name } else { "Private Workspace" }
-            $templateMap["AGENTS.md"] = @(Get-DefaultPrivateWorkspaceTemplateLines -WorkspaceName $workspaceName -WorkspacePath $WorkspacePath -AgentName $AgentName -SharedWorkspacePath $SharedWorkspacePath)
+            $templateMap["AGENTS.md"] = @(Get-DefaultPrivateWorkspaceTemplateLines -WorkspaceName $workspaceName -WorkspacePath $WorkspacePath -AgentName $AgentName -SharedWorkspacePaths $SharedWorkspacePaths)
         }
     }
 
@@ -731,9 +744,17 @@ function Get-AgentSkillsOverride {
 }
 
 function Get-SharedWorkspacePath {
-    param([Parameter(Mandatory = $true)]$MultiConfig)
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $MultiConfig
+    )
 
-    if ($MultiConfig.sharedWorkspace -and $MultiConfig.sharedWorkspace.enabled) {
+    $sharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $Config
+    if ($null -ne $sharedWorkspace) {
+        return (Get-ToolkitWorkspacePathValue -Workspace $sharedWorkspace -DefaultPath "/home/node/.openclaw/workspace")
+    }
+
+    if ($null -ne $MultiConfig -and $MultiConfig.sharedWorkspace -and $MultiConfig.sharedWorkspace.enabled) {
         if ($MultiConfig.sharedWorkspace.path) {
             return [string]$MultiConfig.sharedWorkspace.path
         }
@@ -757,78 +778,59 @@ function Get-DefaultPrivateWorkspacePath {
 
 function Get-AgentWorkspaceMode {
     param(
+        [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
-    if ($null -ne $AgentConfig -and
-        $AgentConfig.PSObject.Properties.Name -contains "workspaceMode" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.workspaceMode)) {
-        $mode = ([string]$AgentConfig.workspaceMode).ToLowerInvariant()
-        if ($mode -in @("shared", "private")) {
-            return $mode
-        }
-    }
-
-    if (Get-SharedWorkspacePath -MultiConfig $MultiConfig) {
-        return "shared"
-    }
-
-    return "private"
+    return (Get-ToolkitAgentWorkspaceMode -Config $Config -AgentConfig $AgentConfig)
 }
 
 function Test-AgentUsesSharedWorkspace {
     param(
+        [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
-    return ((Get-AgentWorkspaceMode -MultiConfig $MultiConfig -AgentConfig $AgentConfig) -eq "shared")
+    return ((Get-AgentWorkspaceMode -Config $Config -MultiConfig $MultiConfig -AgentConfig $AgentConfig) -eq "shared")
 }
 
 function Get-AgentWorkspacePath {
     param(
+        [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
-    $sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $MultiConfig
-    if ($sharedWorkspacePath -and (Test-AgentUsesSharedWorkspace -MultiConfig $MultiConfig -AgentConfig $AgentConfig)) {
-        return $sharedWorkspacePath
-    }
+    return (Get-ToolkitAgentWorkspacePath -Config $Config -AgentConfig $AgentConfig)
+}
 
-    if ($null -ne $AgentConfig -and $AgentConfig.PSObject.Properties.Name -contains "workspace" -and $AgentConfig.workspace) {
-        return [string]$AgentConfig.workspace
-    }
+function Get-AgentAccessibleSharedWorkspacePaths {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $AgentConfig
+    )
 
-    if ($null -ne $AgentConfig -and $AgentConfig.PSObject.Properties.Name -contains "id" -and $AgentConfig.id) {
-        return (Get-DefaultPrivateWorkspacePath -AgentId ([string]$AgentConfig.id))
-    }
-
-    return (Get-DefaultPrivateWorkspacePath -AgentId $null)
+    return @(
+        foreach ($workspace in @(Get-ToolkitAccessibleSharedWorkspaceList -Config $Config -AgentConfig $AgentConfig)) {
+            Get-ToolkitWorkspacePathValue -Workspace $workspace -DefaultPath "/home/node/.openclaw/workspace"
+        }
+    )
 }
 
 function Test-AgentCanAccessSharedWorkspace {
     param(
+        [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
-    if (-not (Get-SharedWorkspacePath -MultiConfig $MultiConfig)) {
+    if (Test-AgentUsesSharedWorkspace -Config $Config -MultiConfig $MultiConfig -AgentConfig $AgentConfig) {
         return $false
     }
 
-    if (Test-AgentUsesSharedWorkspace -MultiConfig $MultiConfig -AgentConfig $AgentConfig) {
-        return $false
-    }
-
-    if ($null -ne $AgentConfig -and
-        $AgentConfig.PSObject.Properties.Name -contains "sharedWorkspaceAccess" -and
-        $null -ne $AgentConfig.sharedWorkspaceAccess) {
-        return [bool]$AgentConfig.sharedWorkspaceAccess
-    }
-
-    return $false
+    return @(Get-AgentAccessibleSharedWorkspacePaths -Config $Config -AgentConfig $AgentConfig).Count -gt 0
 }
 
 function Expand-PolicyTemplateLines {
@@ -851,24 +853,39 @@ function Expand-PolicyTemplateLines {
 function Get-SharedWorkspaceAccessLines {
     param(
         [string]$WorkspacePath,
-        [string]$SharedWorkspacePath
+        [string[]]$SharedWorkspacePaths = @()
     )
 
-    if ([string]::IsNullOrWhiteSpace($SharedWorkspacePath)) {
+    $accessibleSharedPaths = @($SharedWorkspacePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($accessibleSharedPaths.Count -eq 0) {
         return @()
     }
 
     $resolvedWorkspacePath = if ($WorkspacePath) { [string]$WorkspacePath } else { "/home/node/.openclaw/workspace" }
 
-    return @(
+    $lines = @(
         "",
         "## Shared Project Access",
         "- Your private home workspace is ``$resolvedWorkspacePath``.",
-        "- A shared collaboration workspace also exists at ``$SharedWorkspacePath``.",
         "- Use your private workspace for agent-specific notes, drafts, and scratch files.",
-        "- Use the shared workspace for collaborative repos, code, durable project notes, and handoff artifacts.",
-        "- When you need to work in the shared project area, use exact absolute paths there and set exec ``workdir`` to ``$SharedWorkspacePath`` explicitly."
+        "- Use shared collaboration workspaces for collaborative repos, code, durable project notes, and handoff artifacts."
     )
+
+    if ($accessibleSharedPaths.Count -eq 1) {
+        $lines += @(
+            "- A shared collaboration workspace also exists at ``$($accessibleSharedPaths[0])``.",
+            "- When you need to work in the shared project area, use exact absolute paths there and set exec ``workdir`` to ``$($accessibleSharedPaths[0])`` explicitly."
+        )
+    }
+    else {
+        $lines += "- Shared collaboration workspaces available from here:"
+        foreach ($sharedWorkspacePath in $accessibleSharedPaths) {
+            $lines += "- ``$sharedWorkspacePath``"
+        }
+        $lines += "- When you need to work in a shared project area, use exact absolute paths there and set exec ``workdir`` to the specific shared workspace path explicitly."
+    }
+
+    return @($lines)
 }
 
 function Get-EffectiveRolePolicyLines {
@@ -877,14 +894,20 @@ function Get-EffectiveRolePolicyLines {
         [string]$PolicyKey,
         [string]$WorkspacePath,
         [string]$SharedWorkspacePath,
+        [string[]]$SharedWorkspacePaths = @(),
         [switch]$IncludeSharedWorkspaceAccess
     )
 
+    $resolvedSharedWorkspacePaths = @($SharedWorkspacePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($resolvedSharedWorkspacePaths.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($SharedWorkspacePath)) {
+        $resolvedSharedWorkspacePaths = @([string]$SharedWorkspacePath)
+    }
+    $primarySharedWorkspacePath = if ($resolvedSharedWorkspacePaths.Count -gt 0) { [string]$resolvedSharedWorkspacePaths[0] } else { [string]$SharedWorkspacePath }
     $lines = @(Get-RolePolicyLines -RolePolicies $RolePolicies -Key $PolicyKey)
-    $lines = @(Expand-PolicyTemplateLines -Lines $lines -WorkspacePath $WorkspacePath -SharedWorkspacePath $SharedWorkspacePath)
+    $lines = @(Expand-PolicyTemplateLines -Lines $lines -WorkspacePath $WorkspacePath -SharedWorkspacePath $primarySharedWorkspacePath)
 
     if ($IncludeSharedWorkspaceAccess) {
-        $lines += @(Get-SharedWorkspaceAccessLines -WorkspacePath $WorkspacePath -SharedWorkspacePath $SharedWorkspacePath)
+        $lines += @(Get-SharedWorkspaceAccessLines -WorkspacePath $WorkspacePath -SharedWorkspacePaths $resolvedSharedWorkspacePaths)
     }
 
     return @($lines)
@@ -1140,7 +1163,7 @@ function Add-DesiredAgentFromConfig {
         $resolvedModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $ModelOverrideRef -AgentConfig $AgentConfig -Config $Config -Purpose $agentId
     }
     $resolvedFallbackRefs = Resolve-AgentFallbackModelRefs -Config $Config -AgentConfig $AgentConfig -PrimaryModelRef $resolvedModelRef -Purpose $agentId -UseAvailableRefsOnly:$useAvailableRefsOnly
-    $workspacePath = Get-AgentWorkspacePath -MultiConfig $MultiConfig -AgentConfig $AgentConfig
+    $workspacePath = Get-AgentWorkspacePath -Config $Config -MultiConfig $MultiConfig -AgentConfig $AgentConfig
     $toolsOverride = Get-ToolProfileOverride -Config $Config -AgentConfig $AgentConfig
     $sandboxOverride = Get-AgentSandboxOverride -AgentConfig $AgentConfig
     $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
@@ -1937,7 +1960,7 @@ foreach ($managedExtraAgentId in @($currentManagedExtraAgentIds)) {
     if ($markerPath) { $managedAgentsFiles += $markerPath }
 }
 
-$sharedWorkspacePath = Get-SharedWorkspacePath -MultiConfig $multi
+$sharedWorkspacePath = Get-SharedWorkspacePath -Config $config -MultiConfig $multi
 foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
     $staleOverlayDir = Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName
     foreach ($fileName in @($script:ManagedBootstrapMarkdownFiles)) {
@@ -1956,15 +1979,20 @@ foreach ($desiredAgent in @($desiredAgents)) {
         [string]$desiredAgent.workspace
     }
     else {
-        Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $agentConfig
+        Get-AgentWorkspacePath -Config $config -MultiConfig $multi -AgentConfig $agentConfig
     }
     $policyKey = Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$agentRecord.DefaultPolicyKey)
-    $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -MultiConfig $multi -AgentConfig $agentConfig)
+    $agentSharedWorkspacePaths = @(Get-AgentAccessibleSharedWorkspacePaths -Config $config -AgentConfig $agentConfig)
+    $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -SharedWorkspacePaths $agentSharedWorkspacePaths -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -Config $config -MultiConfig $multi -AgentConfig $agentConfig)
     $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentId ([string]$desiredAgent.id) -FallbackAgentsLines $agentPolicyLines
     $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap)
 }
 
-if ($multi.manageWorkspaceAgentsMd) {
+foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
+    if ($null -eq $workspace -or -not (Test-ToolkitWorkspaceManagesAgentsMd -Config $config -Workspace $workspace)) {
+        continue
+    }
+
     foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
         $staleExistingAgent = $currentAgents | Where-Object { $_.id -eq $staleExtraAgentId } | Select-Object -First 1
         if ($null -eq $staleExistingAgent) {
@@ -1980,44 +2008,52 @@ if ($multi.manageWorkspaceAgentsMd) {
             }
         }
     }
-
-    $sharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $config
-    if ($sharedWorkspacePath -and $null -ne $sharedWorkspace) {
-        $sharedPolicyKey = "sharedWorkspace"
-        if ($multi.sharedWorkspace -and
-            $multi.sharedWorkspace.PSObject.Properties.Name -contains "rolePolicyKey" -and
-            -not [string]::IsNullOrWhiteSpace([string]$multi.sharedWorkspace.rolePolicyKey)) {
-            $sharedPolicyKey = [string]$multi.sharedWorkspace.rolePolicyKey
+    $workspaceDefaultPath = if ([string]$workspace.mode -eq "shared") { "/home/node/.openclaw/workspace" } else { "/home/node/.openclaw/workspace" }
+    $workspacePath = Get-ToolkitWorkspacePathValue -Workspace $workspace -DefaultPath $workspaceDefaultPath
+    $activeWorkspaceAgents = @(
+        foreach ($agentId in @($workspace.agents)) {
+            $workspaceAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$agentId)
+            if ($null -ne $workspaceAgent -and
+                (Test-ToolkitAgentEnabled -AgentConfig $workspaceAgent) -and
+                (Test-ToolkitAgentAssigned -Config $config -AgentConfig $workspaceAgent)) {
+                $workspaceAgent
+            }
         }
-
-        $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $sharedWorkspace -WorkspacePath $sharedWorkspacePath -FallbackAgentsLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $sharedWorkspacePath -SharedWorkspacePath $sharedWorkspacePath) -SharedWorkspacePath $sharedWorkspacePath
-        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $sharedWorkspacePath) -TemplateMap $sharedTemplateMap)
+    )
+    if (@($activeWorkspaceAgents).Count -eq 0) {
+        continue
     }
 
-    foreach ($desiredAgent in @($desiredAgents)) {
-        $agentRecord = Get-ManagedAgentConfigRecord -MultiConfig $multi -StrongAgentId $strongId -AgentId ([string]$desiredAgent.id)
-        if ($null -eq $agentRecord -or $null -eq $agentRecord.AgentConfig) {
-            continue
-        }
-
-        $agentConfig = $agentRecord.AgentConfig
-        $effectiveWorkspacePath = if ($desiredAgent.PSObject.Properties.Name -contains "workspace" -and $desiredAgent.workspace) {
-            [string]$desiredAgent.workspace
+    if ([string]$workspace.mode -eq "shared") {
+        $sharedPolicyKey = if ($workspace.PSObject.Properties.Name -contains "rolePolicyKey" -and -not [string]::IsNullOrWhiteSpace([string]$workspace.rolePolicyKey)) {
+            [string]$workspace.rolePolicyKey
         }
         else {
-            Get-AgentWorkspacePath -MultiConfig $multi -AgentConfig $agentConfig
+            "sharedWorkspace"
         }
-        $policyKey = Get-AgentRolePolicyKey -AgentConfig $agentConfig -DefaultKey ([string]$agentRecord.DefaultPolicyKey)
-
-        $workspace = Get-ToolkitWorkspaceForAgent -Config $config -Agent $agentConfig
-        if ($null -ne $workspace -and
-            (-not ($workspace.PSObject.Properties.Name -contains "mode") -or [string]$workspace.mode -ne "shared") -and
-            -not [string]::IsNullOrWhiteSpace($effectiveWorkspacePath)) {
-            $workspaceAgentName = if ($desiredAgent.PSObject.Properties.Name -contains "name" -and $desiredAgent.name) { [string]$desiredAgent.name } else { [string]$desiredAgent.id }
-            $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $effectiveWorkspacePath -AgentName $workspaceAgentName -SharedWorkspacePath $sharedWorkspacePath
-            $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $effectiveWorkspacePath) -TemplateMap $workspaceTemplateMap)
-        }
+        $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -FallbackAgentsLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $workspacePath -SharedWorkspacePath $workspacePath -SharedWorkspacePaths @($workspacePath)) -SharedWorkspacePaths @()
+        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath) -TemplateMap $sharedTemplateMap)
+        continue
     }
+
+    $primaryWorkspaceAgent = @($activeWorkspaceAgents) | Select-Object -First 1
+    if ($null -eq $primaryWorkspaceAgent) {
+        continue
+    }
+
+    $workspaceAgentName = if ($primaryWorkspaceAgent.PSObject.Properties.Name -contains "name" -and $primaryWorkspaceAgent.name) {
+        [string]$primaryWorkspaceAgent.name
+    }
+    else {
+        [string]$primaryWorkspaceAgent.id
+    }
+    $sharedWorkspacePathsForPrivateWorkspace = @(
+        foreach ($sharedWorkspace in @(Get-ToolkitAccessibleSharedWorkspaceList -Config $config -AgentConfig $primaryWorkspaceAgent)) {
+            Get-ToolkitWorkspacePathValue -Workspace $sharedWorkspace -DefaultPath "/home/node/.openclaw/workspace"
+        }
+    )
+    $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -AgentName $workspaceAgentName -SharedWorkspacePaths $sharedWorkspacePathsForPrivateWorkspace
+    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath) -TemplateMap $workspaceTemplateMap)
 }
 
 Write-Host "Configured agents:" -ForegroundColor Green

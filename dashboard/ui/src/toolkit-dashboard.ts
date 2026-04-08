@@ -27,6 +27,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private configSection: string = 'general';
   @state() private editingAgentKey: string | null = null;
   @state() private editingEndpointKey: string | null = null;
+  @state() private editingWorkspaceId: string | null = null;
   @state() private topologyLinkSourceAgentId: string | null = null;
   @state() private topologyDraggedAgentKey: string | null = null;
   @state() private topologyHoverEndpointKey: string | null = null;
@@ -584,14 +585,26 @@ export class ToolkitDashboard extends LitElement {
 
   normalizeWorkspaceRecord(workspace: any) {
     const normalized = JSON.parse(JSON.stringify(workspace || {}));
+    normalized.mode = normalized.mode === 'private' ? 'private' : 'shared';
     normalized.enableAgentToAgent = this.normalizeBoolean(normalized.enableAgentToAgent, false);
     normalized.manageWorkspaceAgentsMd = this.normalizeBoolean(normalized.manageWorkspaceAgentsMd, false);
     if (!Array.isArray(normalized.agents)) {
       normalized.agents = [];
     }
+    normalized.agents = normalized.agents
+      .map((agentId: any) => String(agentId || '').trim())
+      .filter((agentId: string) => agentId.length > 0);
     if (normalized.mode === 'private') {
-      normalized.allowSharedWorkspaceAccess = this.normalizeBoolean(normalized.allowSharedWorkspaceAccess, false);
+      if (!Array.isArray(normalized.sharedWorkspaceIds)) {
+        normalized.sharedWorkspaceIds = [];
+      }
+      normalized.sharedWorkspaceIds = normalized.sharedWorkspaceIds
+        .map((workspaceId: any) => String(workspaceId || '').trim())
+        .filter((workspaceId: string) => workspaceId.length > 0);
+    } else {
+      normalized.sharedWorkspaceIds = [];
     }
+    delete normalized.allowSharedWorkspaceAccess;
     return normalized;
   }
 
@@ -705,9 +718,29 @@ export class ToolkitDashboard extends LitElement {
     if (!policyKey) {
       return [];
     }
-    const roles = this.config?.multiAgent?.rolePolicies || {};
+    const roles = this.getRolePoliciesRoot();
     const lines = roles[policyKey];
     return Array.isArray(lines) ? lines.map((line: any) => String(line)) : [];
+  }
+
+  getRolePoliciesRoot() {
+    if (!this.config?.agents || typeof this.config.agents !== 'object') {
+      this.config.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
+    }
+    if (!this.config.agents.rolePolicies || typeof this.config.agents.rolePolicies !== 'object') {
+      this.config.agents.rolePolicies = {};
+    }
+    return this.config.agents.rolePolicies;
+  }
+
+  getTelegramRoutingRoot() {
+    if (!this.config?.agents || typeof this.config.agents !== 'object') {
+      this.config.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
+    }
+    if (!this.config.agents.telegramRouting || typeof this.config.agents.telegramRouting !== 'object') {
+      this.config.agents.telegramRouting = {};
+    }
+    return this.config.agents.telegramRouting;
   }
 
   buildDefaultAgentBootstrapFile(agent: any, fileName: string) {
@@ -747,6 +780,24 @@ export class ToolkitDashboard extends LitElement {
     return `# AGENTS.md - ${workspaceName}\n\n## Workspace Role\n- This is a private workspace for ${workspaceAgents || 'one agent'}.\n- Keep drafts, scratch work, and agent-specific notes here.\n- Agent-specific bootstrap files are injected separately from each agent bootstrap folder.\n`;
   }
 
+  buildDefaultWorkspaceBootstrapFile(workspace: any, fileName: string) {
+    const workspaceName = workspace?.name || workspace?.id || 'Workspace';
+    switch (fileName) {
+      case 'AGENTS.md':
+        return this.buildDefaultWorkspaceAgentsFile(workspace);
+      case 'TOOLS.md':
+        return `# TOOLS.md - ${workspaceName}\n\nAdd workspace-level tool guidance for ${workspaceName} here.\n`;
+      case 'SOUL.md':
+        return `# SOUL.md - ${workspaceName}\n\nAdd shared tone, culture, and collaboration principles for ${workspaceName} here.\n`;
+      case 'IDENTITY.md':
+        return `# IDENTITY.md - ${workspaceName}\n\nDescribe what this workspace is for and how it should be used.\n`;
+      case 'USER.md':
+        return `# USER.md - ${workspaceName}\n\nAdd workspace-specific user reminders, conventions, or handoff notes here.\n`;
+      default:
+        return '';
+    }
+  }
+
   ensureAgentTemplateFiles(agent: any) {
     const agentId = typeof agent?.id === 'string' ? agent.id.trim() : '';
     if (!agentId) {
@@ -777,8 +828,10 @@ export class ToolkitDashboard extends LitElement {
     if (!this.templateFiles.workspaces[workspaceId] || typeof this.templateFiles.workspaces[workspaceId] !== 'object') {
       this.templateFiles.workspaces[workspaceId] = {};
     }
-    if (typeof this.templateFiles.workspaces[workspaceId]['AGENTS.md'] !== 'string') {
-      this.templateFiles.workspaces[workspaceId]['AGENTS.md'] = this.buildDefaultWorkspaceAgentsFile(workspace);
+    for (const fileName of VALID_BOOTSTRAP_MARKDOWN_FILES) {
+      if (typeof this.templateFiles.workspaces[workspaceId][fileName] !== 'string') {
+        this.templateFiles.workspaces[workspaceId][fileName] = this.buildDefaultWorkspaceBootstrapFile(workspace, fileName);
+      }
     }
     return this.templateFiles.workspaces[workspaceId];
   }
@@ -821,7 +874,7 @@ export class ToolkitDashboard extends LitElement {
       endpoint.agents = this.getEndpointAgentIds(endpoint).map((agentId: string) => agentId === normalizedOldId ? normalizedNewId : agentId);
     }
 
-    const telegramRouting = this.config?.multiAgent?.telegramRouting;
+    const telegramRouting = this.getTelegramRoutingRoot();
     if (telegramRouting?.targetAgentId === normalizedOldId) {
       telegramRouting.targetAgentId = normalizedNewId;
     }
@@ -829,6 +882,187 @@ export class ToolkitDashboard extends LitElement {
     if (this.topologyLinkSourceAgentId === normalizedOldId) {
       this.topologyLinkSourceAgentId = normalizedNewId;
     }
+  }
+
+  renameWorkspaceIdEverywhere(oldId: string, newId: string) {
+    const normalizedOldId = typeof oldId === 'string' ? oldId.trim() : '';
+    const normalizedNewId = typeof newId === 'string' ? newId.trim() : '';
+    if (!normalizedOldId || !normalizedNewId || normalizedOldId === normalizedNewId) {
+      return;
+    }
+
+    if (this.templateFiles?.workspaces?.[normalizedOldId] && !this.templateFiles.workspaces[normalizedNewId]) {
+      this.templateFiles.workspaces[normalizedNewId] = this.templateFiles.workspaces[normalizedOldId];
+    }
+    if (this.templateFiles?.workspaces && this.templateFiles.workspaces[normalizedOldId]) {
+      delete this.templateFiles.workspaces[normalizedOldId];
+    }
+
+    for (const workspace of Array.isArray(this.config?.workspaces) ? this.config.workspaces : []) {
+      if (Array.isArray(workspace?.sharedWorkspaceIds)) {
+        workspace.sharedWorkspaceIds = workspace.sharedWorkspaceIds.map((workspaceId: string) =>
+          workspaceId === normalizedOldId ? normalizedNewId : workspaceId
+        );
+      }
+    }
+
+    if (this.editingWorkspaceId === normalizedOldId) {
+      this.editingWorkspaceId = normalizedNewId;
+    }
+  }
+
+  normalizeWorkspaceAssignments(config: any = this.config) {
+    if (!Array.isArray(config?.workspaces)) {
+      config.workspaces = [];
+    }
+
+    config.workspaces = config.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace));
+    const validAgentIds = new Set(
+      (Array.isArray(config?.agents?.list) ? config.agents.list : [])
+        .map((agent: any) => String(agent?.id || '').trim())
+        .filter((agentId: string) => agentId.length > 0)
+    );
+    const sharedWorkspaceIds = config.workspaces
+      .filter((workspace: any) => workspace?.mode === 'shared')
+      .map((workspace: any) => String(workspace?.id || '').trim())
+      .filter((workspaceId: string) => workspaceId.length > 0);
+
+    const assignedAgentIds = new Set<string>();
+    for (const workspace of config.workspaces) {
+      const cleanedAgentIds: string[] = [];
+      for (const agentId of Array.isArray(workspace?.agents) ? workspace.agents : []) {
+        const normalizedAgentId = String(agentId || '').trim();
+        if (!normalizedAgentId || !validAgentIds.has(normalizedAgentId) || assignedAgentIds.has(normalizedAgentId)) {
+          continue;
+        }
+        cleanedAgentIds.push(normalizedAgentId);
+        assignedAgentIds.add(normalizedAgentId);
+        if (workspace.mode === 'private') {
+          break;
+        }
+      }
+      workspace.agents = cleanedAgentIds;
+
+      if (workspace.mode === 'private') {
+        const cleanedSharedWorkspaceIds: string[] = [];
+        for (const workspaceId of Array.isArray(workspace.sharedWorkspaceIds) ? workspace.sharedWorkspaceIds : []) {
+          const normalizedWorkspaceId = String(workspaceId || '').trim();
+          if (!normalizedWorkspaceId || !sharedWorkspaceIds.includes(normalizedWorkspaceId) || cleanedSharedWorkspaceIds.includes(normalizedWorkspaceId)) {
+            continue;
+          }
+          cleanedSharedWorkspaceIds.push(normalizedWorkspaceId);
+        }
+        workspace.sharedWorkspaceIds = cleanedSharedWorkspaceIds;
+      } else {
+        workspace.sharedWorkspaceIds = [];
+      }
+      delete workspace.allowSharedWorkspaceAccess;
+    }
+
+    return config;
+  }
+
+  getWorkspaces() {
+    if (!Array.isArray(this.config?.workspaces)) {
+      this.config.workspaces = [];
+    }
+    this.normalizeWorkspaceAssignments(this.config);
+    return this.config.workspaces;
+  }
+
+  getWorkspaceAgentIds(workspace: any) {
+    if (!workspace || typeof workspace !== 'object') {
+      return [];
+    }
+    if (!Array.isArray(workspace.agents)) {
+      workspace.agents = [];
+    }
+    workspace.agents = workspace.agents
+      .map((agentId: any) => String(agentId || '').trim())
+      .filter((agentId: string) => agentId.length > 0);
+    return workspace.agents;
+  }
+
+  getWorkspaceSharedAccessIds(workspace: any) {
+    if (!workspace || typeof workspace !== 'object' || workspace.mode !== 'private') {
+      return [];
+    }
+    if (!Array.isArray(workspace.sharedWorkspaceIds)) {
+      workspace.sharedWorkspaceIds = [];
+    }
+    workspace.sharedWorkspaceIds = workspace.sharedWorkspaceIds
+      .map((workspaceId: any) => String(workspaceId || '').trim())
+      .filter((workspaceId: string) => workspaceId.length > 0);
+    return workspace.sharedWorkspaceIds;
+  }
+
+  getWorkspaceById(workspaceId: string | null | undefined) {
+    if (!workspaceId) return null;
+    return this.getWorkspaces().find((workspace: any) => String(workspace?.id || '') === workspaceId) || null;
+  }
+
+  getWorkspaceForAgentId(agentId: string | null | undefined) {
+    const normalizedAgentId = String(agentId || '').trim();
+    if (!normalizedAgentId) {
+      return null;
+    }
+    return this.getWorkspaces().find((workspace: any) => this.getWorkspaceAgentIds(workspace).includes(normalizedAgentId)) || null;
+  }
+
+  getSharedWorkspaces() {
+    return this.getWorkspaces().filter((workspace: any) => workspace?.mode === 'shared');
+  }
+
+  getWorkspaceDisplayLabel(workspace: any) {
+    if (!workspace) {
+      return 'No workspace';
+    }
+    const label = String(workspace?.name || workspace?.id || 'Workspace');
+    return `${label} (${workspace.mode === 'private' ? 'private' : 'shared'})`;
+  }
+
+  setAgentPrimaryWorkspace(agentId: string, workspaceId: string | null) {
+    const normalizedAgentId = String(agentId || '').trim();
+    if (!normalizedAgentId) {
+      return;
+    }
+
+    for (const workspace of this.getWorkspaces()) {
+      workspace.agents = this.getWorkspaceAgentIds(workspace).filter((candidateId: string) => candidateId !== normalizedAgentId);
+    }
+
+    if (!workspaceId) {
+      this.requestUpdate();
+      return;
+    }
+
+    const targetWorkspace = this.getWorkspaceById(workspaceId);
+    if (!targetWorkspace) {
+      this.requestUpdate();
+      return;
+    }
+
+    if (targetWorkspace.mode === 'private') {
+      targetWorkspace.agents = [normalizedAgentId];
+    } else if (!this.getWorkspaceAgentIds(targetWorkspace).includes(normalizedAgentId)) {
+      targetWorkspace.agents = [...this.getWorkspaceAgentIds(targetWorkspace), normalizedAgentId];
+    }
+
+    this.normalizeWorkspaceAssignments(this.config);
+    this.requestUpdate();
+  }
+
+  setWorkspaceSharedAccess(workspace: any, sharedWorkspaceIds: string[]) {
+    if (!workspace || workspace.mode !== 'private') {
+      return;
+    }
+    const availableSharedIds = new Set(this.getSharedWorkspaces().map((candidate: any) => String(candidate?.id || '')));
+    workspace.sharedWorkspaceIds = Array.from(new Set(
+      sharedWorkspaceIds
+        .map((workspaceId: any) => String(workspaceId || '').trim())
+        .filter((workspaceId: string) => workspaceId.length > 0 && availableSharedIds.has(workspaceId))
+    ));
+    this.requestUpdate();
   }
 
   renderStatus() {
@@ -1301,6 +1535,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
           <div class="tab ${this.configSection === 'roles' ? 'active' : ''}" @click=${() => this.configSection = 'roles'}>Role Policies</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
+          <div class="tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</div>
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
         </div>
         <div style="display: flex; gap: 10px;">
@@ -1321,6 +1556,7 @@ export class ToolkitDashboard extends LitElement {
       case 'models': return this.renderModelsConfig();
       case 'roles': return this.renderRolesConfig();
       case 'agents': return this.renderAgentsConfig();
+      case 'workspaces': return this.renderWorkspacesConfig();
       case 'features': return this.renderFeaturesConfig();
       default: return html``;
     }
@@ -1652,7 +1888,7 @@ export class ToolkitDashboard extends LitElement {
           name: `${normalized.name || normalized.id} Workspace`,
           mode: 'private',
           path: typeof agent.workspace === 'string' && agent.workspace.trim().length > 0 ? agent.workspace : `/home/node/.openclaw/workspace-${normalized.id}`,
-          allowSharedWorkspaceAccess: this.normalizeBoolean(agent.sharedWorkspaceAccess, false),
+          sharedWorkspaceIds: this.normalizeBoolean(agent.sharedWorkspaceAccess, false) ? ['shared-main'] : [],
           enableAgentToAgent: this.normalizeBoolean(multi.enableAgentToAgent, false),
           manageWorkspaceAgentsMd: this.normalizeBoolean(multi.manageWorkspaceAgentsMd, false),
           agents: [normalized.id]
@@ -1742,7 +1978,7 @@ export class ToolkitDashboard extends LitElement {
         if (workspace.path) {
           agent.workspace = workspace.path;
         }
-        if (workspace.allowSharedWorkspaceAccess) {
+        if (Array.isArray(workspace.sharedWorkspaceIds) ? workspace.sharedWorkspaceIds.length > 0 : workspace.allowSharedWorkspaceAccess) {
           agent.sharedWorkspaceAccess = true;
         }
       }
@@ -1780,6 +2016,7 @@ export class ToolkitDashboard extends LitElement {
       clone.ollama.endpoints = normalizedEndpoints;
     }
     this.normalizeEndpointAgentAssignments(clone);
+    this.normalizeWorkspaceAssignments(clone);
     if (Array.isArray(clone.agents?.list)) {
       clone.agents.list = clone.agents.list.map((agent: any) => {
         const normalized = this.sanitizeAgentRecord(agent, agent?.key);
@@ -1789,6 +2026,9 @@ export class ToolkitDashboard extends LitElement {
         delete normalized.sharedWorkspaceAccess;
         return normalized;
       });
+    }
+    for (const workspace of Array.isArray(clone.workspaces) ? clone.workspaces : []) {
+      delete workspace.allowSharedWorkspaceAccess;
     }
     delete clone.multiAgent;
     return clone;
@@ -1819,6 +2059,7 @@ export class ToolkitDashboard extends LitElement {
     }
     this.normalizeEndpointAgentAssignments(clone);
     clone.workspaces = clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace));
+    this.normalizeWorkspaceAssignments(clone);
     clone.agents.list = clone.agents.list.map((agent: any) => {
       const normalized = this.sanitizeAgentRecord(agent, agent?.key);
       delete normalized.workspaceMode;
@@ -2091,31 +2332,18 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getManagedAgentEntries() {
-    const entries: any[] = [];
-    const managedKeys = [
-      'strongAgent',
-      'researchAgent',
-      'localChatAgent',
-      'hostedTelegramAgent',
-      'localReviewAgent',
-      'localCoderAgent',
-      'remoteReviewAgent',
-      'remoteCoderAgent'
-    ];
-
-    for (const key of managedKeys) {
-      const agent = this.config?.multiAgent?.[key];
-      if (agent?.id) {
-        entries.push({ key, agent });
+    const agents = Array.isArray(this.config?.agents?.list) ? this.config.agents.list : [];
+    const entries = agents
+      .map((agent: any, idx: number) => ({ key: typeof agent?.key === 'string' && agent.key.trim().length > 0 ? agent.key : `agent:${idx}`, agent }))
+      .filter((entry: any) => entry.agent?.id);
+    entries.sort((left: any, right: any) => {
+      const leftMain = this.isMainAgentEntry(left.key, left.agent) ? 0 : 1;
+      const rightMain = this.isMainAgentEntry(right.key, right.agent) ? 0 : 1;
+      if (leftMain !== rightMain) {
+        return leftMain - rightMain;
       }
-    }
-
-    for (const [idx, agent] of (this.config?.multiAgent?.extraAgents || []).entries()) {
-      if (agent?.id) {
-        entries.push({ key: `extra:${idx}`, agent });
-      }
-    }
-
+      return String(left.agent?.name || left.agent?.id || left.key).localeCompare(String(right.agent?.name || right.agent?.id || right.key));
+    });
     return entries;
   }
 
@@ -2133,11 +2361,15 @@ export class ToolkitDashboard extends LitElement {
       subagents.allowAgents = subagents.allowAgents.filter((candidateId: string) => candidateId !== agentId);
     }
 
+    for (const workspace of this.getWorkspaces()) {
+      workspace.agents = this.getWorkspaceAgentIds(workspace).filter((candidateId: string) => candidateId !== agentId);
+    }
+
     for (const endpoint of this.getConfigEndpoints()) {
       endpoint.agents = this.getEndpointAgentIds(endpoint).filter((candidateId: string) => candidateId !== agentId);
     }
 
-    const telegramRouting = this.config?.multiAgent?.telegramRouting;
+    const telegramRouting = this.getTelegramRoutingRoot();
     if (telegramRouting && telegramRouting.targetAgentId === agentId) {
       delete telegramRouting.targetAgentId;
     }
@@ -2161,7 +2393,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getAgentEffectiveWorkspaceMode(agent: any) {
-    return agent?.workspaceMode || (this.config?.multiAgent?.sharedWorkspace?.enabled ? 'shared' : 'private');
+    return this.getWorkspaceForAgentId(agent?.id)?.mode || 'private';
   }
 
   getTopologyAgentEntries() {
@@ -2171,7 +2403,7 @@ export class ToolkitDashboard extends LitElement {
       id: String(agent?.id || key),
       name: String(agent?.name || agent?.id || key),
       enabled: this.getAgentEnabledState(key, agent),
-      isMain: key === 'strongAgent',
+      isMain: this.isMainAgentEntry(key, agent),
       endpoint: this.resolveAgentEndpoint(agent),
       workspaceMode: this.getAgentEffectiveWorkspaceMode(agent),
       modelSource: agent?.modelSource || (this.isLocalModelRef(agent?.modelRef) ? 'local' : 'hosted')
@@ -2750,7 +2982,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderRolesConfig() {
-      const roles = this.config.multiAgent.rolePolicies || {};
+      const roles = this.getRolePoliciesRoot();
       return html`
         <div class="card">
             <div class="card-header">
@@ -2764,7 +2996,7 @@ export class ToolkitDashboard extends LitElement {
                         <span style="font-weight: bold; color: #00bcd4;">${roleKey}</span>
                         <button class="btn btn-danger btn-small" style="padding: 4px 10px;" @click=${() => this.removeRole(roleKey)}>Delete Role</button>
                     </div>
-                    <textarea rows="8" @input=${(e: any) => { this.config.multiAgent.rolePolicies[roleKey] = e.target.value.split('\n'); this.requestUpdate(); }}>${roles[roleKey].join('\n')}</textarea>
+                    <textarea rows="8" @input=${(e: any) => { this.getRolePoliciesRoot()[roleKey] = e.target.value.split('\n'); this.requestUpdate(); }}>${roles[roleKey].join('\n')}</textarea>
                 </div>
             `)}
         </div>
@@ -2774,15 +3006,14 @@ export class ToolkitDashboard extends LitElement {
   addRole() {
       const key = prompt('New Role Key (e.g. specializedCoder):');
       if (key) {
-          if (!this.config.multiAgent.rolePolicies) this.config.multiAgent.rolePolicies = {};
-          this.config.multiAgent.rolePolicies[key] = ["# AGENTS.md - New Role", "", "## Role", "- Instruction 1"];
+          this.getRolePoliciesRoot()[key] = ["# AGENTS.md - New Role", "", "## Role", "- Instruction 1"];
           this.requestUpdate();
       }
   }
 
   removeRole(key: string) {
       if (confirm(`Delete role policy "${key}"?`)) {
-          delete this.config.multiAgent.rolePolicies[key];
+          delete this.getRolePoliciesRoot()[key];
           this.requestUpdate();
       }
   }
@@ -2797,75 +3028,25 @@ export class ToolkitDashboard extends LitElement {
       ...agent,
       enabled: this.getAgentEnabledState(key, agent)
     }));
-    const sharedWorkspace = this.config.multiAgent.sharedWorkspace || (this.config.multiAgent.sharedWorkspace = { enabled: false });
 
     return html`
       <div class="card">
         <div class="card-header">
             <h3>Agents Configuration</h3>
-            <button class="btn btn-ghost" @click=${() => this.addExtraAgent()}>+ Add Agent</button>
+            <button class="btn btn-ghost" @click=${() => this.addAgent()}>+ Add Agent</button>
         </div>
-        
-        <div class="grid-2" style="margin-bottom: 25px;">
-            <div class="card" style="margin-bottom: 0;">
-                <div class="card-header"><h3>Workspace Collaboration</h3></div>
-                <div class="form-group">
-                    <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${sharedWorkspace.enabled} @change=${(e: any) => { sharedWorkspace.enabled = e.target.checked; this.requestUpdate(); }}>
-                        Enable shared workspace
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label>Shared Workspace Path</label>
-                    <input type="text" .value=${sharedWorkspace.path || ''} @input=${(e: any) => { sharedWorkspace.path = e.target.value; this.requestUpdate(); }}>
-                </div>
-                <div class="form-group">
-                    <label>Shared Workspace Role Policy</label>
-                    <select @change=${(e: any) => {
-                        const value = e.target.value;
-                        if (value) {
-                            sharedWorkspace.rolePolicyKey = value;
-                        } else {
-                            delete sharedWorkspace.rolePolicyKey;
-                        }
-                        this.requestUpdate();
-                    }}>
-                        <option value="">Default sharedWorkspace policy</option>
-                        ${Object.keys(this.config.multiAgent.rolePolicies || {}).map((role: string) => html`
-                            <option value=${role} ?selected=${sharedWorkspace.rolePolicyKey === role}>${role}</option>
-                        `)}
-                    </select>
-                </div>
-            </div>
-
-            <div class="card" style="margin-bottom: 0;">
-                <div class="card-header"><h3>Managed Agent Wiring</h3></div>
-                <div class="form-group">
-                    <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${this.config.multiAgent.enableAgentToAgent} @change=${(e: any) => { this.config.multiAgent.enableAgentToAgent = e.target.checked; this.requestUpdate(); }}>
-                        Enable agent-to-agent tool
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${this.config.multiAgent.manageWorkspaceAgentsMd} @change=${(e: any) => { this.config.multiAgent.manageWorkspaceAgentsMd = e.target.checked; this.requestUpdate(); }}>
-                        Manage AGENTS.md files in workspaces
-                    </label>
-                    <div class="help-text">Workspace markdown files are stored separately from agent bootstrap files under <code>openclaw-toolkit\\workspaces\\&lt;workspaceId&gt;\\markdown\\</code>.</div>
-                </div>
-            </div>
-        </div>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Agents are first-class toolkit records. Endpoints own machine placement, and workspaces own primary workspace membership plus shared collaboration access.</p>
 
         <h4 style="color: #666; margin-bottom: 10px;">All Agents</h4>
-        ${agents.map(agent => html`
+        ${agents.map((agent: any) => html`
           <div class="item-row" style="${!agent.enabled ? 'opacity: 0.5;' : ''}">
             <div class="item-info">
               <span class="item-title">
                 ${agent.name} 
-                ${agent.key === 'strongAgent' ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
+                ${this.isMainAgentEntry(agent.key, agent) ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
                 ${!agent.enabled ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
               </span>
-              <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef} | Workspace: ${agent.workspaceMode || (sharedWorkspace.enabled ? 'shared' : 'private')} | Sandbox: ${agent.sandboxMode || 'default'}</span>
+              <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef || '(unset)'} | Workspace: ${this.getWorkspaceDisplayLabel(this.getWorkspaceForAgentId(agent.id))} | Sandbox: ${agent.sandboxMode || 'default'}</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
@@ -2881,11 +3062,8 @@ export class ToolkitDashboard extends LitElement {
 
   getEditingAgent() {
       if (!this.editingAgentKey) return null;
-      if (this.editingAgentKey.startsWith('extra:')) {
-          const idx = parseInt(this.editingAgentKey.split(':')[1]);
-          return this.config.multiAgent.extraAgents[idx];
-      }
-      return this.config.multiAgent[this.editingAgentKey];
+      const entry = this.getManagedAgentEntries().find((candidate: any) => candidate.key === this.editingAgentKey);
+      return entry?.agent || null;
   }
 
   renderAgentEditor(key: string) {
@@ -2895,10 +3073,13 @@ export class ToolkitDashboard extends LitElement {
     const previousAgentId = typeof agent.id === 'string' ? agent.id : '';
 
     const endpoints = this.getConfigEndpoints();
-    const roles = Object.keys(this.config.multiAgent.rolePolicies || {});
+    const roles = Object.keys(this.getRolePoliciesRoot());
     const subagents = this.ensureSubagentsConfig(agent);
     const agentTemplateFiles = this.ensureAgentTemplateFiles(agent);
-    const effectiveWorkspaceMode = agent.workspaceMode || (this.config.multiAgent.sharedWorkspace?.enabled ? 'shared' : 'private');
+    const primaryWorkspace = this.getWorkspaceForAgentId(agent.id);
+    const accessibleSharedWorkspaces = primaryWorkspace?.mode === 'private'
+      ? this.getWorkspaceSharedAccessIds(primaryWorkspace).map((workspaceId: string) => this.getWorkspaceById(workspaceId)).filter(Boolean)
+      : [];
     const selectedEndpoint = this.resolveAgentEndpoint(agent);
     const effectiveEndpointKey = selectedEndpoint?.key || '';
     const endpointModelOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
@@ -2963,15 +3144,22 @@ export class ToolkitDashboard extends LitElement {
             </div>
 
             <div class="grid-2">
-                <div class="form-group">
-                    <label>Workspace Mode</label>
-                    <select @change=${(e: any) => { agent.workspaceMode = e.target.value; this.requestUpdate(); }}>
-                        <option value="shared" ?selected=${effectiveWorkspaceMode === 'shared'}>shared</option>
-                        <option value="private" ?selected=${effectiveWorkspaceMode === 'private'}>private</option>
-                    </select>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header"><h3>Workspace Membership</h3></div>
+                    <div class="help-text" style="margin-top: 0;">Primary workspace membership is edited on the Workspaces tab.</div>
+                    <div style="color: #fff; margin-top: 10px;">${primaryWorkspace ? this.getWorkspaceDisplayLabel(primaryWorkspace) : 'No primary workspace assigned yet.'}</div>
+                    ${primaryWorkspace?.mode === 'private' && accessibleSharedWorkspaces.length > 0 ? html`
+                      <div class="help-text" style="margin-top: 10px;">Shared collaboration access: ${accessibleSharedWorkspaces.map((workspace: any) => workspace.name || workspace.id).join(', ')}</div>
+                    ` : ''}
+                    ${primaryWorkspace?.mode === 'private' && accessibleSharedWorkspaces.length === 0 ? html`
+                      <div class="help-text" style="margin-top: 10px;">This private workspace currently has no shared collaboration workspaces attached.</div>
+                    ` : ''}
+                    <div style="margin-top: 12px;">
+                      <button class="btn btn-ghost" @click=${() => { this.editingWorkspaceId = primaryWorkspace?.id || null; this.configSection = 'workspaces'; }}>Open Workspaces Tab</button>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Sandbox Mode Override</label>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header"><h3>Sandbox Mode</h3></div>
                     <label class="toggle-switch">
                         <input type="checkbox" ?checked=${forceSandboxOff} @change=${(e: any) => {
                             if (e.target.checked) {
@@ -2989,30 +3177,6 @@ export class ToolkitDashboard extends LitElement {
                       : ''}
                 </div>
             </div>
-
-            ${effectiveWorkspaceMode === 'private' ? html`
-                <div class="form-group">
-                    <label>Private Workspace Path</label>
-                    <input type="text" .value=${agent.workspace || ''} placeholder="/home/node/.openclaw/workspace-${agent.id}" @input=${(e: any) => {
-                        const value = e.target.value.trim();
-                        if (value) {
-                            agent.workspace = value;
-                        } else {
-                            delete agent.workspace;
-                        }
-                        this.requestUpdate();
-                    }}>
-                </div>
-            ` : ''}
-
-            ${effectiveWorkspaceMode === 'private' && this.config.multiAgent.sharedWorkspace?.enabled ? html`
-            <div class="form-group">
-                <label class="toggle-switch">
-                    <input type="checkbox" ?checked=${!!agent.sharedWorkspaceAccess} @change=${(e: any) => { agent.sharedWorkspaceAccess = e.target.checked; this.requestUpdate(); }}>
-                    Allow private workspace agent to access the shared workspace
-                </label>
-            </div>
-            ` : ''}
 
             <div class="form-group">
                 <label>Primary Model</label>
@@ -3271,20 +3435,260 @@ export class ToolkitDashboard extends LitElement {
           </div>
         </div>
       </div>
+      `;
+  }
+
+  renderWorkspacesConfig() {
+    if (this.editingWorkspaceId) {
+      return this.renderWorkspaceEditor(this.editingWorkspaceId);
+    }
+
+    const workspaces = this.getWorkspaces();
+    return html`
+      <div class="card">
+        <div class="card-header">
+          <h3>Workspaces</h3>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-ghost" @click=${() => this.addWorkspace('shared')}>+ Shared Workspace</button>
+            <button class="btn btn-ghost" @click=${() => this.addWorkspace('private')}>+ Private Workspace</button>
+          </div>
+        </div>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Workspaces own primary workspace membership. Shared workspaces can host many agents; private workspaces host one agent and can expose shared collaboration workspaces through an access list.</p>
+        ${workspaces.map((workspace: any) => {
+          const occupantIds = this.getWorkspaceAgentIds(workspace);
+          const occupants = this.getManagedAgentEntries().filter(({ agent }: any) => occupantIds.includes(String(agent?.id || '')));
+          const sharedAccessLabels = workspace.mode === 'private'
+            ? this.getWorkspaceSharedAccessIds(workspace)
+                .map((workspaceId: string) => this.getWorkspaceById(workspaceId))
+                .filter(Boolean)
+                .map((candidate: any) => candidate.name || candidate.id)
+            : [];
+          return html`
+            <div class="item-row">
+              <div class="item-info">
+                <span class="item-title">${workspace.name || workspace.id}</span>
+                <span class="item-sub">
+                  ID: ${workspace.id} | Mode: ${workspace.mode} | Path: ${workspace.path || '(unset)'} | Occupants: ${occupants.length > 0 ? occupants.map(({ agent }: any) => agent.name || agent.id).join(', ') : 'none'}
+                  ${workspace.mode === 'private' ? ` | Shared access: ${sharedAccessLabels.length > 0 ? sharedAccessLabels.join(', ') : 'none'}` : ''}
+                </span>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" @click=${() => this.editingWorkspaceId = workspace.id}>Configure</button>
+                <button class="btn btn-danger" @click=${() => this.removeWorkspaceById(workspace.id)}>Remove</button>
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  renderWorkspaceEditor(workspaceId: string) {
+    const workspace = this.getWorkspaceById(workspaceId);
+    if (!workspace) return html`Workspace not found`;
+
+    const previousWorkspaceId = String(workspace?.id || '');
+    const roles = Object.keys(this.getRolePoliciesRoot());
+    const occupantIds = this.getWorkspaceAgentIds(workspace);
+    const occupantEntries = this.getManagedAgentEntries().filter(({ agent }: any) => occupantIds.includes(String(agent?.id || '')));
+    const sharedWorkspaces = this.getSharedWorkspaces().filter((candidate: any) => candidate.id !== workspace.id);
+    const availableAgents = this.getManagedAgentEntries().filter(({ agent }: any) => {
+      const agentId = String(agent?.id || '');
+      const assignedWorkspace = this.getWorkspaceForAgentId(agentId);
+      return agentId.length > 0 && (!assignedWorkspace || assignedWorkspace.id === workspace.id);
+    });
+    const selectedSharedAccessIds = this.getWorkspaceSharedAccessIds(workspace);
+
+    return html`
+      <div class="card">
+        <div class="card-header">
+          <h3>Workspace: ${workspace.name || workspace.id}</h3>
+          <button class="btn btn-ghost" @click=${() => this.editingWorkspaceId = null}>Back to Workspaces</button>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Workspace Name</label>
+            <input type="text" .value=${workspace.name || ''} @input=${(e: any) => { workspace.name = e.target.value; this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Workspace ID</label>
+            <input type="text" .value=${workspace.id || ''} @input=${(e: any) => {
+              const nextId = e.target.value;
+              this.renameWorkspaceIdEverywhere(previousWorkspaceId, nextId);
+              workspace.id = nextId;
+              this.requestUpdate();
+            }}>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Workspace Mode</label>
+            <select @change=${(e: any) => {
+              const nextMode = e.target.value === 'private' ? 'private' : 'shared';
+              if (nextMode === 'private' && workspace.mode !== 'private' && this.getWorkspaceAgentIds(workspace).length > 1) {
+                alert('A private workspace can only host one primary agent. Move the extra agents to other workspaces first.');
+                e.target.value = workspace.mode;
+                return;
+              }
+              workspace.mode = nextMode;
+              if (workspace.mode === 'shared') {
+                workspace.sharedWorkspaceIds = [];
+              } else if (!Array.isArray(workspace.sharedWorkspaceIds)) {
+                workspace.sharedWorkspaceIds = [];
+              }
+              this.normalizeWorkspaceAssignments(this.config);
+              this.requestUpdate();
+            }}>
+              <option value="shared" ?selected=${workspace.mode === 'shared'}>shared</option>
+              <option value="private" ?selected=${workspace.mode === 'private'}>private</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Workspace Path</label>
+            <input type="text" .value=${workspace.path || ''} @input=${(e: any) => { workspace.path = e.target.value; this.requestUpdate(); }}>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${!!workspace.enableAgentToAgent} @change=${(e: any) => { workspace.enableAgentToAgent = e.target.checked; this.requestUpdate(); }}>
+              Enable agent-to-agent tool in this workspace
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${!!workspace.manageWorkspaceAgentsMd} @change=${(e: any) => { workspace.manageWorkspaceAgentsMd = e.target.checked; this.requestUpdate(); }}>
+              Manage workspace markdown files
+            </label>
+            <div class="help-text">Workspace markdown lives under <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>.</div>
+          </div>
+        </div>
+
+        ${workspace.mode === 'shared' ? html`
+          <div class="form-group">
+            <label>Shared Workspace Role Policy</label>
+            <select @change=${(e: any) => {
+              const value = e.target.value;
+              if (value) {
+                workspace.rolePolicyKey = value;
+              } else {
+                delete workspace.rolePolicyKey;
+              }
+              this.requestUpdate();
+            }}>
+              <option value="">Default sharedWorkspace policy</option>
+              ${roles.map((role: string) => html`<option value=${role} ?selected=${workspace.rolePolicyKey === role}>${role}</option>`)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Primary Agents in this Shared Workspace</label>
+            <div class="tag-list">
+              ${occupantEntries.map(({ agent }: any) => html`
+                <div class="tag">
+                  ${agent.name || agent.id}
+                  <span class="tag-remove" @click=${() => this.setAgentPrimaryWorkspace(agent.id, null)}>×</span>
+                </div>
+              `)}
+            </div>
+            <div style="margin-top: 10px;">
+              <select @change=${(e: any) => {
+                const agentId = e.target.value;
+                if (agentId) {
+                  this.setAgentPrimaryWorkspace(agentId, workspace.id);
+                }
+                e.target.value = '';
+              }}>
+                <option value="">${availableAgents.length === 0 ? 'No unassigned agents available' : '+ Add Agent to Shared Workspace'}</option>
+                ${availableAgents
+                  .filter(({ agent }: any) => !occupantIds.includes(String(agent?.id || '')))
+                  .map(({ agent }: any) => html`<option value=${agent.id}>${agent.name || agent.id}</option>`)}
+              </select>
+            </div>
+          </div>
+        ` : html`
+          <div class="grid-2">
+            <div class="form-group">
+              <label>Primary Agent in this Private Workspace</label>
+              <select @change=${(e: any) => {
+                const agentId = e.target.value;
+                if (agentId) {
+                  this.setAgentPrimaryWorkspace(agentId, workspace.id);
+                } else {
+                  workspace.agents = [];
+                  this.requestUpdate();
+                }
+              }}>
+                <option value="">No primary agent assigned</option>
+                ${availableAgents.map(({ agent }: any) => html`
+                  <option value=${agent.id} ?selected=${occupantIds.includes(String(agent?.id || ''))}>${agent.name || agent.id}</option>
+                `)}
+              </select>
+              <div class="help-text">A private workspace can host only one primary agent at a time.</div>
+            </div>
+            <div class="form-group">
+              <label>Shared Workspaces Accessible from this Private Workspace</label>
+              <div class="tag-list">
+                ${selectedSharedAccessIds.map((sharedWorkspaceId: string) => {
+                  const sharedWorkspace = this.getWorkspaceById(sharedWorkspaceId);
+                  if (!sharedWorkspace) return null;
+                  return html`
+                    <div class="tag">
+                      ${sharedWorkspace.name || sharedWorkspace.id}
+                      <span class="tag-remove" @click=${() => {
+                        this.setWorkspaceSharedAccess(workspace, selectedSharedAccessIds.filter((candidateId: string) => candidateId !== sharedWorkspaceId));
+                      }}>×</span>
+                    </div>
+                  `;
+                })}
+              </div>
+              <div style="margin-top: 10px;">
+                <select @change=${(e: any) => {
+                  const selectedId = e.target.value;
+                  if (selectedId && !selectedSharedAccessIds.includes(selectedId)) {
+                    this.setWorkspaceSharedAccess(workspace, [...selectedSharedAccessIds, selectedId]);
+                  }
+                  e.target.value = '';
+                }}>
+                  <option value="">${sharedWorkspaces.length === 0 ? 'No shared workspaces available' : '+ Grant Shared Workspace Access'}</option>
+                  ${sharedWorkspaces
+                    .filter((candidate: any) => !selectedSharedAccessIds.includes(String(candidate?.id || '')))
+                    .map((candidate: any) => html`<option value=${candidate.id}>${candidate.name || candidate.id}</option>`)}
+                </select>
+              </div>
+            </div>
+          </div>
+        `}
+
+        <div class="card" style="margin-top: 20px;">
+          <div class="card-header"><h3>Workspace Markdown</h3></div>
+          ${Object.entries(this.ensureWorkspaceTemplateFiles(workspace)).map(([fileName, content]: [string, any]) => html`
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label>${fileName}</label>
+              <textarea rows="8" .value=${content || ''} @input=${(e: any) => {
+                this.templateFiles.workspaces[workspace.id][fileName] = e.target.value;
+                this.requestUpdate();
+              }}></textarea>
+            </div>
+          `)}
+        </div>
+      </div>
     `;
   }
 
   // Helpers
-  addExtraAgent() {
-      if (!this.config.multiAgent.extraAgents) this.config.multiAgent.extraAgents = [];
+  addAgent() {
+      if (!this.config.agents || typeof this.config.agents !== 'object') {
+          this.config.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
+      }
+      if (!Array.isArray(this.config.agents.list)) this.config.agents.list = [];
       const newAgent = {
           enabled: true,
           id: 'new-agent-' + Date.now(),
           name: 'New Agent',
           rolePolicyKey: 'codingDelegate',
-          modelSource: 'local',
-          workspaceMode: 'private',
-          sharedWorkspaceAccess: false,
           sandboxMode: 'off',
           modelRef: 'ollama/qwen2.5-coder:3b',
           candidateModelRefs: [],
@@ -3294,9 +3698,13 @@ export class ToolkitDashboard extends LitElement {
               allowAgents: []
           }
       };
-      this.config.multiAgent.extraAgents.push(newAgent);
+      this.config.agents.list.push(newAgent);
       this.ensureAgentTemplateFiles(newAgent);
-      this.editingAgentKey = `extra:${this.config.multiAgent.extraAgents.length - 1}`;
+      this.editingAgentKey = `agent:${this.config.agents.list.length - 1}`;
+  }
+
+  addExtraAgent() {
+      this.addAgent();
   }
 
   removeAgentByKey(key: string) {
@@ -3320,23 +3728,11 @@ export class ToolkitDashboard extends LitElement {
           delete this.templateFiles.agents[entry.agent.id];
       }
 
-      if (key.startsWith('extra:')) {
-          const idx = parseInt(key.split(':')[1], 10);
-          if (!Number.isNaN(idx)) {
-              this.config.multiAgent.extraAgents.splice(idx, 1);
-              if (this.editingAgentKey?.startsWith('extra:')) {
-                  const editingIdx = parseInt(this.editingAgentKey.split(':')[1], 10);
-                  if (!Number.isNaN(editingIdx)) {
-                      if (editingIdx === idx) {
-                          this.editingAgentKey = null;
-                      } else if (editingIdx > idx) {
-                          this.editingAgentKey = `extra:${editingIdx - 1}`;
-                      }
-                  }
-              }
+      if (Array.isArray(this.config?.agents?.list)) {
+          const idx = this.config.agents.list.findIndex((candidate: any) => candidate === entry.agent || String(candidate?.id || '') === String(entry.agent.id || ''));
+          if (idx >= 0) {
+              this.config.agents.list.splice(idx, 1);
           }
-      } else if (this.config.multiAgent && Object.prototype.hasOwnProperty.call(this.config.multiAgent, key)) {
-          delete this.config.multiAgent[key];
       }
 
       if (this.editingAgentKey === key) {
@@ -3344,6 +3740,57 @@ export class ToolkitDashboard extends LitElement {
       }
 
       this.requestUpdate();
+  }
+
+  addWorkspace(mode: 'shared' | 'private') {
+    const workspaceId = `${mode === 'shared' ? 'shared' : 'workspace'}-${Date.now()}`;
+    if (!Array.isArray(this.config?.workspaces)) {
+      this.config.workspaces = [];
+    }
+    const workspace = {
+      id: workspaceId,
+      name: mode === 'shared' ? 'New Shared Workspace' : 'New Private Workspace',
+      mode,
+      path: mode === 'shared' && this.getSharedWorkspaces().length === 0
+        ? '/home/node/.openclaw/workspace'
+        : `/home/node/.openclaw/${workspaceId}`,
+      rolePolicyKey: mode === 'shared' ? 'sharedWorkspace' : undefined,
+      enableAgentToAgent: false,
+      manageWorkspaceAgentsMd: false,
+      sharedWorkspaceIds: [],
+      agents: []
+    };
+    this.config.workspaces.push(workspace);
+    this.ensureWorkspaceTemplateFiles(workspace);
+    this.editingWorkspaceId = workspace.id;
+    this.requestUpdate();
+  }
+
+  removeWorkspaceById(workspaceId: string) {
+    const workspace = this.getWorkspaceById(workspaceId);
+    if (!workspace) {
+      return;
+    }
+
+    const label = workspace.name ? `${workspace.name} (${workspace.id})` : workspace.id;
+    if (!confirm(`Remove workspace ${label}?`)) {
+      return;
+    }
+
+    this.config.workspaces = this.getWorkspaces().filter((candidate: any) => candidate.id !== workspaceId);
+    for (const candidate of this.config.workspaces) {
+      if (Array.isArray(candidate?.sharedWorkspaceIds)) {
+        candidate.sharedWorkspaceIds = candidate.sharedWorkspaceIds.filter((candidateId: string) => candidateId !== workspaceId);
+      }
+    }
+    if (this.templateFiles?.workspaces?.[workspaceId]) {
+      delete this.templateFiles.workspaces[workspaceId];
+    }
+    if (this.editingWorkspaceId === workspaceId) {
+      this.editingWorkspaceId = null;
+    }
+    this.normalizeWorkspaceAssignments(this.config);
+    this.requestUpdate();
   }
 
   addEndpoint() {

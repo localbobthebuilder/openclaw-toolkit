@@ -307,16 +307,108 @@ function Normalize-ToolkitConfigDefaults {
     Sync-ToolkitEndpointAssignments -Config $Config | Out-Null
 
     if ($Config.PSObject.Properties.Name -contains "workspaces" -and $null -ne $Config.workspaces) {
+        $validAgentIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
+            if ($null -eq $agent -or -not ($agent.PSObject.Properties.Name -contains "id")) {
+                continue
+            }
+
+            $agentId = [string]$agent.id
+            if (-not [string]::IsNullOrWhiteSpace($agentId)) {
+                [void]$validAgentIds.Add($agentId)
+            }
+        }
+
         foreach ($workspace in @($Config.workspaces)) {
             if ($null -eq $workspace) {
                 continue
+            }
+
+            if (-not ($workspace.PSObject.Properties.Name -contains "mode") -or [string]::IsNullOrWhiteSpace([string]$workspace.mode)) {
+                Add-Member -InputObject $workspace -NotePropertyName "mode" -NotePropertyValue "shared" -Force
+            }
+            else {
+                $normalizedMode = ([string]$workspace.mode).Trim().ToLowerInvariant()
+                if ($normalizedMode -notin @("shared", "private")) {
+                    $normalizedMode = "shared"
+                }
+                $workspace.mode = $normalizedMode
             }
 
             Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "enableAgentToAgent" -DefaultValue $false
             Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "manageWorkspaceAgentsMd" -DefaultValue $false
             Set-ToolkitArrayDefaultProperty -Object $workspace -PropertyName "agents"
             if ([string]$workspace.mode -eq "private") {
-                Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "allowSharedWorkspaceAccess" -DefaultValue $false
+                Set-ToolkitArrayDefaultProperty -Object $workspace -PropertyName "sharedWorkspaceIds"
+            }
+        }
+
+        $sharedWorkspaceIds = New-Object System.Collections.Generic.List[string]
+        foreach ($workspace in @($Config.workspaces)) {
+            if ($null -eq $workspace -or [string]$workspace.mode -ne "shared") {
+                continue
+            }
+
+            $workspaceId = if ($workspace.PSObject.Properties.Name -contains "id" -and $workspace.id) { [string]$workspace.id } else { "" }
+            if (-not [string]::IsNullOrWhiteSpace($workspaceId) -and ($workspaceId -notin @($sharedWorkspaceIds))) {
+                $sharedWorkspaceIds.Add($workspaceId)
+            }
+        }
+
+        $assignedAgentIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($workspace in @($Config.workspaces)) {
+            if ($null -eq $workspace) {
+                continue
+            }
+
+            $cleanedAgentIds = New-Object System.Collections.Generic.List[string]
+            foreach ($rawAgentId in @($workspace.agents)) {
+                $agentId = [string]$rawAgentId
+                if ([string]::IsNullOrWhiteSpace($agentId)) {
+                    continue
+                }
+                if (-not $validAgentIds.Contains($agentId)) {
+                    continue
+                }
+                if ($assignedAgentIds.Contains($agentId)) {
+                    continue
+                }
+                if ([string]$workspace.mode -eq "private" -and $cleanedAgentIds.Count -ge 1) {
+                    continue
+                }
+
+                $cleanedAgentIds.Add($agentId)
+                [void]$assignedAgentIds.Add($agentId)
+            }
+            $workspace.agents = @($cleanedAgentIds.ToArray())
+
+            if ([string]$workspace.mode -eq "private") {
+                $cleanedSharedWorkspaceIds = New-Object System.Collections.Generic.List[string]
+                foreach ($rawWorkspaceId in @($workspace.sharedWorkspaceIds)) {
+                    $workspaceId = [string]$rawWorkspaceId
+                    if ([string]::IsNullOrWhiteSpace($workspaceId)) {
+                        continue
+                    }
+                    if ($workspaceId -notin @($sharedWorkspaceIds)) {
+                        continue
+                    }
+                    if ($workspaceId -notin @($cleanedSharedWorkspaceIds)) {
+                        $cleanedSharedWorkspaceIds.Add($workspaceId)
+                    }
+                }
+
+                $legacySharedAccess = $false
+                if ($workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess") {
+                    $legacySharedAccess = ConvertTo-ToolkitBooleanValue -Value $workspace.allowSharedWorkspaceAccess -DefaultValue $false
+                }
+                if ($legacySharedAccess -and $cleanedSharedWorkspaceIds.Count -eq 0 -and $sharedWorkspaceIds.Count -gt 0) {
+                    $cleanedSharedWorkspaceIds.Add([string]$sharedWorkspaceIds[0])
+                }
+
+                $workspace.sharedWorkspaceIds = @($cleanedSharedWorkspaceIds.ToArray())
+            }
+            elseif ($workspace.PSObject.Properties.Name -contains "sharedWorkspaceIds") {
+                $workspace.sharedWorkspaceIds = @()
             }
         }
     }
@@ -589,6 +681,137 @@ function Get-ToolkitWorkspaceForAgent {
     return $null
 }
 
+function Get-ToolkitDefaultPrivateWorkspacePath {
+    param([string]$AgentId)
+
+    if ([string]::IsNullOrWhiteSpace($AgentId) -or $AgentId -eq "main") {
+        return "/home/node/.openclaw/workspace"
+    }
+
+    return "/home/node/.openclaw/workspace-$AgentId"
+}
+
+function Get-ToolkitWorkspacePathValue {
+    param(
+        $Workspace,
+        [string]$DefaultPath
+    )
+
+    if ($null -ne $Workspace -and
+        $Workspace.PSObject.Properties.Name -contains "path" -and
+        -not [string]::IsNullOrWhiteSpace([string]$Workspace.path)) {
+        return [string]$Workspace.path
+    }
+
+    return $DefaultPath
+}
+
+function Get-ToolkitAgentWorkspaceMode {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    $workspace = Get-ToolkitWorkspaceForAgent -Config $Config -AgentConfig $AgentConfig
+    if ($null -ne $workspace -and
+        $workspace.PSObject.Properties.Name -contains "mode" -and
+        -not [string]::IsNullOrWhiteSpace([string]$workspace.mode)) {
+        return ([string]$workspace.mode).ToLowerInvariant()
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "workspaceMode" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.workspaceMode)) {
+        return ([string]$AgentConfig.workspaceMode).ToLowerInvariant()
+    }
+
+    return "private"
+}
+
+function Get-ToolkitAgentWorkspacePath {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    $agentId = if ($AgentConfig.PSObject.Properties.Name -contains "id" -and $AgentConfig.id) {
+        [string]$AgentConfig.id
+    }
+    else {
+        $null
+    }
+
+    $workspace = Get-ToolkitWorkspaceForAgent -Config $Config -AgentConfig $AgentConfig
+    if ($null -ne $workspace) {
+        if ([string]$workspace.mode -eq "shared") {
+            return Get-ToolkitWorkspacePathValue -Workspace $workspace -DefaultPath "/home/node/.openclaw/workspace"
+        }
+
+        return Get-ToolkitWorkspacePathValue -Workspace $workspace -DefaultPath (Get-ToolkitDefaultPrivateWorkspacePath -AgentId $agentId)
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "workspace" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.workspace)) {
+        return [string]$AgentConfig.workspace
+    }
+
+    return (Get-ToolkitDefaultPrivateWorkspacePath -AgentId $agentId)
+}
+
+function Get-ToolkitAccessibleSharedWorkspaceList {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    $workspace = Get-ToolkitWorkspaceForAgent -Config $Config -AgentConfig $AgentConfig
+    if ($null -eq $workspace) {
+        return @()
+    }
+
+    if ([string]$workspace.mode -eq "shared") {
+        return @()
+    }
+
+    $sharedWorkspaceIds = @()
+    if ($workspace.PSObject.Properties.Name -contains "sharedWorkspaceIds" -and $null -ne $workspace.sharedWorkspaceIds) {
+        $sharedWorkspaceIds = @($workspace.sharedWorkspaceIds | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    elseif ($workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess" -and
+        (ConvertTo-ToolkitBooleanValue -Value $workspace.allowSharedWorkspaceAccess -DefaultValue $false)) {
+        $primarySharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $Config
+        if ($null -ne $primarySharedWorkspace -and $primarySharedWorkspace.id) {
+            $sharedWorkspaceIds = @([string]$primarySharedWorkspace.id)
+        }
+    }
+
+    return @(
+        foreach ($workspaceId in @($sharedWorkspaceIds)) {
+            $sharedWorkspace = Get-ToolkitWorkspaceById -Config $Config -WorkspaceId ([string]$workspaceId)
+            if ($null -ne $sharedWorkspace -and [string]$sharedWorkspace.mode -eq "shared") {
+                $sharedWorkspace
+            }
+        }
+    )
+}
+
+function Get-ToolkitPrimaryAccessibleSharedWorkspace {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    return @(Get-ToolkitAccessibleSharedWorkspaceList -Config $Config -AgentConfig $AgentConfig) | Select-Object -First 1
+}
+
+function Test-ToolkitAgentHasSharedWorkspaceAccess {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    return @(Get-ToolkitAccessibleSharedWorkspaceList -Config $Config -AgentConfig $AgentConfig).Count -gt 0
+}
+
 function Get-ToolkitAgentEndpointKey {
     param(
         $Config,
@@ -849,8 +1072,13 @@ function Get-ToolkitLegacyMultiAgentConfig {
                 if ($workspace.PSObject.Properties.Name -contains "path" -and $workspace.path) {
                     Add-Member -InputObject $legacyAgent -NotePropertyName "workspace" -NotePropertyValue ([string]$workspace.path) -Force
                 }
-                if ($workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess") {
-                    Add-Member -InputObject $legacyAgent -NotePropertyName "sharedWorkspaceAccess" -NotePropertyValue ([bool]$workspace.allowSharedWorkspaceAccess) -Force
+                $sharedWorkspaceIds = @()
+                if ($workspace.PSObject.Properties.Name -contains "sharedWorkspaceIds" -and $null -ne $workspace.sharedWorkspaceIds) {
+                    $sharedWorkspaceIds = @($workspace.sharedWorkspaceIds)
+                }
+                if (@($sharedWorkspaceIds).Count -gt 0 -or
+                    ($workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess" -and [bool]$workspace.allowSharedWorkspaceAccess)) {
+                    Add-Member -InputObject $legacyAgent -NotePropertyName "sharedWorkspaceAccess" -NotePropertyValue $true -Force
                 }
             }
         }
@@ -948,15 +1176,19 @@ function Convert-ToolkitConfigToPersistedSchema {
         $wasPrivate = ($Agent.PSObject.Properties.Name -contains "workspaceMode" -and [string]$Agent.workspaceMode -eq "private") -or
             (($Agent.PSObject.Properties.Name -contains "workspace") -and -not [string]::IsNullOrWhiteSpace([string]$Agent.workspace))
         if ($wasPrivate) {
+            $sharedWorkspaceIds = @()
+            if ($Agent.PSObject.Properties.Name -contains "sharedWorkspaceAccess" -and $Agent.sharedWorkspaceAccess) {
+                $sharedWorkspaceIds = @("shared-main")
+            }
             $privateWorkspaces.Add([pscustomobject][ordered]@{
-                    id                       = "workspace-$([string]$Agent.id)"
-                    name                     = if ($Agent.name) { "$([string]$Agent.name) Workspace" } else { "$([string]$Agent.id) Workspace" }
-                    mode                     = "private"
-                    path                     = if ($Agent.PSObject.Properties.Name -contains "workspace" -and $Agent.workspace) { [string]$Agent.workspace } else { "/home/node/.openclaw/workspace-$([string]$Agent.id)" }
-                    allowSharedWorkspaceAccess = [bool]($Agent.PSObject.Properties.Name -contains "sharedWorkspaceAccess" -and $Agent.sharedWorkspaceAccess)
-                    enableAgentToAgent       = [bool]$multi.enableAgentToAgent
-                    manageWorkspaceAgentsMd  = [bool]$multi.manageWorkspaceAgentsMd
-                    agents                   = @([string]$Agent.id)
+                    id                      = "workspace-$([string]$Agent.id)"
+                    name                    = if ($Agent.name) { "$([string]$Agent.name) Workspace" } else { "$([string]$Agent.id) Workspace" }
+                    mode                    = "private"
+                    path                    = if ($Agent.PSObject.Properties.Name -contains "workspace" -and $Agent.workspace) { [string]$Agent.workspace } else { "/home/node/.openclaw/workspace-$([string]$Agent.id)" }
+                    sharedWorkspaceIds      = @($sharedWorkspaceIds)
+                    enableAgentToAgent      = [bool]$multi.enableAgentToAgent
+                    manageWorkspaceAgentsMd = [bool]$multi.manageWorkspaceAgentsMd
+                    agents                  = @([string]$Agent.id)
                 })
         }
         else {
@@ -1020,6 +1252,11 @@ function Convert-ToolkitConfigToPersistedSchema {
             if ($null -ne $persistedAgent -and $persistedAgent.PSObject.Properties.Name -contains "endpointKey") {
                 $persistedAgent.PSObject.Properties.Remove("endpointKey")
             }
+        }
+    }
+    foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $Config)) {
+        if ($null -ne $workspace -and $workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess") {
+            $workspace.PSObject.Properties.Remove("allowSharedWorkspaceAccess")
         }
     }
 
