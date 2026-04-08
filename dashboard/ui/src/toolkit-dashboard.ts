@@ -1021,6 +1021,60 @@ export class ToolkitDashboard extends LitElement {
     return `${label} (${workspace.mode === 'private' ? 'private' : 'shared'})`;
   }
 
+  getAgentEffectiveSandboxMode(agent: any) {
+    if (typeof agent?.sandboxMode === 'string' && agent.sandboxMode.trim().length > 0) {
+      return agent.sandboxMode.trim();
+    }
+    if (typeof this.config?.sandbox?.mode === 'string' && this.config.sandbox.mode.trim().length > 0) {
+      return this.config.sandbox.mode.trim();
+    }
+    return 'off';
+  }
+
+  isAgentSandboxEffectivelyOff(agent: any) {
+    return this.getAgentEffectiveSandboxMode(agent) === 'off';
+  }
+
+  getWorkspaceHomeBaseDescription(workspace: any) {
+    if (!workspace) {
+      return 'No home workspace assigned yet.';
+    }
+    if (workspace.mode === 'private') {
+      return 'Private home workspace';
+    }
+    return 'Shared collaboration home workspace';
+  }
+
+  enforceWorkspaceSandboxPolicy(agent: any, workspace: any) {
+    if (!agent || !workspace) {
+      return '';
+    }
+
+    const agentName = String(agent?.name || agent?.id || 'Agent');
+    const workspaceName = String(workspace?.name || workspace?.id || 'workspace');
+    const sharedAccessIds = workspace?.mode === 'private' ? this.getWorkspaceSharedAccessIds(workspace) : [];
+    const needsSandboxOff = workspace.mode === 'shared' || sharedAccessIds.length > 0;
+    const effectiveSandboxMode = this.getAgentEffectiveSandboxMode(agent);
+
+    if (needsSandboxOff) {
+      if (effectiveSandboxMode !== 'off') {
+        agent.sandboxMode = 'off';
+        if (workspace.mode === 'shared') {
+          return `${agentName} now lives in shared workspace "${workspaceName}", so the toolkit turned sandbox off. Shared collaboration should not be limited to a single private home-base path.`;
+        }
+        return `${agentName} keeps private workspace "${workspaceName}" as the home base, but shared workspace access is enabled, so the toolkit turned sandbox off to let the agent reach those extra collaboration workspaces.`;
+      }
+      return '';
+    }
+
+    if (effectiveSandboxMode === 'off' || effectiveSandboxMode === 'all') {
+      agent.sandboxMode = 'workspace-write';
+      return `${agentName} now lives only in private workspace "${workspaceName}", so the toolkit turned sandbox on with workspace-write mode. The private workspace is now the agent's home base and privacy boundary.`;
+    }
+
+    return '';
+  }
+
   setAgentPrimaryWorkspace(agentId: string, workspaceId: string | null) {
     const normalizedAgentId = String(agentId || '').trim();
     if (!normalizedAgentId) {
@@ -1042,6 +1096,8 @@ export class ToolkitDashboard extends LitElement {
       return;
     }
 
+    const targetAgent = this.getManagedAgentEntries().find(({ agent }: any) => String(agent?.id || '') === normalizedAgentId)?.agent || null;
+
     if (targetWorkspace.mode === 'private') {
       targetWorkspace.agents = [normalizedAgentId];
     } else if (!this.getWorkspaceAgentIds(targetWorkspace).includes(normalizedAgentId)) {
@@ -1049,6 +1105,12 @@ export class ToolkitDashboard extends LitElement {
     }
 
     this.normalizeWorkspaceAssignments(this.config);
+    if (targetAgent) {
+      const message = this.enforceWorkspaceSandboxPolicy(targetAgent, targetWorkspace);
+      if (message) {
+        alert(message);
+      }
+    }
     this.requestUpdate();
   }
 
@@ -1062,6 +1124,16 @@ export class ToolkitDashboard extends LitElement {
         .map((workspaceId: any) => String(workspaceId || '').trim())
         .filter((workspaceId: string) => workspaceId.length > 0 && availableSharedIds.has(workspaceId))
     ));
+    const primaryAgentId = this.getWorkspaceAgentIds(workspace)[0];
+    if (primaryAgentId) {
+      const primaryAgent = this.getManagedAgentEntries().find(({ agent }: any) => String(agent?.id || '') === primaryAgentId)?.agent || null;
+      if (primaryAgent) {
+        const message = this.enforceWorkspaceSandboxPolicy(primaryAgent, workspace);
+        if (message) {
+          alert(message);
+        }
+      }
+    }
     this.requestUpdate();
   }
 
@@ -1717,9 +1789,24 @@ export class ToolkitDashboard extends LitElement {
     return this.getConfigEndpointsFrom(this.config);
   }
 
+  getSortedConfigEndpoints() {
+    return [...this.getConfigEndpoints()].sort((left: any, right: any) => {
+      const leftDefault = left?.default ? 0 : 1;
+      const rightDefault = right?.default ? 0 : 1;
+      if (leftDefault !== rightDefault) {
+        return leftDefault - rightDefault;
+      }
+      return String(left?.name || left?.key || '').localeCompare(String(right?.name || right?.key || ''));
+    });
+  }
+
   getDefaultEndpoint() {
-    const endpoints = this.getConfigEndpoints();
+    const endpoints = this.getSortedConfigEndpoints();
     return endpoints.find((endpoint: any) => !!endpoint?.default) || endpoints[0] || null;
+  }
+
+  canRemoveEndpoint(endpoint: any) {
+    return !endpoint?.default;
   }
 
   getEndpointsForModelRef(modelRef: string | undefined) {
@@ -2571,7 +2658,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getTopologySlots() {
-    const slots = this.getConfigEndpoints().map((endpoint: any) => ({
+    const slots = this.getSortedConfigEndpoints().map((endpoint: any) => ({
       key: endpoint.key,
       endpointKey: endpoint.key,
       title: this.getEndpointLabel(endpoint),
@@ -2654,7 +2741,7 @@ export class ToolkitDashboard extends LitElement {
         return this.renderEndpointEditor(this.editingEndpointKey);
     }
 
-    const endpoints = this.getConfigEndpoints();
+    const endpoints = this.getSortedConfigEndpoints();
 
     return html`
       <div class="card">
@@ -2663,18 +2750,20 @@ export class ToolkitDashboard extends LitElement {
           <button class="btn btn-ghost" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
         </div>
         <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines or PCs. Each one can expose a local Ollama runtime, a hosted model pool, or both.</p>
-        ${repeat(endpoints, (ep: any) => ep.key, (ep: any, idx) => {
+        ${repeat(endpoints, (ep: any) => ep.key, (ep: any) => {
           const runtime = this.getEndpointOllama(ep);
           const assignedAgentCount = this.getEndpointAgentIds(ep).length;
           return html`
           <div class="item-row">
             <div class="item-info">
-              <span class="item-title">${ep.key}</span>
+              <span class="item-title">${ep.key} ${ep.default ? html`<span class="badge" style="background: #ffc107;">Default</span>` : ''}</span>
               <span class="item-sub">${runtime?.hostBaseUrl || 'Hosted-only endpoint'} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted | ${assignedAgentCount} assigned</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure Endpoint</button>
-              <button class="btn btn-danger" @click=${() => this.removeEndpoint(idx)}>Remove</button>
+              ${this.canRemoveEndpoint(ep) ? html`
+                <button class="btn btn-danger" @click=${() => this.removeEndpointByKey(ep.key)}>Remove</button>
+              ` : ''}
             </div>
           </div>
         `})}
@@ -2703,24 +2792,30 @@ export class ToolkitDashboard extends LitElement {
             </div>
 
             <div class="grid-2">
-                <div class="form-group">
-                    <label>Endpoint Key</label>
-                    <input type="text" .value=${ep.key} disabled>
+                <div>
+                    <div class="form-group">
+                        <label>Endpoint Key</label>
+                        <input type="text" .value=${ep.key} disabled>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle-switch">
+                            <input type="checkbox" ?checked=${!!ep.default} @change=${(e: any) => {
+                                if (e.target.checked) {
+                                    for (const endpoint of this.getConfigEndpoints()) {
+                                        endpoint.default = endpoint.key === ep.key;
+                                    }
+                                } else {
+                                    ep.default = false;
+                                }
+                                this.requestUpdate();
+                            }}>
+                            Default endpoint
+                        </label>
+                    </div>
                 </div>
                 <div class="form-group">
-                    <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${!!ep.default} @change=${(e: any) => {
-                            if (e.target.checked) {
-                                for (const endpoint of this.getConfigEndpoints()) {
-                                    endpoint.default = endpoint.key === ep.key;
-                                }
-                            } else {
-                                ep.default = false;
-                            }
-                            this.requestUpdate();
-                        }}>
-                        Default endpoint
-                    </label>
+                    <label>Endpoint Role</label>
+                    <div class="help-text" style="margin-top: 0;">The default endpoint is the main workbench the toolkit prefers first when an agent has not been moved elsewhere.</div>
                 </div>
             </div>
 
@@ -2779,15 +2874,21 @@ export class ToolkitDashboard extends LitElement {
             </div>
 
             <div class="grid-2">
-                <div class="form-group">
-                    <label>Provider ID</label>
-                    <input type="text" .value=${runtime.providerId || ''} @input=${(e: any) => { runtime.providerId = e.target.value; this.requestUpdate(); }}>
+                <div>
+                    <div class="form-group">
+                        <label>Provider ID</label>
+                        <input type="text" .value=${runtime.providerId || ''} @input=${(e: any) => { runtime.providerId = e.target.value; this.requestUpdate(); }}>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle-switch">
+                            <input type="checkbox" ?checked=${!!runtime.autoPullMissingModels} @change=${(e: any) => { runtime.autoPullMissingModels = e.target.checked; this.requestUpdate(); }}>
+                            Auto-pull missing local models when they fit
+                        </label>
+                    </div>
                 </div>
                 <div class="form-group">
-                    <label class="toggle-switch">
-                        <input type="checkbox" ?checked=${!!runtime.autoPullMissingModels} @change=${(e: any) => { runtime.autoPullMissingModels = e.target.checked; this.requestUpdate(); }}>
-                        Auto-pull missing local models when they fit
-                    </label>
+                    <label>Runtime Pull Behavior</label>
+                    <div class="help-text" style="margin-top: 0;">When enabled, bootstrap can pull missing local models onto this machine if they fit the configured hardware budget.</div>
                 </div>
             </div>
 
@@ -3035,7 +3136,7 @@ export class ToolkitDashboard extends LitElement {
             <h3>Agents Configuration</h3>
             <button class="btn btn-ghost" @click=${() => this.addAgent()}>+ Add Agent</button>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Agents are first-class toolkit records. Endpoints own machine placement, and workspaces own primary workspace membership plus shared collaboration access.</p>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Agents are first-class toolkit records. Endpoints own machine placement, and workspaces own the agent home base: the primary workspace the agent lives in by default. Private workspaces are the privacy boundary; shared workspaces are the collaboration area.</p>
 
         <h4 style="color: #666; margin-bottom: 10px;">All Agents</h4>
         ${agents.map((agent: any) => html`
@@ -3046,7 +3147,7 @@ export class ToolkitDashboard extends LitElement {
                 ${this.isMainAgentEntry(agent.key, agent) ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
                 ${!agent.enabled ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
               </span>
-              <span class="item-sub">ID: ${agent.id} | Model: ${agent.modelRef || '(unset)'} | Workspace: ${this.getWorkspaceDisplayLabel(this.getWorkspaceForAgentId(agent.id))} | Sandbox: ${agent.sandboxMode || 'default'}</span>
+              <span class="item-sub">ID: ${agent.id} | Home Base: ${this.getWorkspaceDisplayLabel(this.getWorkspaceForAgentId(agent.id))} | Sandbox: ${this.getAgentEffectiveSandboxMode(agent)} | Model: ${agent.modelRef || '(unset)'}</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
@@ -3072,7 +3173,7 @@ export class ToolkitDashboard extends LitElement {
     const isMain = this.isMainAgentEntry(key, agent);
     const previousAgentId = typeof agent.id === 'string' ? agent.id : '';
 
-    const endpoints = this.getConfigEndpoints();
+    const endpoints = this.getSortedConfigEndpoints();
     const roles = Object.keys(this.getRolePoliciesRoot());
     const subagents = this.ensureSubagentsConfig(agent);
     const agentTemplateFiles = this.ensureAgentTemplateFiles(agent);
@@ -3145,14 +3246,20 @@ export class ToolkitDashboard extends LitElement {
 
             <div class="grid-2">
                 <div class="card" style="margin-bottom: 0;">
-                    <div class="card-header"><h3>Workspace Membership</h3></div>
-                    <div class="help-text" style="margin-top: 0;">Primary workspace membership is edited on the Workspaces tab.</div>
+                    <div class="card-header"><h3>Home Workspace</h3></div>
+                    <div class="help-text" style="margin-top: 0;">This is the agent's home base. OpenClaw uses the configured workspace path directly, so it does not need to match the agent ID.</div>
                     <div style="color: #fff; margin-top: 10px;">${primaryWorkspace ? this.getWorkspaceDisplayLabel(primaryWorkspace) : 'No primary workspace assigned yet.'}</div>
+                    ${primaryWorkspace ? html`
+                      <div class="help-text" style="margin-top: 10px;">${this.getWorkspaceHomeBaseDescription(primaryWorkspace)} at <code>${primaryWorkspace.path || '(unset path)'}</code>.</div>
+                    ` : ''}
                     ${primaryWorkspace?.mode === 'private' && accessibleSharedWorkspaces.length > 0 ? html`
-                      <div class="help-text" style="margin-top: 10px;">Shared collaboration access: ${accessibleSharedWorkspaces.map((workspace: any) => workspace.name || workspace.id).join(', ')}</div>
+                      <div class="help-text" style="margin-top: 10px;">Shared collaboration access: ${accessibleSharedWorkspaces.map((workspace: any) => workspace.name || workspace.id).join(', ')}. Because this reaches beyond the private home base, the toolkit keeps sandbox off for this agent.</div>
                     ` : ''}
                     ${primaryWorkspace?.mode === 'private' && accessibleSharedWorkspaces.length === 0 ? html`
-                      <div class="help-text" style="margin-top: 10px;">This private workspace currently has no shared collaboration workspaces attached.</div>
+                      <div class="help-text" style="margin-top: 10px;">This private workspace currently has no shared collaboration workspaces attached, so the toolkit keeps the agent sandboxed to the home base.</div>
+                    ` : ''}
+                    ${primaryWorkspace?.mode === 'shared' ? html`
+                      <div class="help-text" style="margin-top: 10px;">Shared workspaces are collaboration areas rather than private boundaries, so the toolkit keeps sandbox off for agents living here.</div>
                     ` : ''}
                     <div style="margin-top: 12px;">
                       <button class="btn btn-ghost" @click=${() => { this.editingWorkspaceId = primaryWorkspace?.id || null; this.configSection = 'workspaces'; }}>Open Workspaces Tab</button>
@@ -3453,7 +3560,7 @@ export class ToolkitDashboard extends LitElement {
             <button class="btn btn-ghost" @click=${() => this.addWorkspace('private')}>+ Private Workspace</button>
           </div>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Workspaces own primary workspace membership. Shared workspaces can host many agents; private workspaces host one agent and can expose shared collaboration workspaces through an access list.</p>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Workspaces define the agent home base. Shared workspaces can host many agents and are collaboration areas. Private workspaces host one agent, act as the privacy boundary, and can optionally expose specific shared collaboration workspaces.</p>
         ${workspaces.map((workspace: any) => {
           const occupantIds = this.getWorkspaceAgentIds(workspace);
           const occupants = this.getManagedAgentEntries().filter(({ agent }: any) => occupantIds.includes(String(agent?.id || '')));
@@ -3468,7 +3575,7 @@ export class ToolkitDashboard extends LitElement {
               <div class="item-info">
                 <span class="item-title">${workspace.name || workspace.id}</span>
                 <span class="item-sub">
-                  ID: ${workspace.id} | Mode: ${workspace.mode} | Path: ${workspace.path || '(unset)'} | Occupants: ${occupants.length > 0 ? occupants.map(({ agent }: any) => agent.name || agent.id).join(', ') : 'none'}
+                  ID: ${workspace.id} | Mode: ${workspace.mode} | Home Base Path: ${workspace.path || '(unset)'} | Occupants: ${occupants.length > 0 ? occupants.map(({ agent }: any) => agent.name || agent.id).join(', ') : 'none'}
                   ${workspace.mode === 'private' ? ` | Shared access: ${sharedAccessLabels.length > 0 ? sharedAccessLabels.join(', ') : 'none'}` : ''}
                 </span>
               </div>
@@ -3500,10 +3607,23 @@ export class ToolkitDashboard extends LitElement {
     const selectedSharedAccessIds = this.getWorkspaceSharedAccessIds(workspace);
 
     return html`
-      <div class="card">
-        <div class="card-header">
-          <h3>Workspace: ${workspace.name || workspace.id}</h3>
-          <button class="btn btn-ghost" @click=${() => this.editingWorkspaceId = null}>Back to Workspaces</button>
+        <div class="card">
+          <div class="card-header">
+            <h3>Workspace: ${workspace.name || workspace.id}</h3>
+            <button class="btn btn-ghost" @click=${() => this.editingWorkspaceId = null}>Back to Workspaces</button>
+          </div>
+
+        <div class="card" style="margin-bottom: 20px; border-color: ${workspace.mode === 'private' ? '#90caf9' : '#81c784'};">
+          <div class="card-header"><h3>Home Base Rules</h3></div>
+          <div class="help-text" style="margin-top: 0;">
+            <strong>${workspace.mode === 'private' ? 'Private workspace' : 'Shared workspace'}:</strong>
+            ${workspace.mode === 'private'
+              ? 'this is the agent home base and privacy boundary. With no shared access attached, the toolkit forces sandbox on with workspace-write mode.'
+              : 'this is a collaboration area, not a private boundary. The toolkit forces sandbox off for agents who live here so they can work beyond a single private home-base path.'}
+          </div>
+          <div class="help-text" style="margin-top: 10px;">
+            OpenClaw uses the exact configured workspace path directly. It does not require the private workspace name or path to match the agent ID.
+          </div>
         </div>
 
         <div class="grid-2">
@@ -3539,6 +3659,12 @@ export class ToolkitDashboard extends LitElement {
                 workspace.sharedWorkspaceIds = [];
               }
               this.normalizeWorkspaceAssignments(this.config);
+              const messages = occupantEntries
+                .map(({ agent }: any) => this.enforceWorkspaceSandboxPolicy(agent, workspace))
+                .filter((message: string) => message.length > 0);
+              if (messages.length > 0) {
+                alert(messages.join('\n\n'));
+              }
               this.requestUpdate();
             }}>
               <option value="shared" ?selected=${workspace.mode === 'shared'}>shared</option>
@@ -3546,8 +3672,9 @@ export class ToolkitDashboard extends LitElement {
             </select>
           </div>
           <div class="form-group">
-            <label>Workspace Path</label>
+            <label>${workspace.mode === 'private' ? 'Home Workspace Path' : 'Shared Workspace Path'}</label>
             <input type="text" .value=${workspace.path || ''} @input=${(e: any) => { workspace.path = e.target.value; this.requestUpdate(); }}>
+            <div class="help-text">This exact path becomes the workspace home base path used by OpenClaw. It can be any valid path; it does not need to match the agent name.</div>
           </div>
         </div>
 
@@ -3585,6 +3712,7 @@ export class ToolkitDashboard extends LitElement {
           </div>
           <div class="form-group">
             <label>Primary Agents in this Shared Workspace</label>
+            <div class="help-text" style="margin-bottom: 10px;">Assigning an agent here makes this shared workspace the agent's home base and forces sandbox off so collaboration is not blocked by a private workspace restriction.</div>
             <div class="tag-list">
               ${occupantEntries.map(({ agent }: any) => html`
                 <div class="tag">
@@ -3626,10 +3754,11 @@ export class ToolkitDashboard extends LitElement {
                   <option value=${agent.id} ?selected=${occupantIds.includes(String(agent?.id || ''))}>${agent.name || agent.id}</option>
                 `)}
               </select>
-              <div class="help-text">A private workspace can host only one primary agent at a time.</div>
+              <div class="help-text">A private workspace can host only one primary agent at a time. If that agent was previously sandbox-off, the toolkit turns sandbox back on with workspace-write mode unless shared collaboration access is attached below.</div>
             </div>
             <div class="form-group">
               <label>Shared Workspaces Accessible from this Private Workspace</label>
+              <div class="help-text" style="margin-bottom: 10px;">Granting shared collaboration access means the agent must reach paths outside its private home base, so the toolkit will turn sandbox off for the occupying agent.</div>
               <div class="tag-list">
                 ${selectedSharedAccessIds.map((sharedWorkspaceId: string) => {
                   const sharedWorkspace = this.getWorkspaceById(sharedWorkspaceId);
@@ -3816,9 +3945,17 @@ export class ToolkitDashboard extends LitElement {
     }
   }
 
-  removeEndpoint(idx: number) {
+  removeEndpointByKey(key: string) {
+    const endpoint = this.getConfigEndpoints().find((candidate: any) => candidate.key === key);
+    if (!endpoint) {
+        return;
+    }
+    if (!this.canRemoveEndpoint(endpoint)) {
+        alert('The default endpoint cannot be removed from the dashboard.');
+        return;
+    }
     if (confirm('Remove endpoint?')) {
-        this.getConfigEndpoints().splice(idx, 1);
+        this.config.endpoints = this.getConfigEndpoints().filter((endpoint: any) => endpoint.key !== key);
         this.requestUpdate();
     }
   }
