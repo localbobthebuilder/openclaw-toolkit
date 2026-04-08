@@ -186,32 +186,11 @@ function Get-BootstrapManagedAgentConfigById {
         [string]$AgentId
     )
 
-    if ($null -eq $BootstrapConfig -or $null -eq $BootstrapConfig.multiAgent) {
+    if ($null -eq $BootstrapConfig) {
         return $null
     }
 
-    $agentConfigs = @(
-        $BootstrapConfig.multiAgent.strongAgent,
-        $BootstrapConfig.multiAgent.researchAgent,
-        $BootstrapConfig.multiAgent.localChatAgent,
-        $BootstrapConfig.multiAgent.hostedTelegramAgent,
-        $BootstrapConfig.multiAgent.localReviewAgent,
-        $BootstrapConfig.multiAgent.localCoderAgent,
-        $BootstrapConfig.multiAgent.remoteReviewAgent,
-        $BootstrapConfig.multiAgent.remoteCoderAgent
-    ) + @($BootstrapConfig.multiAgent.extraAgents)
-
-    foreach ($agentConfig in @($agentConfigs)) {
-        if ($null -eq $agentConfig) {
-            continue
-        }
-
-        if ($agentConfig.PSObject.Properties.Name -contains "id" -and [string]$agentConfig.id -eq $AgentId) {
-            return $agentConfig
-        }
-    }
-
-    return $null
+    return (Get-ToolkitAgentById -Config $BootstrapConfig -AgentId $AgentId)
 }
 
 function Get-PreferredLocalSmokeCandidateRefs {

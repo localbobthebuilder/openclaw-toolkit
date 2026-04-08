@@ -366,7 +366,6 @@ if ($isManagedModel) {
         $replacementModelRef = if ($replacementId) { "ollama/$replacementId" } else { $null }
         $changedRefs = @(Replace-ManagedModelRefs -Config $config -RemovedModelRef $removedModelRef -ReplacementModelRef $replacementModelRef)
 
-        $config = Convert-ToolkitConfigToPersistedSchema -Config $config
         $json = $config | ConvertTo-Json -Depth 50
         Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 

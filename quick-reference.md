@@ -103,7 +103,7 @@ Multi-agent note:
   next configured model; that is why `main` can keep working when OpenAI is in
   quota cooldown.
 - Telegram target agent is configurable with
-  `multiAgent.telegramRouting.targetAgentId` in
+  `agents.telegramRouting.targetAgentId` in
   `<toolkit-dir>\openclaw-bootstrap.config.json`
 - Gemini in this setup uses the official Google API-key provider, and OpenClaw stores its own auth profiles in the gateway state
 

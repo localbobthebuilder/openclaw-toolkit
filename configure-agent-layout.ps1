@@ -941,20 +941,12 @@ function Get-AgentSkillsOverride {
 
 function Get-SharedWorkspacePath {
     param(
-        [Parameter(Mandatory = $true)]$Config,
-        $MultiConfig
+        [Parameter(Mandatory = $true)]$Config
     )
 
     $sharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $Config
     if ($null -ne $sharedWorkspace) {
         return (Get-ToolkitWorkspacePathValue -Workspace $sharedWorkspace -DefaultPath "/home/node/.openclaw/workspace")
-    }
-
-    if ($null -ne $MultiConfig -and $MultiConfig.sharedWorkspace -and $MultiConfig.sharedWorkspace.enabled) {
-        if ($MultiConfig.sharedWorkspace.path) {
-            return [string]$MultiConfig.sharedWorkspace.path
-        }
-        return "/home/node/.openclaw/workspace"
     }
 
     return $null
@@ -975,7 +967,6 @@ function Get-DefaultPrivateWorkspacePath {
 function Get-AgentWorkspaceMode {
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
@@ -985,17 +976,15 @@ function Get-AgentWorkspaceMode {
 function Test-AgentUsesSharedWorkspace {
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
-    return ((Get-AgentWorkspaceMode -Config $Config -MultiConfig $MultiConfig -AgentConfig $AgentConfig) -eq "shared")
+    return ((Get-AgentWorkspaceMode -Config $Config -AgentConfig $AgentConfig) -eq "shared")
 }
 
 function Get-AgentWorkspacePath {
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
@@ -1018,11 +1007,10 @@ function Get-AgentAccessibleSharedWorkspacePaths {
 function Test-AgentCanAccessSharedWorkspace {
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$MultiConfig,
         $AgentConfig
     )
 
-    if (Test-AgentUsesSharedWorkspace -Config $Config -MultiConfig $MultiConfig -AgentConfig $AgentConfig) {
+    if (Test-AgentUsesSharedWorkspace -Config $Config -AgentConfig $AgentConfig) {
         return $false
     }
 
@@ -1105,77 +1093,14 @@ function Expand-ManagedMarkdownLines {
 
 function Get-ManagedAgentConfigRecord {
     param(
-        [Parameter(Mandatory = $true)]$MultiConfig,
-        [Parameter(Mandatory = $true)][string]$StrongAgentId,
+        [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)][string]$AgentId
     )
 
-    switch ($AgentId) {
-        $StrongAgentId {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.strongAgent
-            }
-        }
-        { $MultiConfig.researchAgent -and $_ -eq [string]$MultiConfig.researchAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.researchAgent
-            }
-        }
-        { $MultiConfig.localChatAgent -and $_ -eq [string]$MultiConfig.localChatAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.localChatAgent
-            }
-        }
-        { $MultiConfig.hostedTelegramAgent -and $_ -eq [string]$MultiConfig.hostedTelegramAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.hostedTelegramAgent
-            }
-        }
-        { $MultiConfig.localReviewAgent -and $_ -eq [string]$MultiConfig.localReviewAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.localReviewAgent
-            }
-        }
-        { $MultiConfig.localCoderAgent -and $_ -eq [string]$MultiConfig.localCoderAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.localCoderAgent
-            }
-        }
-        { $MultiConfig.remoteReviewAgent -and $_ -eq [string]$MultiConfig.remoteReviewAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.remoteReviewAgent
-            }
-        }
-        { $MultiConfig.remoteCoderAgent -and $_ -eq [string]$MultiConfig.remoteCoderAgent.id } {
-            return [pscustomobject]@{
-                AgentConfig = $MultiConfig.remoteCoderAgent
-            }
-        }
-    }
-
-    $extraAgent = Get-ExtraAgentConfigById -MultiConfig $MultiConfig -AgentId $AgentId
-    if ($null -ne $extraAgent) {
+    $agentConfig = Get-ToolkitAgentById -Config $Config -AgentId $AgentId
+    if ($null -ne $agentConfig) {
         return [pscustomobject]@{
-            AgentConfig = $extraAgent
-        }
-    }
-
-    return $null
-}
-
-function Get-ExtraAgentConfigById {
-    param(
-        [Parameter(Mandatory = $true)]$MultiConfig,
-        [Parameter(Mandatory = $true)][string]$AgentId
-    )
-
-    foreach ($extraAgent in @($MultiConfig.extraAgents)) {
-        if ($null -eq $extraAgent) {
-            continue
-        }
-
-        if ($extraAgent.PSObject.Properties.Name -contains "id" -and [string]$extraAgent.id -eq $AgentId) {
-            return $extraAgent
+            AgentConfig = $agentConfig
         }
     }
 
@@ -1184,26 +1109,42 @@ function Get-ExtraAgentConfigById {
 
 function Get-EnabledExtraAgents {
     param(
-        [Parameter(Mandatory = $true)]$MultiConfig
+        [Parameter(Mandatory = $true)]$Config
+    )
+
+    $managedKeys = @(
+        "strongAgent",
+        "researchAgent",
+        "localChatAgent",
+        "hostedTelegramAgent",
+        "localReviewAgent",
+        "localCoderAgent",
+        "remoteReviewAgent",
+        "remoteCoderAgent"
     )
 
     return @(
-        foreach ($extraAgent in @($MultiConfig.extraAgents)) {
-            if ($null -eq $extraAgent) {
+        foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
+            if ($null -eq $agent) {
                 continue
             }
 
-            if (-not ($extraAgent.PSObject.Properties.Name -contains "id") -or [string]::IsNullOrWhiteSpace([string]$extraAgent.id)) {
+            if (-not ($agent.PSObject.Properties.Name -contains "id") -or [string]::IsNullOrWhiteSpace([string]$agent.id)) {
                 continue
             }
 
-            $isEnabled = $true
-            if ($extraAgent.PSObject.Properties.Name -contains "enabled" -and $null -ne $extraAgent.enabled) {
-                $isEnabled = [bool]$extraAgent.enabled
+            $agentKey = if ($agent.PSObject.Properties.Name -contains "key" -and $agent.key) {
+                [string]$agent.key
+            }
+            else {
+                ""
+            }
+            if (-not [string]::IsNullOrWhiteSpace($agentKey) -and $agentKey -in $managedKeys) {
+                continue
             }
 
-            if ($isEnabled) {
-                $extraAgent
+            if (Test-ToolkitAgentEnabled -AgentConfig $agent) {
+                $agent
             }
         }
     )
@@ -1320,7 +1261,6 @@ function Add-DesiredAgentFromConfig {
     param(
         [object[]]$DesiredAgents = @(),
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$MultiConfig,
         [Parameter(Mandatory = $true)]$AgentConfig,
         [string]$ModelOverrideRef,
         [bool]$IsDefault = $false
@@ -1341,7 +1281,7 @@ function Add-DesiredAgentFromConfig {
         $resolvedModelRef = Resolve-PreferredAgentModelRef -ExplicitRef $ModelOverrideRef -AgentConfig $AgentConfig -Config $Config -Purpose $agentId
     }
     $resolvedFallbackRefs = Resolve-AgentFallbackModelRefs -Config $Config -AgentConfig $AgentConfig -PrimaryModelRef $resolvedModelRef -Purpose $agentId -UseAvailableRefsOnly:$useAvailableRefsOnly
-    $workspacePath = Get-AgentWorkspacePath -Config $Config -MultiConfig $MultiConfig -AgentConfig $AgentConfig
+    $workspacePath = Get-AgentWorkspacePath -Config $Config -AgentConfig $AgentConfig
     $toolsOverride = Get-ToolProfileOverride -Config $Config -AgentConfig $AgentConfig
     $sandboxOverride = Get-AgentSandboxOverride -AgentConfig $AgentConfig
     $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
@@ -1907,10 +1847,24 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
-$multi = $config.multiAgent
+$strongAgent = Get-ToolkitAgentByKey -Config $config -Key "strongAgent"
+$researchAgent = Get-ToolkitAgentByKey -Config $config -Key "researchAgent"
+$localChatAgent = Get-ToolkitAgentByKey -Config $config -Key "localChatAgent"
+$localReviewAgent = Get-ToolkitAgentByKey -Config $config -Key "localReviewAgent"
+$hostedTelegramAgent = Get-ToolkitAgentByKey -Config $config -Key "hostedTelegramAgent"
+$localCoderAgent = Get-ToolkitAgentByKey -Config $config -Key "localCoderAgent"
+$remoteReviewAgent = Get-ToolkitAgentByKey -Config $config -Key "remoteReviewAgent"
+$remoteCoderAgent = Get-ToolkitAgentByKey -Config $config -Key "remoteCoderAgent"
+$telegramRouting = Get-ToolkitTelegramRouting -Config $config
+$agentToAgentEnabled = @(
+    foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
+        if (Test-ToolkitWorkspaceAllowsAgentToAgent -Config $config -Workspace $workspace) {
+            $true
+        }
+    }
+).Count -gt 0
 
-if ($null -eq $multi) {
+if ($null -eq $strongAgent) {
     Write-Host "Multi-agent starter layout is not configured in openclaw-bootstrap.config.json." -ForegroundColor Yellow
     exit 0
 }
@@ -1933,50 +1887,50 @@ $overlayDirName = Get-AgentOverlayDirName -Config $config
 
 $desiredAgents = @()
 $configuredManagedAgentIds = @(Get-ToolkitConfiguredAgentIds -Config $config)
-$strongId = [string]$multi.strongAgent.id
-if ($multi.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.strongAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.strongAgent -ModelOverrideRef $StrongModelRef -IsDefault ([bool]$multi.strongAgent.default)
+$strongId = [string]$strongAgent.id
+if ($strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $strongAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $strongAgent -ModelOverrideRef $StrongModelRef -IsDefault ([bool]$strongAgent.default)
 }
 
-if ($multi.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.researchAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.researchAgent -ModelOverrideRef $ResearchModelRef
+if ($researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $researchAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $researchAgent -ModelOverrideRef $ResearchModelRef
 }
 
 $chatAgentId = $null
-if ($multi.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localChatAgent)) {
-    $chatAgentId = [string]$multi.localChatAgent.id
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localChatAgent -ModelOverrideRef $LocalChatModelRef
-    if (-not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $multi.localChatAgent)) {
+if ($localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $localChatAgent)) {
+    $chatAgentId = [string]$localChatAgent.id
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $localChatAgent -ModelOverrideRef $LocalChatModelRef
+    if (-not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localChatAgent)) {
         $chatAgentId = $null
     }
 }
 
-if ($multi.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localReviewAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localReviewAgent -ModelOverrideRef $LocalReviewModelRef
+if ($localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $localReviewAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $localReviewAgent -ModelOverrideRef $LocalReviewModelRef
 }
 
-if ($multi.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.hostedTelegramAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.hostedTelegramAgent -ModelOverrideRef $HostedTelegramModelRef
+if ($hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $hostedTelegramAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $hostedTelegramAgent -ModelOverrideRef $HostedTelegramModelRef
 }
 
-if ($multi.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.localCoderAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.localCoderAgent -ModelOverrideRef $LocalCoderModelRef
+if ($localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $localCoderAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $localCoderAgent -ModelOverrideRef $LocalCoderModelRef
 }
 
-if ($multi.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.remoteReviewAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.remoteReviewAgent -ModelOverrideRef $RemoteReviewModelRef
+if ($remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $remoteReviewAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $remoteReviewAgent -ModelOverrideRef $RemoteReviewModelRef
 }
 
-if ($multi.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $multi.remoteCoderAgent)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $multi.remoteCoderAgent -ModelOverrideRef $RemoteCoderModelRef
+if ($remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $remoteCoderAgent)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $remoteCoderAgent -ModelOverrideRef $RemoteCoderModelRef
 }
 
-foreach ($extraAgent in @(Get-EnabledExtraAgents -MultiConfig $multi)) {
-    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -MultiConfig $multi -AgentConfig $extraAgent
+foreach ($extraAgent in @(Get-EnabledExtraAgents -Config $config)) {
+    $desiredAgents = Add-DesiredAgentFromConfig -DesiredAgents $desiredAgents -Config $config -AgentConfig $extraAgent
 }
 
 $currentManagedExtraAgentIds = @(
-    foreach ($extraAgent in @(Get-EnabledExtraAgents -MultiConfig $multi)) {
+    foreach ($extraAgent in @(Get-EnabledExtraAgents -Config $config)) {
         [string]$extraAgent.id
     }
 )
@@ -2036,21 +1990,21 @@ foreach ($existing in $currentAgents) {
 $telegramRouteTargetAgentId = $null
 $routeTrustedTelegramGroups = $false
 $routeTrustedTelegramDms = $false
-if ($multi.telegramRouting) {
-    if ($multi.telegramRouting.targetAgentId) {
-        $telegramRouteTargetAgentId = [string]$multi.telegramRouting.targetAgentId
+if ($telegramRouting) {
+    if ($telegramRouting.targetAgentId) {
+        $telegramRouteTargetAgentId = [string]$telegramRouting.targetAgentId
     }
-    if ($null -ne $multi.telegramRouting.routeTrustedTelegramGroups) {
-        $routeTrustedTelegramGroups = [bool]$multi.telegramRouting.routeTrustedTelegramGroups
+    if ($null -ne $telegramRouting.routeTrustedTelegramGroups) {
+        $routeTrustedTelegramGroups = [bool]$telegramRouting.routeTrustedTelegramGroups
     }
-    if ($null -ne $multi.telegramRouting.routeTrustedTelegramDms) {
-        $routeTrustedTelegramDms = [bool]$multi.telegramRouting.routeTrustedTelegramDms
+    if ($null -ne $telegramRouting.routeTrustedTelegramDms) {
+        $routeTrustedTelegramDms = [bool]$telegramRouting.routeTrustedTelegramDms
     }
 }
-elseif ($chatAgentId) {
+elseif ($chatAgentId -and $localChatAgent) {
     $telegramRouteTargetAgentId = $chatAgentId
-    $routeTrustedTelegramGroups = [bool]$multi.localChatAgent.routeTrustedTelegramGroups
-    $routeTrustedTelegramDms = [bool]$multi.localChatAgent.routeTrustedTelegramDms
+    $routeTrustedTelegramGroups = [bool]$localChatAgent.routeTrustedTelegramGroups
+    $routeTrustedTelegramDms = [bool]$localChatAgent.routeTrustedTelegramDms
 }
 
 if ($telegramRouteTargetAgentId) {
@@ -2135,7 +2089,7 @@ if (@($currentBindings).Count -gt 0) {
     Set-OpenClawConfigJson -Path "bindings" -Value @($currentBindings) -AsArray
 }
 
-if ($multi.enableAgentToAgent) {
+if ($agentToAgentEnabled) {
     $allow = @()
     foreach ($agent in @($mergedAgents)) {
         $allow = Add-UniqueString -List $allow -Value ([string]$agent.id)
@@ -2160,7 +2114,7 @@ foreach ($managedExtraAgentId in @($currentManagedExtraAgentIds)) {
     if ($markerPath) { $managedAgentsFiles += $markerPath }
 }
 
-$sharedWorkspacePath = Get-SharedWorkspacePath -Config $config -MultiConfig $multi
+$sharedWorkspacePath = Get-SharedWorkspacePath -Config $config
 foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
     $staleOverlayDir = Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName
     foreach ($fileName in @($script:ManagedAgentBootstrapOverlayFiles)) {
@@ -2169,7 +2123,7 @@ foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
 }
 
 foreach ($desiredAgent in @($desiredAgents)) {
-    $agentRecord = Get-ManagedAgentConfigRecord -MultiConfig $multi -StrongAgentId $strongId -AgentId ([string]$desiredAgent.id)
+    $agentRecord = Get-ManagedAgentConfigRecord -Config $config -AgentId ([string]$desiredAgent.id)
     if ($null -eq $agentRecord -or $null -eq $agentRecord.AgentConfig) {
         continue
     }
@@ -2179,10 +2133,10 @@ foreach ($desiredAgent in @($desiredAgents)) {
         [string]$desiredAgent.workspace
     }
     else {
-        Get-AgentWorkspacePath -Config $config -MultiConfig $multi -AgentConfig $agentConfig
+        Get-AgentWorkspacePath -Config $config -AgentConfig $agentConfig
     }
     $agentSharedWorkspacePaths = @(Get-AgentAccessibleSharedWorkspacePaths -Config $config -AgentConfig $agentConfig)
-    $agentCanAccessSharedWorkspace = Test-AgentCanAccessSharedWorkspace -Config $config -MultiConfig $multi -AgentConfig $agentConfig
+    $agentCanAccessSharedWorkspace = Test-AgentCanAccessSharedWorkspace -Config $config -AgentConfig $agentConfig
     $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentConfig $desiredAgent -AgentId ([string]$desiredAgent.id) -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePaths $agentSharedWorkspacePaths -IncludeSharedWorkspaceAccess:$agentCanAccessSharedWorkspace
     $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap -AllowedFileNames $script:ManagedAgentBootstrapOverlayFiles)
 }

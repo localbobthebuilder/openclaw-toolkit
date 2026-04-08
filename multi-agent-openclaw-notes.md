@@ -123,29 +123,28 @@ against the official OpenClaw docs/source in `<repo-dir>`.
 ## Mixed workspace support in this toolkit
 
 - The toolkit now supports a mixed layout for the managed role slots.
-- Global shared collaboration still comes from `multiAgent.sharedWorkspace`.
-- Any managed agent can opt out of that shared default with
-  `workspaceMode: "private"`.
-- A private agent can set its own `workspace`, or if omitted the toolkit now
+- Global shared collaboration now comes from the shared workspace record in
+  `workspaces[]`.
+- Any managed agent can opt out of that shared default by being assigned to a
+  private workspace record.
+- A private workspace can set its own `path`, or if omitted the toolkit now
   defaults it to `/home/node/.openclaw/workspace-<agentId>` (with `main`
   defaulting to `/home/node/.openclaw/workspace`).
-- A private agent can also opt into shared-project collaboration guidance with
-  `sharedWorkspaceAccess: true`. That does not change hard permissions by
-  itself; it just tells the agent where the shared project tree lives and how to
-  use it.
+- A private workspace can also opt into shared-project collaboration guidance
+  with `sharedWorkspaceIds`. That does not change hard permissions by itself; it
+  just tells the agent where the shared project tree lives and how to use it.
 - The toolkit still has built-in role slots such as `main`, `research`,
   `chat-local`, `review-local`, and the coder/reviewer delegates.
-- But it is no longer limited to only those slots:
-  `multiAgent.extraAgents[]` can now add arbitrary managed agents through the
-  bootstrap config.
+- But it is no longer limited to only those slots: `agents.list[]` can now add
+  arbitrary managed agents through the bootstrap config.
 - Extra agents use the same model resolution, workspace-mode, subagent, and
   managed `AGENTS.md` machinery as the built-ins.
 - Extra agents can either:
   reuse a built-in AGENTS template/tool profile such as `research`, `review`,
   or `codingDelegate`, or
   define their own `tools` plus `markdownTemplateKeys`.
-- Removing an extra agent from `multiAgent.extraAgents` now removes that managed
-  agent from `agents.list` and cleans up the toolkit-managed prompt marker/files.
+- Removing an extra agent from `agents.list[]` now removes that managed agent
+  from live config and cleans up the toolkit-managed prompt marker/files.
 
 ## Recommended house view
 

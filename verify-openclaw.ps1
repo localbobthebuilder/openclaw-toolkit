@@ -1359,14 +1359,19 @@ function Resolve-ExpectedStrongModelRef {
         [Parameter(Mandatory = $true)]$LiveConfig
     )
 
+    $strongAgent = Get-ToolkitAgentByKey -Config $Config -Key "strongAgent"
+    if ($null -eq $strongAgent) {
+        return ""
+    }
+
     $candidateRefs = @()
-    foreach ($candidate in @($Config.multiAgent.strongAgent.candidateModelRefs)) {
+    foreach ($candidate in @($strongAgent.candidateModelRefs)) {
         if ($candidate) {
             $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidate)
         }
     }
-    if ($Config.multiAgent.strongAgent.modelRef) {
-        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$Config.multiAgent.strongAgent.modelRef)
+    if ($strongAgent.modelRef) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$strongAgent.modelRef)
     }
 
     $authReadyProviders = @(Get-AuthReadyProvidersFromLiveConfig -LiveConfig $LiveConfig)
@@ -1385,7 +1390,7 @@ function Resolve-ExpectedStrongModelRef {
         }
     }
 
-    if ($Config.multiAgent.strongAgent.allowLocalFallback) {
+    if ($strongAgent.allowLocalFallback) {
         $defaultEndpoint = Get-ToolkitDefaultOllamaEndpoint -Config $Config
         $defaultEndpointKey = if ($null -ne $defaultEndpoint) { [string]$defaultEndpoint.key } else { "local" }
         foreach ($model in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey $defaultEndpointKey)) {
@@ -1398,7 +1403,7 @@ function Resolve-ExpectedStrongModelRef {
         }
     }
 
-    return [string]$Config.multiAgent.strongAgent.modelRef
+    return [string]$strongAgent.modelRef
 }
 
 function Get-AuthReadyProvidersFromLiveConfig {
@@ -1451,27 +1456,44 @@ function Resolve-ExpectedHostedCandidateModelRef {
 }
 
 function Get-EnabledExtraAgentConfigs {
-    param($MultiConfig)
+    param([Parameter(Mandatory = $true)]$Config)
 
-    if ($null -eq $MultiConfig -or -not ($MultiConfig.PSObject.Properties.Name -contains "extraAgents") -or $null -eq $MultiConfig.extraAgents) {
-        return @()
-    }
+    $managedKeys = @(
+        "strongAgent",
+        "researchAgent",
+        "localChatAgent",
+        "hostedTelegramAgent",
+        "localReviewAgent",
+        "localCoderAgent",
+        "remoteReviewAgent",
+        "remoteCoderAgent"
+    )
 
     return @(
-        foreach ($extraAgent in @($MultiConfig.extraAgents)) {
-            if ($null -eq $extraAgent) {
+        foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
+            if ($null -eq $agent) {
+                continue
+            }
+
+            $agentKey = if ($agent.PSObject.Properties.Name -contains "key" -and $agent.key) {
+                [string]$agent.key
+            }
+            else {
+                ""
+            }
+            if (-not [string]::IsNullOrWhiteSpace($agentKey) -and $agentKey -in $managedKeys) {
                 continue
             }
 
             $isEnabled = $true
-            if ($extraAgent.PSObject.Properties.Name -contains "enabled" -and $null -ne $extraAgent.enabled) {
-                $isEnabled = [bool]$extraAgent.enabled
+            if ($agent.PSObject.Properties.Name -contains "enabled" -and $null -ne $agent.enabled) {
+                $isEnabled = [bool]$agent.enabled
             }
             if (-not $isEnabled) {
                 continue
             }
 
-            $extraAgent
+            $agent
         }
     )
 }
@@ -1537,15 +1559,17 @@ function Get-ExpectedManagedModelRefs {
     }
 
     $agentConfigs = @(
-        $Config.multiAgent.strongAgent,
-        $Config.multiAgent.researchAgent,
-        $Config.multiAgent.localChatAgent,
-        $Config.multiAgent.hostedTelegramAgent,
-        $Config.multiAgent.localReviewAgent,
-        $Config.multiAgent.localCoderAgent,
-        $Config.multiAgent.remoteReviewAgent,
-        $Config.multiAgent.remoteCoderAgent
-    ) + @(Get-EnabledExtraAgentConfigs -MultiConfig $Config.multiAgent)
+        foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
+            if ($null -eq $agent) {
+                continue
+            }
+            if ($agent.PSObject.Properties.Name -contains "enabled" -and -not [bool]$agent.enabled) {
+                continue
+            }
+
+            $agent
+        }
+    )
 
     foreach ($agentConfig in @($agentConfigs)) {
         if ($null -eq $agentConfig) {
@@ -1577,7 +1601,6 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
 $requiredConfigPaths = @(
     @{ Name = "repoPath"; Value = [string]$config.repoPath },
     @{ Name = "verification.healthUrl"; Value = [string]$config.verification.healthUrl },
@@ -1594,6 +1617,22 @@ if (-not (Test-Path $config.repoPath)) {
 
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 $liveConfig = Get-OpenClawConfigDocument -Config $config
+$strongAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "strongAgent"
+$researchAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "researchAgent"
+$localChatAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localChatAgent"
+$hostedTelegramAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "hostedTelegramAgent"
+$localReviewAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localReviewAgent"
+$localCoderAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localCoderAgent"
+$remoteReviewAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "remoteReviewAgent"
+$remoteCoderAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "remoteCoderAgent"
+$telegramRoutingConfig = Get-ToolkitTelegramRouting -Config $config
+$agentToAgentEnabled = @(
+    foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
+        if (Test-ToolkitWorkspaceAllowsAgentToAgent -Config $config -Workspace $workspace) {
+            $true
+        }
+    }
+).Count -gt 0
 
 $missingVerificationCommands = @(
     @{ Name = "curl.exe"; Required = (Test-CheckRequested -Names @("health")) },
@@ -1702,13 +1741,13 @@ if ((Test-CheckRequested -Names @("sandbox")) -and $config.sandbox.enabled) {
     $sandboxSmokeTestOutput = Invoke-LoggedScript -Label "Sandbox smoke test" -ScriptPath $sandboxScript -SkipMessage "Sandbox smoke test skipped: script not found."
 }
 $chatWorkspaceWriteSmokeTestOutput = "Chat workspace write smoke test skipped."
-if ((Test-CheckRequested -Names @("chat-write")) -and $config.multiAgent -and $config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $config.multiAgent.localChatAgent)) {
+if ((Test-CheckRequested -Names @("chat-write")) -and $localChatAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $localChatAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localChatAgentConfig)) {
     $chatWorkspaceScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-chat-workspace-write.ps1"
     $chatWorkspaceParams = @{}
-    if ($config.multiAgent.localChatAgent.id) {
-        $chatWorkspaceParams.AgentId = [string]$config.multiAgent.localChatAgent.id
+    if ($localChatAgentConfig.id) {
+        $chatWorkspaceParams.AgentId = [string]$localChatAgentConfig.id
     }
-    $chatWorkspacePath = Get-ToolkitAgentWorkspacePath -Config $config -AgentConfig $config.multiAgent.localChatAgent
+    $chatWorkspacePath = Get-ToolkitAgentWorkspacePath -Config $config -AgentConfig $localChatAgentConfig
     if ($chatWorkspacePath) {
         $chatWorkspaceHostPath = Resolve-HostWorkspacePath -Config $config -WorkspacePath $chatWorkspacePath
         $chatWorkspaceParams.WorkspaceHostPath = $chatWorkspaceHostPath
@@ -1732,7 +1771,7 @@ if (Test-CheckRequested -Names @("git")) {
 
 $multiAgentVerification = @()
 if (Test-CheckRequested -Names @("multi-agent")) {
-    if ($config.multiAgent) {
+    if ($strongAgentConfig) {
         $activeAssignedAgentIds = @(
             foreach ($agent in @(Get-ToolkitAssignedAgentList -Config $config)) {
                 if ($null -ne $agent -and $agent.id) {
@@ -1772,7 +1811,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.strongAgent.modelRef) {
+        if ($strongAgentConfig -and $strongAgentConfig.modelRef) {
             $expectedStrongDefault = Resolve-ExpectedStrongModelRef -Config $config -LiveConfig $liveConfig
             $actualStrongDefault = [string]$liveConfig.agents.defaults.model.primary
             if ($actualStrongDefault -eq $expectedStrongDefault) {
@@ -1798,16 +1837,16 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
+        if ($researchAgentConfig -and $researchAgentConfig.enabled) {
             $researchCandidates = @()
-            foreach ($candidateRef in @($config.multiAgent.researchAgent.candidateModelRefs)) {
+            foreach ($candidateRef in @($researchAgentConfig.candidateModelRefs)) {
                 $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$candidateRef)
             }
-            if ($config.multiAgent.researchAgent.modelRef) {
-                $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$config.multiAgent.researchAgent.modelRef)
+            if ($researchAgentConfig.modelRef) {
+                $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$researchAgentConfig.modelRef)
             }
 
-            $researchAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.researchAgent.id } | Select-Object -First 1
+            $researchAgent = $actualAgents | Where-Object { $_.id -eq [string]$researchAgentConfig.id } | Select-Object -First 1
             $actualResearchModel = if ($researchAgent -and $researchAgent.model) { [string]$researchAgent.model.primary } else { "" }
             $expectedResearchModel = Resolve-ExpectedHostedCandidateModelRef -CandidateRefs $researchCandidates -AuthReadyProviders $authReadyProviders
             if ($actualResearchModel -eq $expectedResearchModel) {
@@ -1835,10 +1874,10 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled) {
-            $chatAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.localChatAgent.id } | Select-Object -First 1
+        if ($localChatAgentConfig -and $localChatAgentConfig.enabled) {
+            $chatAgent = $actualAgents | Where-Object { $_.id -eq [string]$localChatAgentConfig.id } | Select-Object -First 1
             $actualChatModel = if ($chatAgent -and $chatAgent.model) { [string]$chatAgent.model.primary } else { "" }
-            $desiredChatModel = [string]$config.multiAgent.localChatAgent.modelRef
+            $desiredChatModel = [string]$localChatAgentConfig.modelRef
             if ($actualChatModel -eq $desiredChatModel) {
                 $multiAgentVerification += "PASS: chat-local model is $actualChatModel"
             }
@@ -1855,8 +1894,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
             }
 
-            $expectedChatSandboxMode = if ($config.multiAgent.localChatAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.localChatAgent.sandboxMode) {
-                [string]$config.multiAgent.localChatAgent.sandboxMode
+            $expectedChatSandboxMode = if ($localChatAgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $localChatAgentConfig.sandboxMode) {
+                [string]$localChatAgentConfig.sandboxMode
             }
             else {
                 [string]$liveConfig.agents.defaults.sandbox.mode
@@ -1875,16 +1914,16 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.hostedTelegramAgent -and $config.multiAgent.hostedTelegramAgent.enabled) {
+        if ($hostedTelegramAgentConfig -and $hostedTelegramAgentConfig.enabled) {
             $hostedChatCandidates = @()
-            foreach ($candidateRef in @($config.multiAgent.hostedTelegramAgent.candidateModelRefs)) {
+            foreach ($candidateRef in @($hostedTelegramAgentConfig.candidateModelRefs)) {
                 $hostedChatCandidates = Add-UniqueString -List $hostedChatCandidates -Value ([string]$candidateRef)
             }
-            if ($config.multiAgent.hostedTelegramAgent.modelRef) {
-                $hostedChatCandidates = Add-UniqueString -List $hostedChatCandidates -Value ([string]$config.multiAgent.hostedTelegramAgent.modelRef)
+            if ($hostedTelegramAgentConfig.modelRef) {
+                $hostedChatCandidates = Add-UniqueString -List $hostedChatCandidates -Value ([string]$hostedTelegramAgentConfig.modelRef)
             }
 
-            $hostedChatAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.hostedTelegramAgent.id } | Select-Object -First 1
+            $hostedChatAgent = $actualAgents | Where-Object { $_.id -eq [string]$hostedTelegramAgentConfig.id } | Select-Object -First 1
             $actualHostedChatModel = if ($hostedChatAgent -and $hostedChatAgent.model) { [string]$hostedChatAgent.model.primary } else { "" }
             $expectedHostedChatModel = Resolve-ExpectedHostedCandidateModelRef -CandidateRefs $hostedChatCandidates -AuthReadyProviders $authReadyProviders
             if ($actualHostedChatModel -eq $expectedHostedChatModel) {
@@ -1903,8 +1942,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
             }
 
-            $expectedHostedChatSandboxMode = if ($config.multiAgent.hostedTelegramAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.hostedTelegramAgent.sandboxMode) {
-                [string]$config.multiAgent.hostedTelegramAgent.sandboxMode
+            $expectedHostedChatSandboxMode = if ($hostedTelegramAgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $hostedTelegramAgentConfig.sandboxMode) {
+                [string]$hostedTelegramAgentConfig.sandboxMode
             }
             else {
                 [string]$liveConfig.agents.defaults.sandbox.mode
@@ -1923,10 +1962,10 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled) {
-            $reviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.localReviewAgent.id } | Select-Object -First 1
+        if ($localReviewAgentConfig -and $localReviewAgentConfig.enabled) {
+            $reviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$localReviewAgentConfig.id } | Select-Object -First 1
             $actualReviewModel = if ($reviewAgent -and $reviewAgent.model) { [string]$reviewAgent.model.primary } else { "" }
-            $desiredReviewModel = Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localReviewAgent -ModelRef ([string]$config.multiAgent.localReviewAgent.modelRef)
+            $desiredReviewModel = Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $localReviewAgentConfig -ModelRef ([string]$localReviewAgentConfig.modelRef)
             if ($actualReviewModel -eq $desiredReviewModel) {
                 $multiAgentVerification += "PASS: review-local model is $actualReviewModel"
             }
@@ -1943,8 +1982,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
             }
 
-            $expectedReviewSandboxMode = if ($config.multiAgent.localReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.localReviewAgent.sandboxMode) {
-                [string]$config.multiAgent.localReviewAgent.sandboxMode
+            $expectedReviewSandboxMode = if ($localReviewAgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $localReviewAgentConfig.sandboxMode) {
+                [string]$localReviewAgentConfig.sandboxMode
             }
             else {
                 [string]$liveConfig.agents.defaults.sandbox.mode
@@ -1963,17 +2002,17 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled) {
-            $coderAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.localCoderAgent.id } | Select-Object -First 1
+        if ($localCoderAgentConfig -and $localCoderAgentConfig.enabled) {
+            $coderAgent = $actualAgents | Where-Object { $_.id -eq [string]$localCoderAgentConfig.id } | Select-Object -First 1
             $actualCoderModel = if ($coderAgent -and $coderAgent.model) { [string]$coderAgent.model.primary } else { "" }
             $expectedCoderModels = @()
-            foreach ($candidateRef in @($config.multiAgent.localCoderAgent.candidateModelRefs)) {
-                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localCoderAgent -ModelRef ([string]$candidateRef))
+            foreach ($candidateRef in @($localCoderAgentConfig.candidateModelRefs)) {
+                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $localCoderAgentConfig -ModelRef ([string]$candidateRef))
             }
-            if ($config.multiAgent.localCoderAgent.modelRef) {
-                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.localCoderAgent -ModelRef ([string]$config.multiAgent.localCoderAgent.modelRef))
+            if ($localCoderAgentConfig.modelRef) {
+                $expectedCoderModels = Add-UniqueString -List $expectedCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $localCoderAgentConfig -ModelRef ([string]$localCoderAgentConfig.modelRef))
             }
-            $desiredCoderModel = if (@($expectedCoderModels).Count -gt 0) { [string]$expectedCoderModels[0] } else { [string]$config.multiAgent.localCoderAgent.modelRef }
+            $desiredCoderModel = if (@($expectedCoderModels).Count -gt 0) { [string]$expectedCoderModels[0] } else { [string]$localCoderAgentConfig.modelRef }
             if ($actualCoderModel -in @($expectedCoderModels)) {
                 $multiAgentVerification += "PASS: coder-local model is $actualCoderModel"
             }
@@ -1990,8 +2029,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
             }
 
-            $expectedCoderSandboxMode = if ($config.multiAgent.localCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.localCoderAgent.sandboxMode) {
-                [string]$config.multiAgent.localCoderAgent.sandboxMode
+            $expectedCoderSandboxMode = if ($localCoderAgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $localCoderAgentConfig.sandboxMode) {
+                [string]$localCoderAgentConfig.sandboxMode
             }
             else {
                 [string]$liveConfig.agents.defaults.sandbox.mode
@@ -2010,20 +2049,20 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.remoteReviewAgent -and $config.multiAgent.remoteReviewAgent.enabled) {
-            $remoteReviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.remoteReviewAgent.id } | Select-Object -First 1
+        if ($remoteReviewAgentConfig -and $remoteReviewAgentConfig.enabled) {
+            $remoteReviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$remoteReviewAgentConfig.id } | Select-Object -First 1
             if ($null -eq $remoteReviewAgent) {
-                $multiAgentVerification += "FAIL: remoteReviewAgent '$($config.multiAgent.remoteReviewAgent.id)' is missing from agents.list"
+                $multiAgentVerification += "FAIL: remoteReviewAgent '$($remoteReviewAgentConfig.id)' is missing from agents.list"
             }
             else {
                 $expectedRemoteReviewModels = @()
-                foreach ($candidateRef in @($config.multiAgent.remoteReviewAgent.candidateModelRefs)) {
-                    $expectedRemoteReviewModels = Add-UniqueString -List $expectedRemoteReviewModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$candidateRef))
+                foreach ($candidateRef in @($remoteReviewAgentConfig.candidateModelRefs)) {
+                    $expectedRemoteReviewModels = Add-UniqueString -List $expectedRemoteReviewModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $remoteReviewAgentConfig -ModelRef ([string]$candidateRef))
                 }
-                if ($config.multiAgent.remoteReviewAgent.modelRef) {
-                    $expectedRemoteReviewModels = Add-UniqueString -List $expectedRemoteReviewModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteReviewAgent -ModelRef ([string]$config.multiAgent.remoteReviewAgent.modelRef))
+                if ($remoteReviewAgentConfig.modelRef) {
+                    $expectedRemoteReviewModels = Add-UniqueString -List $expectedRemoteReviewModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $remoteReviewAgentConfig -ModelRef ([string]$remoteReviewAgentConfig.modelRef))
                 }
-                $desiredRemoteReviewModel = if (@($expectedRemoteReviewModels).Count -gt 0) { [string]$expectedRemoteReviewModels[0] } else { [string]$config.multiAgent.remoteReviewAgent.modelRef }
+                $desiredRemoteReviewModel = if (@($expectedRemoteReviewModels).Count -gt 0) { [string]$expectedRemoteReviewModels[0] } else { [string]$remoteReviewAgentConfig.modelRef }
                 if ($remoteReviewAgent.model.primary -in @($expectedRemoteReviewModels)) {
                     $multiAgentVerification += "PASS: review-remote model is $($remoteReviewAgent.model.primary)"
                 }
@@ -2035,8 +2074,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
             }
 
-            $expectedRemoteReviewSandboxMode = if ($config.multiAgent.remoteReviewAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.remoteReviewAgent.sandboxMode) {
-                [string]$config.multiAgent.remoteReviewAgent.sandboxMode
+            $expectedRemoteReviewSandboxMode = if ($remoteReviewAgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $remoteReviewAgentConfig.sandboxMode) {
+                [string]$remoteReviewAgentConfig.sandboxMode
             }
             else {
                 [string]$liveConfig.agents.defaults.sandbox.mode
@@ -2055,20 +2094,20 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled) {
-            $remoteCoderAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.remoteCoderAgent.id } | Select-Object -First 1
+        if ($remoteCoderAgentConfig -and $remoteCoderAgentConfig.enabled) {
+            $remoteCoderAgent = $actualAgents | Where-Object { $_.id -eq [string]$remoteCoderAgentConfig.id } | Select-Object -First 1
             if ($null -eq $remoteCoderAgent) {
-                $multiAgentVerification += "FAIL: remoteCoderAgent '$($config.multiAgent.remoteCoderAgent.id)' is missing from agents.list"
+                $multiAgentVerification += "FAIL: remoteCoderAgent '$($remoteCoderAgentConfig.id)' is missing from agents.list"
             }
             else {
                 $expectedRemoteCoderModels = @()
-                foreach ($candidateRef in @($config.multiAgent.remoteCoderAgent.candidateModelRefs)) {
-                    $expectedRemoteCoderModels = Add-UniqueString -List $expectedRemoteCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$candidateRef))
+                foreach ($candidateRef in @($remoteCoderAgentConfig.candidateModelRefs)) {
+                    $expectedRemoteCoderModels = Add-UniqueString -List $expectedRemoteCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $remoteCoderAgentConfig -ModelRef ([string]$candidateRef))
                 }
-                if ($config.multiAgent.remoteCoderAgent.modelRef) {
-                    $expectedRemoteCoderModels = Add-UniqueString -List $expectedRemoteCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $config.multiAgent.remoteCoderAgent -ModelRef ([string]$config.multiAgent.remoteCoderAgent.modelRef))
+                if ($remoteCoderAgentConfig.modelRef) {
+                    $expectedRemoteCoderModels = Add-UniqueString -List $expectedRemoteCoderModels -Value (Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $remoteCoderAgentConfig -ModelRef ([string]$remoteCoderAgentConfig.modelRef))
                 }
-                $desiredRemoteCoderModel = if (@($expectedRemoteCoderModels).Count -gt 0) { [string]$expectedRemoteCoderModels[0] } else { [string]$config.multiAgent.remoteCoderAgent.modelRef }
+                $desiredRemoteCoderModel = if (@($expectedRemoteCoderModels).Count -gt 0) { [string]$expectedRemoteCoderModels[0] } else { [string]$remoteCoderAgentConfig.modelRef }
                 if ($remoteCoderAgent.model.primary -in @($expectedRemoteCoderModels)) {
                     $multiAgentVerification += "PASS: coder-remote model is $($remoteCoderAgent.model.primary)"
                 }
@@ -2080,8 +2119,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 }
             }
 
-            $expectedRemoteCoderSandboxMode = if ($config.multiAgent.remoteCoderAgent.PSObject.Properties.Name -contains "sandboxMode" -and $config.multiAgent.remoteCoderAgent.sandboxMode) {
-                [string]$config.multiAgent.remoteCoderAgent.sandboxMode
+            $expectedRemoteCoderSandboxMode = if ($remoteCoderAgentConfig.PSObject.Properties.Name -contains "sandboxMode" -and $remoteCoderAgentConfig.sandboxMode) {
+                [string]$remoteCoderAgentConfig.sandboxMode
             }
             else {
                 [string]$liveConfig.agents.defaults.sandbox.mode
@@ -2100,7 +2139,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.enableAgentToAgent) {
+        if ($agentToAgentEnabled) {
             $actualAgentToAgent = $liveConfig.tools.agentToAgent
             if ($actualAgentToAgent.enabled) {
                 $multiAgentVerification += "PASS: agent-to-agent delegation is enabled"
@@ -2120,11 +2159,11 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($config.multiAgent.strongAgent -and $config.multiAgent.strongAgent.subagents) {
-            $mainAgent = $actualAgents | Where-Object { $_.id -eq [string]$config.multiAgent.strongAgent.id } | Select-Object -First 1
+        if ($strongAgentConfig -and $strongAgentConfig.subagents) {
+            $mainAgent = $actualAgents | Where-Object { $_.id -eq [string]$strongAgentConfig.id } | Select-Object -First 1
             $delegationEnabled = $true
-            if ($config.multiAgent.strongAgent.subagents.PSObject.Properties.Name -contains "enabled") {
-                $delegationEnabled = [bool]$config.multiAgent.strongAgent.subagents.enabled
+            if ($strongAgentConfig.subagents.PSObject.Properties.Name -contains "enabled") {
+                $delegationEnabled = [bool]$strongAgentConfig.subagents.enabled
             }
             $actualAllowAgents = @()
             if ($mainAgent -and $mainAgent.subagents -and $mainAgent.subagents.allowAgents) {
@@ -2132,7 +2171,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
 
             if ($delegationEnabled) {
-                $expectedAllowAgents = @($config.multiAgent.strongAgent.subagents.allowAgents | ForEach-Object { [string]$_ })
+                $expectedAllowAgents = @($strongAgentConfig.subagents.allowAgents | ForEach-Object { [string]$_ })
                 foreach ($agentId in $expectedAllowAgents) {
                     if ($agentId -in $actualAllowAgents) {
                         $multiAgentVerification += "PASS: main subagent allowlist includes '$agentId'"
@@ -2152,8 +2191,8 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
 
             $expectedRequireAgentId = $false
-            if ($delegationEnabled -and $config.multiAgent.strongAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
-                $expectedRequireAgentId = [bool]$config.multiAgent.strongAgent.subagents.requireAgentId
+            if ($delegationEnabled -and $strongAgentConfig.subagents.PSObject.Properties.Name -contains "requireAgentId") {
+                $expectedRequireAgentId = [bool]$strongAgentConfig.subagents.requireAgentId
             }
             $actualRequireAgentId = $false
             if ($mainAgent -and $mainAgent.subagents -and $mainAgent.subagents.PSObject.Properties.Name -contains "requireAgentId") {
@@ -2174,21 +2213,21 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         $telegramRouteTargetAgentId = $null
         $routeTrustedTelegramGroups = $false
         $routeTrustedTelegramDms = $false
-        if ($config.multiAgent.telegramRouting) {
-            if ($config.multiAgent.telegramRouting.targetAgentId) {
-                $telegramRouteTargetAgentId = [string]$config.multiAgent.telegramRouting.targetAgentId
+        if ($telegramRoutingConfig) {
+            if ($telegramRoutingConfig.targetAgentId) {
+                $telegramRouteTargetAgentId = [string]$telegramRoutingConfig.targetAgentId
             }
-            if ($null -ne $config.multiAgent.telegramRouting.routeTrustedTelegramGroups) {
-                $routeTrustedTelegramGroups = [bool]$config.multiAgent.telegramRouting.routeTrustedTelegramGroups
+            if ($null -ne $telegramRoutingConfig.routeTrustedTelegramGroups) {
+                $routeTrustedTelegramGroups = [bool]$telegramRoutingConfig.routeTrustedTelegramGroups
             }
-            if ($null -ne $config.multiAgent.telegramRouting.routeTrustedTelegramDms) {
-                $routeTrustedTelegramDms = [bool]$config.multiAgent.telegramRouting.routeTrustedTelegramDms
+            if ($null -ne $telegramRoutingConfig.routeTrustedTelegramDms) {
+                $routeTrustedTelegramDms = [bool]$telegramRoutingConfig.routeTrustedTelegramDms
             }
         }
-        elseif ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled) {
-            $telegramRouteTargetAgentId = if ($config.multiAgent.localChatAgent.id) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" }
-            $routeTrustedTelegramGroups = [bool]$config.multiAgent.localChatAgent.routeTrustedTelegramGroups
-            $routeTrustedTelegramDms = [bool]$config.multiAgent.localChatAgent.routeTrustedTelegramDms
+        elseif ($localChatAgentConfig -and $localChatAgentConfig.enabled) {
+            $telegramRouteTargetAgentId = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
+            $routeTrustedTelegramGroups = [bool]$localChatAgentConfig.routeTrustedTelegramGroups
+            $routeTrustedTelegramDms = [bool]$localChatAgentConfig.routeTrustedTelegramDms
         }
 
         $liveTelegramConfig = Resolve-OpenClawConfigDocumentPathValue -Document $liveConfig -Path "channels.telegram"

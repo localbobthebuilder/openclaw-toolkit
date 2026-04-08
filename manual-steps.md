@@ -667,77 +667,97 @@ Shared workspace note:
   separate workspaces are mostly organization/default-cwd choices rather than
   strong isolation boundaries.
 - Managed agents are no longer locked into only that one layout:
-  if `multiAgent.sharedWorkspace.enabled = true`, an individual managed agent
-  can still opt out with `workspaceMode: "private"`.
-- A private managed agent can set `workspace` explicitly, or if omitted it now
-  defaults to `/home/node/.openclaw/workspace-<agentId>`.
+  if a shared workspace exists in `workspaces[]`, an individual managed agent
+  can still opt out by being assigned to a private workspace.
+- A private workspace can set `path` explicitly, or if omitted it now defaults
+  to `/home/node/.openclaw/workspace-<agentId>`.
 - If you want a private agent to keep its own home workspace but still
   collaborate with the shared project tree, set
-  `sharedWorkspaceAccess: true` on that agent.
-- `sharedWorkspaceAccess: true` adds config-managed instructions telling that
-  private agent where the shared project workspace lives and to use exact
+  `sharedWorkspaceIds` on that private workspace.
+- `sharedWorkspaceIds` adds config-managed instructions telling that private
+  agent where the shared project workspace lives and to use exact
   absolute paths there when joining collaborative work.
 - The managed toolkit layout still includes the built-in role slots, but it now
-  also supports arbitrary managed extras through `multiAgent.extraAgents`.
+  also supports arbitrary managed extras through `agents.list`.
 
 Example extra agent:
 
 ```json
-"extraAgents": [
-  {
-    "enabled": true,
-    "id": "notes-helper",
-    "name": "Notes Helper",
-    "toolProfile": "research",
-    "markdownTemplateKeys": {
-      "AGENTS.md": "research"
-    },
-    "workspaceMode": "private",
-    "sharedWorkspaceAccess": true,
-    "workspace": "/home/node/.openclaw/workspace-notes-helper",
-    "modelRef": "google/gemini-3.1-flash-lite-preview",
-    "candidateModelRefs": [
-      "google/gemini-3.1-flash-lite-preview"
-    ],
-    "subagents": {
-      "requireAgentId": true,
-      "allowAgents": []
+"agents": {
+  "list": [
+    {
+      "enabled": true,
+      "id": "notes-helper",
+      "name": "Notes Helper",
+      "toolProfile": "research",
+      "markdownTemplateKeys": {
+        "AGENTS.md": "research"
+      },
+      "modelRef": "google/gemini-3.1-flash-lite-preview",
+      "candidateModelRefs": [
+        "google/gemini-3.1-flash-lite-preview"
+      ],
+      "subagents": {
+        "requireAgentId": true,
+        "allowAgents": []
+      }
     }
+  ]
+},
+"workspaces": [
+  {
+    "id": "workspace-notes-helper",
+    "name": "Notes Helper Workspace",
+    "mode": "private",
+    "path": "/home/node/.openclaw/workspace-notes-helper",
+    "sharedWorkspaceIds": ["shared-main"],
+    "agents": ["notes-helper"]
   }
 ]
 ```
 
-Notes for `extraAgents`:
+Notes for extra agents in `agents.list`:
 
 - each extra agent needs a unique `id`
-- each extra agent can choose `workspaceMode: "shared"` or
-  `workspaceMode: "private"`
-- private extra agents can still collaborate through
-  `sharedWorkspaceAccess: true`
+- each extra agent is assigned to either a shared or private workspace through
+  `workspaces[].agents`
+- private extra agents can still collaborate through `sharedWorkspaceIds`
 - `markdownTemplateKeys.AGENTS.md` controls which managed `AGENTS.md` template
   is written
 - `toolProfile` can be used to reuse the built-in tool presets such as
   `research`, `review`, or `codingDelegate`
-- or you can provide an explicit `tools` object directly on the extra agent
-- removing an entry from `extraAgents` now removes that managed extra agent from
-  `agents.list` and cleans up its managed marker / managed workspace prompt file
+- or you can provide an explicit `tools` object directly on the agent
+- removing an entry from `agents.list` now removes that managed extra agent from
+  live config and cleans up its managed marker / managed workspace prompt file
 
 Example mixed layout:
 
 ```json
-"researchAgent": {
-  "enabled": true,
-  "id": "research",
-  "name": "Gemini Research",
-  "toolProfile": "research",
-  "markdownTemplateKeys": {
-    "AGENTS.md": "research"
-  },
-  "workspaceMode": "private",
-  "sharedWorkspaceAccess": true,
-  "workspace": "/home/node/.openclaw/workspace-research",
-  "modelRef": "google/gemini-3.1-flash-lite-preview"
-}
+"agents": {
+  "list": [
+    {
+      "key": "researchAgent",
+      "enabled": true,
+      "id": "research",
+      "name": "Gemini Research",
+      "toolProfile": "research",
+      "markdownTemplateKeys": {
+        "AGENTS.md": "research"
+      },
+      "modelRef": "google/gemini-3.1-flash-lite-preview"
+    }
+  }
+},
+"workspaces": [
+  {
+    "id": "workspace-research",
+    "name": "Research Workspace",
+    "mode": "private",
+    "path": "/home/node/.openclaw/workspace-research",
+    "sharedWorkspaceIds": ["shared-main"],
+    "agents": ["research"]
+  }
+]
 ```
 
 That gives `research` its own home workspace and AGENTS file, while still
@@ -747,7 +767,7 @@ Purpose routing note:
 
 - channel routing is explicit, not magical
 - trusted Telegram DM/group are routed to whichever agent you set in
-  `multiAgent.telegramRouting.targetAgentId`
+  `agents.telegramRouting.targetAgentId`
 - by default that target is `chat-local`
 - in this Windows + Docker Desktop shared-workspace setup, `chat-local`,
   `review-local`, `coder-local`, and the optional `chat-openai` default to
@@ -755,9 +775,9 @@ Purpose routing note:
   of the broken disposable `/workspace` mount seen in sandbox sessions
 - if you want Telegram on OpenAI while `main` uses Claude or another hosted
   model, enable `hostedTelegramAgent` and set
-  `multiAgent.telegramRouting.targetAgentId` to `chat-openai`
+  `agents.telegramRouting.targetAgentId` to `chat-openai`
 - if you want Telegram to use the default strong agent instead, set
-  `multiAgent.telegramRouting.targetAgentId` to `main`
+  `agents.telegramRouting.targetAgentId` to `main`
 - trusted Telegram DM/group routing is managed through
   `bindings`
 - everything else defaults to `main`
@@ -783,7 +803,7 @@ Important:
 - if a preferred local primary model is still unavailable, bootstrap falls back
   to another available local model instead of leaving the local agent unusable
 - Telegram only routes to `chat-local` when you explicitly turn on the routing
-  flags under `multiAgent.localChatAgent`
+  flags on the selected target agent and/or in `agents.telegramRouting`
 - disabling the relevant agent or removing it from its endpoint's `agents` list keeps it toolkit-only
   and removes it from future bootstrap runs
 

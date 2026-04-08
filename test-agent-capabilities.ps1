@@ -421,7 +421,6 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
 
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 if (-not (Test-Path $hostConfigPath)) {
@@ -448,15 +447,20 @@ if (-not (Test-Path $WorkspaceHostPath)) {
     throw "Workspace host path does not exist: $WorkspaceHostPath"
 }
 
-$chatAgentId = if ($config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.id) { [string]$config.multiAgent.localChatAgent.id } else { "chat-local" }
-$reviewAgentId = if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.id) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" }
-$coderAgentId = if ($config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.id) { [string]$config.multiAgent.localCoderAgent.id } else { "coder-local" }
-$researchAgentId = if ($config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.id) { [string]$config.multiAgent.researchAgent.id } else { "research" }
+$localChatAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localChatAgent"
+$localReviewAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localReviewAgent"
+$localCoderAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localCoderAgent"
+$researchAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "researchAgent"
 
-$chatAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.localChatAgent -and $config.multiAgent.localChatAgent.enabled)
-$reviewAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled)
-$coderAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.localCoderAgent -and $config.multiAgent.localCoderAgent.enabled)
-$researchAgentEnabled = [bool]($config.multiAgent -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled)
+$chatAgentId = if ($localChatAgentConfig -and $localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
+$reviewAgentId = if ($localReviewAgentConfig -and $localReviewAgentConfig.id) { [string]$localReviewAgentConfig.id } else { "review-local" }
+$coderAgentId = if ($localCoderAgentConfig -and $localCoderAgentConfig.id) { [string]$localCoderAgentConfig.id } else { "coder-local" }
+$researchAgentId = if ($researchAgentConfig -and $researchAgentConfig.id) { [string]$researchAgentConfig.id } else { "research" }
+
+$chatAgentEnabled = [bool]($localChatAgentConfig -and $localChatAgentConfig.enabled)
+$reviewAgentEnabled = [bool]($localReviewAgentConfig -and $localReviewAgentConfig.enabled)
+$coderAgentEnabled = [bool]($localCoderAgentConfig -and $localCoderAgentConfig.enabled)
+$researchAgentEnabled = [bool]($researchAgentConfig -and $researchAgentConfig.enabled)
 
 $suffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
 $chatRepoName = "telegram-smoke-$suffix"

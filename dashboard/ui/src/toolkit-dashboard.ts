@@ -2641,88 +2641,10 @@ export class ToolkitDashboard extends LitElement {
     return clone;
   }
 
-  buildAgentsSchemaFromLegacy(config: any) {
-    const multi = (config?.multiAgent && typeof config.multiAgent === 'object') ? config.multiAgent : {};
-    const agentsList: any[] = [];
-    const privateWorkspaces: any[] = [];
-    const sharedAgentIds: string[] = [];
-
-    const pushAgent = (agent: any, key?: string) => {
-      if (!agent || typeof agent !== 'object' || typeof agent.id !== 'string' || !agent.id.trim()) return;
-      const normalized = this.sanitizeAgentRecord(agent, key);
-      if (typeof agent?.endpointKey === 'string' && agent.endpointKey.trim().length > 0) {
-        normalized.endpointKey = agent.endpointKey.trim();
-      }
-      delete normalized.workspaceMode;
-      delete normalized.workspace;
-      delete normalized.sharedWorkspaceAccess;
-      if (key === 'strongAgent') {
-        normalized.isMain = true;
-      }
-      agentsList.push(normalized);
-
-      const isPrivate = agent.workspaceMode === 'private' || typeof agent.workspace === 'string' && agent.workspace.trim().length > 0;
-      if (isPrivate) {
-        privateWorkspaces.push({
-          id: `workspace-${normalized.id}`,
-          name: `${normalized.name || normalized.id} Workspace`,
-          mode: 'private',
-          path: typeof agent.workspace === 'string' && agent.workspace.trim().length > 0 ? agent.workspace : `/home/node/.openclaw/workspace-${normalized.id}`,
-          sharedWorkspaceIds: this.normalizeBoolean(agent.sharedWorkspaceAccess, false) ? ['shared-main'] : [],
-          enableAgentToAgent: this.normalizeBoolean(multi.enableAgentToAgent, false),
-          manageWorkspaceAgentsMd: this.normalizeBoolean(multi.manageWorkspaceAgentsMd, false),
-          agents: [normalized.id]
-        });
-      } else {
-        sharedAgentIds.push(normalized.id);
-      }
-    };
-
-    for (const key of this.getLegacyManagedAgentKeys()) {
-      pushAgent(multi[key], key);
-    }
-    for (const agent of (Array.isArray(multi.extraAgents) ? multi.extraAgents : [])) {
-      pushAgent(agent);
-    }
-
-    const workspaces: any[] = [];
-    if ((multi.sharedWorkspace && this.normalizeBoolean(multi.sharedWorkspace.enabled, true)) || sharedAgentIds.length > 0) {
-      workspaces.push({
-        id: 'shared-main',
-        name: 'Shared Workspace',
-        mode: 'shared',
-        path: multi.sharedWorkspace?.path || '/home/node/.openclaw/workspace',
-        markdownTemplateKeys: { 'AGENTS.md': multi.sharedWorkspace?.rolePolicyKey || 'sharedWorkspace' },
-        enableAgentToAgent: this.normalizeBoolean(multi.enableAgentToAgent, false),
-        manageWorkspaceAgentsMd: this.normalizeBoolean(multi.manageWorkspaceAgentsMd, false),
-        agents: sharedAgentIds
-      });
-    }
-    workspaces.push(...privateWorkspaces);
-
-    return {
-      agents: {
-        telegramRouting: JSON.parse(JSON.stringify(multi.telegramRouting || {})),
-        list: agentsList
-      },
-      workspaces
-    };
-  }
-
   buildPersistedConfig(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
-    const hasFirstClassAgentSchema = !!(clone.agents && typeof clone.agents === 'object');
-    const hasFirstClassWorkspaceSchema = Array.isArray(clone.workspaces);
-    const migrated = (hasFirstClassAgentSchema || hasFirstClassWorkspaceSchema) ? {
-      agents: clone.agents,
-      workspaces: clone.workspaces
-    } : clone.multiAgent ? this.buildAgentsSchemaFromLegacy(clone) : {
-      agents: clone.agents,
-      workspaces: clone.workspaces
-    };
-
-    clone.agents = migrated.agents || { telegramRouting: {}, list: [] };
-    clone.workspaces = Array.isArray(migrated.workspaces) ? migrated.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
+    clone.agents = clone.agents || { telegramRouting: {}, list: [] };
+    clone.workspaces = Array.isArray(clone.workspaces) ? clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(clone.endpoints)) {
       clone.endpoints = normalizedEndpoints;
@@ -2745,18 +2667,12 @@ export class ToolkitDashboard extends LitElement {
     for (const workspace of Array.isArray(clone.workspaces) ? clone.workspaces : []) {
       delete workspace.allowSharedWorkspaceAccess;
     }
-    delete clone.multiAgent;
     return clone;
   }
 
   sanitizeConfigModelNames(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
     if (!clone) return clone;
-    if (!clone.agents && clone.multiAgent) {
-      const migrated = this.buildAgentsSchemaFromLegacy(clone);
-      clone.agents = migrated.agents;
-      clone.workspaces = migrated.workspaces;
-    }
     if (!clone.agents || typeof clone.agents !== 'object') {
       clone.agents = { telegramRouting: {}, list: [] };
     }

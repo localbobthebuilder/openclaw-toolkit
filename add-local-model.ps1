@@ -723,7 +723,6 @@ if ($AssignTo) {
     $assigned = Set-AgentLocalModel -Config $config -TargetAgentId $AssignTo -ModelId $plan.ModelId -EndpointKey $endpoint.key
 }
 
-$config = Convert-ToolkitConfigToPersistedSchema -Config $config
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 

@@ -386,7 +386,6 @@ if (-not (Test-Path $ConfigPath)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
 
 $hostConfigPath = Join-Path (Get-HostConfigDir -Config $config) "openclaw.json"
 if (-not (Test-Path $hostConfigPath)) {
@@ -413,14 +412,18 @@ if (-not (Test-Path $WorkspaceHostPath)) {
     throw "Workspace host path does not exist: $WorkspaceHostPath"
 }
 
-$mainAgentId = if ($config.multiAgent.strongAgent -and $config.multiAgent.strongAgent.id) { [string]$config.multiAgent.strongAgent.id } else { "main" }
-$remoteCoderId = if ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.id) { [string]$config.multiAgent.remoteCoderAgent.id } else { "coder-remote" }
-$localReviewId = if ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.id) { [string]$config.multiAgent.localReviewAgent.id } else { "review-local" }
+$strongAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "strongAgent"
+$remoteCoderAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "remoteCoderAgent"
+$localReviewAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localReviewAgent"
 
-if (-not ($config.multiAgent.remoteCoderAgent -and $config.multiAgent.remoteCoderAgent.enabled)) {
+$mainAgentId = if ($strongAgentConfig -and $strongAgentConfig.id) { [string]$strongAgentConfig.id } else { "main" }
+$remoteCoderId = if ($remoteCoderAgentConfig -and $remoteCoderAgentConfig.id) { [string]$remoteCoderAgentConfig.id } else { "coder-remote" }
+$localReviewId = if ($localReviewAgentConfig -and $localReviewAgentConfig.id) { [string]$localReviewAgentConfig.id } else { "review-local" }
+
+if (-not ($remoteCoderAgentConfig -and $remoteCoderAgentConfig.enabled)) {
     throw "remoteCoderAgent is not enabled in bootstrap config."
 }
-if (-not ($config.multiAgent.localReviewAgent -and $config.multiAgent.localReviewAgent.enabled)) {
+if (-not ($localReviewAgentConfig -and $localReviewAgentConfig.enabled)) {
     throw "localReviewAgent is not enabled in bootstrap config."
 }
 
