@@ -2709,74 +2709,6 @@ export class ToolkitDashboard extends LitElement {
     };
   }
 
-  buildLegacyMultiAgentView(config: any) {
-    const agentsRoot = (config?.agents && typeof config.agents === 'object') ? config.agents : {};
-    const agentsList = Array.isArray(agentsRoot.list) ? agentsRoot.list : [];
-    const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
-    const workspaceByAgentId = new Map<string, any>();
-
-    for (const workspace of workspaces) {
-      for (const agentId of (Array.isArray(workspace?.agents) ? workspace.agents : [])) {
-        if (typeof agentId === 'string' && agentId.length > 0) {
-          workspaceByAgentId.set(agentId, workspace);
-        }
-      }
-    }
-
-    const multi: any = {
-      enableAgentToAgent: workspaces.some((workspace: any) => this.normalizeBoolean(workspace?.enableAgentToAgent, false)),
-      manageWorkspaceAgentsMd: workspaces.some((workspace: any) => this.normalizeBoolean(workspace?.manageWorkspaceAgentsMd, false)),
-      sharedWorkspace: { enabled: false },
-      telegramRouting: JSON.parse(JSON.stringify(agentsRoot.telegramRouting || {})),
-      extraAgents: []
-    };
-
-    const primarySharedWorkspace = workspaces.find((workspace: any) => workspace?.mode === 'shared');
-    if (primarySharedWorkspace) {
-      multi.sharedWorkspace = {
-        enabled: true,
-        path: primarySharedWorkspace.path || '/home/node/.openclaw/workspace'
-      };
-    }
-
-    const legacyKeys = new Set(this.getLegacyManagedAgentKeys());
-    let inferredMainAssigned = false;
-    for (const rawAgent of agentsList) {
-      const workspace = workspaceByAgentId.get(rawAgent?.id);
-      const agent = this.sanitizeAgentRecord(rawAgent, rawAgent?.key);
-      const endpoint = this.getConfigEndpointsFrom(config).find((candidate: any) =>
-        this.getEndpointAgentIds(candidate).includes(String(agent?.id || ''))
-      );
-      if (endpoint?.key) {
-        agent.endpointKey = endpoint.key;
-      }
-      if (workspace?.mode === 'private') {
-        agent.workspaceMode = 'private';
-        if (workspace.path) {
-          agent.workspace = workspace.path;
-        }
-        if (Array.isArray(workspace.sharedWorkspaceIds) ? workspace.sharedWorkspaceIds.length > 0 : workspace.allowSharedWorkspaceAccess) {
-          agent.sharedWorkspaceAccess = true;
-        }
-      }
-
-      const targetKey = typeof agent.key === 'string' && legacyKeys.has(agent.key)
-        ? agent.key
-        : (!inferredMainAssigned && agent.isMain ? 'strongAgent' : '');
-
-      if (targetKey) {
-        multi[targetKey] = agent;
-        if (targetKey === 'strongAgent') {
-          inferredMainAssigned = true;
-        }
-      } else {
-        multi.extraAgents.push(agent);
-      }
-    }
-
-    return multi;
-  }
-
   buildPersistedConfig(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
     const hasFirstClassAgentSchema = !!(clone.agents && typeof clone.agents === 'object');
@@ -2949,8 +2881,6 @@ export class ToolkitDashboard extends LitElement {
     } else {
       clone.endpoints = [];
     }
-
-    clone.multiAgent = this.buildLegacyMultiAgentView(clone);
 
     return clone;
   }

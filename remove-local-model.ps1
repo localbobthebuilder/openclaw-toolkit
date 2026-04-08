@@ -272,30 +272,29 @@ function Replace-ManagedModelRefs {
     )
 
     $changed = New-Object System.Collections.Generic.List[string]
-    $agentPropertyNames = @(
-        "strongAgent",
-        "researchAgent",
-        "localChatAgent",
-        "hostedTelegramAgent",
-        "localReviewAgent",
-        "localCoderAgent",
-        "remoteReviewAgent",
-        "remoteCoderAgent"
-    )
 
-    foreach ($propertyName in $agentPropertyNames) {
-        $agent = $Config.multiAgent.$propertyName
+    foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
         if ($null -eq $agent) {
             continue
         }
 
+        $agentLabel = if ($agent.PSObject.Properties.Name -contains "key" -and $agent.key) {
+            [string]$agent.key
+        }
+        elseif ($agent.PSObject.Properties.Name -contains "id" -and $agent.id) {
+            [string]$agent.id
+        }
+        else {
+            "unknown-agent"
+        }
+
         if (($agent.PSObject.Properties.Name -contains "modelRef") -and [string]$agent.modelRef -eq $RemovedModelRef) {
             if ([string]::IsNullOrWhiteSpace($ReplacementModelRef)) {
-                throw "Managed agent '$propertyName' points to $RemovedModelRef and no replacement model was available. Add another local model first or pass -ReplaceWith."
+                throw "Managed agent '$agentLabel' points to $RemovedModelRef and no replacement model was available. Add another local model first or pass -ReplaceWith."
             }
 
             $agent.modelRef = $ReplacementModelRef
-            $changed.Add("$propertyName.modelRef")
+            $changed.Add("$agentLabel.modelRef")
         }
 
         if ($agent.PSObject.Properties.Name -contains "candidateModelRefs" -and $agent.candidateModelRefs) {
@@ -308,7 +307,7 @@ function Replace-ManagedModelRefs {
             )
             if (@($newCandidates).Count -ne @($agent.candidateModelRefs).Count) {
                 $agent.candidateModelRefs = $newCandidates
-                $changed.Add("$propertyName.candidateModelRefs")
+                $changed.Add("$agentLabel.candidateModelRefs")
             }
         }
     }
@@ -319,7 +318,6 @@ function Replace-ManagedModelRefs {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
 
 $currentIds = @(Get-LocalModelIds -Config $config)
 $assignedEndpoints = @(Get-EndpointModelAssignments -Config $config -ModelId $Model)

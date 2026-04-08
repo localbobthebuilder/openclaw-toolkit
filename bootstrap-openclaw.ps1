@@ -1385,44 +1385,34 @@ function Get-ManagedModelRefs {
         return @(Add-UniqueString -List $List -Value $modelRefText)
     }
 
-    if ($Config.multiAgent) {
-        foreach ($ref in @(
-                $ResolvedStrongModelRef,
-                $ResolvedResearchModelRef,
-                $ResolvedLocalChatModelRef,
-                $ResolvedHostedTelegramModelRef,
-                $ResolvedLocalReviewModelRef,
-                $ResolvedLocalCoderModelRef,
-                $ResolvedRemoteReviewModelRef,
-                $ResolvedRemoteCoderModelRef
-            )) {
-            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$ref)
+    foreach ($ref in @(
+            $ResolvedStrongModelRef,
+            $ResolvedResearchModelRef,
+            $ResolvedLocalChatModelRef,
+            $ResolvedHostedTelegramModelRef,
+            $ResolvedLocalReviewModelRef,
+            $ResolvedLocalCoderModelRef,
+            $ResolvedRemoteReviewModelRef,
+            $ResolvedRemoteCoderModelRef
+        )) {
+        $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$ref)
+    }
+
+    foreach ($agentConfig in @(Get-ToolkitAgentList -Config $Config)) {
+        if ($null -eq $agentConfig) {
+            continue
         }
-
-        $agentConfigs = @(
-            $Config.multiAgent.strongAgent,
-            $Config.multiAgent.researchAgent,
-            $Config.multiAgent.localChatAgent,
-            $Config.multiAgent.hostedTelegramAgent,
-            $Config.multiAgent.localReviewAgent,
-            $Config.multiAgent.localCoderAgent,
-            $Config.multiAgent.remoteReviewAgent,
-            $Config.multiAgent.remoteCoderAgent
-        )
-
-        foreach ($agentConfig in @($agentConfigs)) {
-            if ($null -eq $agentConfig) {
-                continue
-            }
-            if (-not (Test-ToolkitAgentEnabled -AgentConfig $agentConfig)) {
-                continue
-            }
-            if ($agentConfig.modelRef) {
-                $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$agentConfig.modelRef)
-            }
-            foreach ($candidateRef in @($agentConfig.candidateModelRefs)) {
-                $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$candidateRef)
-            }
+        if (-not (Test-ToolkitAgentEnabled -AgentConfig $agentConfig)) {
+            continue
+        }
+        if (-not (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $agentConfig)) {
+            continue
+        }
+        if ($agentConfig.modelRef) {
+            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$agentConfig.modelRef)
+        }
+        foreach ($candidateRef in @($agentConfig.candidateModelRefs)) {
+            $refs = Add-RefIfUsable -List $refs -ModelRef ([string]$candidateRef)
         }
     }
 
@@ -1733,6 +1723,38 @@ function Get-EndpointVramBudgetMiB {
     return [int]($totalMiB * $ThresholdFraction)
 }
 
+function Get-BootstrapAgentByKey {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
+
+    return (Get-ToolkitAgentByKey -Config $Config -Key $Key)
+}
+
+function Resolve-ManagedAgentPreferredModelRefByKey {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [string[]]$AvailableOllamaRefs = @(),
+        [switch]$FallbackToFirstCandidate
+    )
+
+    $agentConfig = Get-BootstrapAgentByKey -Config $Config -Key $Key
+    if ($null -eq $agentConfig) {
+        return $null
+    }
+    if (-not (Test-ToolkitAgentEnabled -AgentConfig $agentConfig)) {
+        return $null
+    }
+    if (-not (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $agentConfig)) {
+        return $null
+    }
+
+    return (Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $agentConfig -AvailableOllamaRefs $AvailableOllamaRefs -Purpose $Purpose -FallbackToFirstCandidate:$FallbackToFirstCandidate)
+}
+
 function Ensure-OllamaState {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -1752,11 +1774,11 @@ function Ensure-OllamaState {
     $referencedLocalModels = New-Object System.Collections.Generic.List[object]
     $referencedLocalModelKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($agentConfig in @(
-            $Config.multiAgent.localChatAgent,
-            $Config.multiAgent.localReviewAgent,
-            $Config.multiAgent.localCoderAgent,
-            $Config.multiAgent.remoteReviewAgent,
-            $Config.multiAgent.remoteCoderAgent
+            Get-BootstrapAgentByKey -Config $Config -Key "localChatAgent"
+            Get-BootstrapAgentByKey -Config $Config -Key "localReviewAgent"
+            Get-BootstrapAgentByKey -Config $Config -Key "localCoderAgent"
+            Get-BootstrapAgentByKey -Config $Config -Key "remoteReviewAgent"
+            Get-BootstrapAgentByKey -Config $Config -Key "remoteCoderAgent"
         )) {
         if ($null -eq $agentConfig -or -not (Test-ToolkitAgentEnabled -AgentConfig $agentConfig)) {
             continue
@@ -1915,21 +1937,11 @@ function Ensure-OllamaState {
         }
     }
 
-    if ($Config.multiAgent -and $Config.multiAgent.localChatAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.localChatAgent) -and (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $Config.multiAgent.localChatAgent)) {
-        $state.ResolvedLocalChatModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localChatAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "chat-local" -FallbackToFirstCandidate
-    }
-    if ($Config.multiAgent -and $Config.multiAgent.localReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.localReviewAgent) -and (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $Config.multiAgent.localReviewAgent)) {
-        $state.ResolvedLocalReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localReviewAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-local" -FallbackToFirstCandidate
-    }
-    if ($Config.multiAgent -and $Config.multiAgent.localCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.localCoderAgent) -and (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent)) {
-        $state.ResolvedLocalCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.localCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-local" -FallbackToFirstCandidate
-    }
-    if ($Config.multiAgent -and $Config.multiAgent.remoteReviewAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.remoteReviewAgent) -and (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $Config.multiAgent.remoteReviewAgent)) {
-        $state.ResolvedRemoteReviewModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.remoteReviewAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-remote" -FallbackToFirstCandidate
-    }
-    if ($Config.multiAgent -and $Config.multiAgent.remoteCoderAgent -and (Test-ToolkitAgentEnabled -AgentConfig $Config.multiAgent.remoteCoderAgent) -and (Test-ToolkitAgentAssigned -Config $Config -AgentConfig $Config.multiAgent.remoteCoderAgent)) {
-        $state.ResolvedRemoteCoderModelRef = Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.remoteCoderAgent -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-remote" -FallbackToFirstCandidate
-    }
+    $state.ResolvedLocalChatModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $Config -Key "localChatAgent" -AvailableOllamaRefs $state.AvailableRefs -Purpose "chat-local" -FallbackToFirstCandidate
+    $state.ResolvedLocalReviewModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $Config -Key "localReviewAgent" -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-local" -FallbackToFirstCandidate
+    $state.ResolvedLocalCoderModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $Config -Key "localCoderAgent" -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-local" -FallbackToFirstCandidate
+    $state.ResolvedRemoteReviewModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $Config -Key "remoteReviewAgent" -AvailableOllamaRefs $state.AvailableRefs -Purpose "review-remote" -FallbackToFirstCandidate
+    $state.ResolvedRemoteCoderModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $Config -Key "remoteCoderAgent" -AvailableOllamaRefs $state.AvailableRefs -Purpose "coder-remote" -FallbackToFirstCandidate
 
     return [pscustomobject]$state
 }
@@ -2015,7 +2027,7 @@ function Resolve-StrongModelRef {
         [Parameter(Mandatory = $true)]$Config,
         [string[]]$AvailableOllamaRefs = @()
     )
-    return (Resolve-AgentPreferredModelRef -Config $Config -AgentConfig $Config.multiAgent.strongAgent -AvailableOllamaRefs $AvailableOllamaRefs -Purpose "strong agent" -FallbackToFirstCandidate)
+    return (Resolve-ManagedAgentPreferredModelRefByKey -Config $Config -Key "strongAgent" -AvailableOllamaRefs $AvailableOllamaRefs -Purpose "strong agent" -FallbackToFirstCandidate)
 }
 
 function Resolve-HostedModelRef {
@@ -2564,7 +2576,6 @@ $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $configBaseDir = Split-Path -Parent $ConfigPath
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir $configBaseDir
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
 $managedUpstreamPatches = @(Get-ManagedUpstreamPatches -Config $config -BaseDir $configBaseDir)
 
 Write-Step "Preparing Windows prerequisites"
@@ -2672,18 +2683,18 @@ if ($config.ollama.enabled -and (Test-ToolkitHasOllamaEndpoints -Config $config)
 }
 
 $resolvedStrongModelRef = $null
-if ($config.multiAgent -and $config.multiAgent.strongAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.strongAgent) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $config.multiAgent.strongAgent)) {
+if ($null -ne (Get-BootstrapAgentByKey -Config $config -Key "strongAgent")) {
     $resolvedStrongModelRef = Resolve-StrongModelRef -Config $config -AvailableOllamaRefs $ollamaState.AvailableRefs
 }
 
 $resolvedResearchModelRef = $null
-if ($config.multiAgent -and $config.multiAgent.researchAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.researchAgent) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $config.multiAgent.researchAgent)) {
-    $resolvedResearchModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.researchAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "research agent" -FallbackToFirstCandidate
+if ($null -ne (Get-BootstrapAgentByKey -Config $config -Key "researchAgent")) {
+    $resolvedResearchModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $config -Key "researchAgent" -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "research agent" -FallbackToFirstCandidate
 }
 
 $resolvedHostedTelegramModelRef = $null
-if ($config.multiAgent -and $config.multiAgent.hostedTelegramAgent -and (Test-ToolkitAgentEnabled -AgentConfig $config.multiAgent.hostedTelegramAgent) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $config.multiAgent.hostedTelegramAgent)) {
-    $resolvedHostedTelegramModelRef = Resolve-AgentPreferredModelRef -Config $config -AgentConfig $config.multiAgent.hostedTelegramAgent -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
+if ($null -ne (Get-BootstrapAgentByKey -Config $config -Key "hostedTelegramAgent")) {
+    $resolvedHostedTelegramModelRef = Resolve-ManagedAgentPreferredModelRefByKey -Config $config -Key "hostedTelegramAgent" -AvailableOllamaRefs $ollamaState.AvailableRefs -Purpose "hosted Telegram agent" -FallbackToFirstCandidate
 }
 
 $managedModelRefs = Get-ManagedModelRefs -Config $config -ResolvedStrongModelRef $resolvedStrongModelRef -ResolvedResearchModelRef $resolvedResearchModelRef -ResolvedLocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -ResolvedHostedTelegramModelRef $resolvedHostedTelegramModelRef -ResolvedLocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -ResolvedLocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -ResolvedRemoteReviewModelRef $ollamaState.ResolvedRemoteReviewModelRef -ResolvedRemoteCoderModelRef $ollamaState.ResolvedRemoteCoderModelRef -ExtraRefs $ollamaState.AvailableRefs
@@ -2831,7 +2842,7 @@ Write-Host "  .\run-openclaw.cmd status"
 if ($config.PSObject.Properties.Name -contains "watchdog" -and -not $config.watchdog.installScheduledTask) {
     Write-Host "  .\run-openclaw.cmd install-watchdog" -ForegroundColor DarkGray
 }
-if ($config.multiAgent -and $config.multiAgent.researchAgent -and $config.multiAgent.researchAgent.enabled) {
+if (Test-ToolkitAgentEnabled -AgentConfig (Get-BootstrapAgentByKey -Config $config -Key "researchAgent")) {
     $authReadyProviders = Get-AuthReadyHostedProviders
     if ("google" -notin @($authReadyProviders)) {
         Write-Host "  .\run-openclaw.cmd gemini-auth" -ForegroundColor Yellow

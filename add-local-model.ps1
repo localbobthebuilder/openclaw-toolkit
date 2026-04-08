@@ -323,9 +323,9 @@ function Set-AgentLocalModel {
     }
 
     $propertyName = $mapping[$TargetAgentId]
-    $agent = $Config.multiAgent.$propertyName
+    $agent = Get-ToolkitAgentById -Config $Config -AgentId $TargetAgentId
     if ($null -eq $agent) {
-        throw "Config does not contain multiAgent.$propertyName"
+        throw "Config does not contain managed agent '$TargetAgentId' ($propertyName)"
     }
 
     $targetEndpoint = $null
@@ -650,7 +650,6 @@ if (-not (Get-Command "pwsh" -ErrorAction SilentlyContinue)) {
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
-$config = Add-ToolkitLegacyMultiAgentView -Config $config
 if (-not $PSBoundParameters.ContainsKey("HeadroomMiB")) {
     $HeadroomMiB = Get-ToolkitOllamaVramHeadroomMiB -Config $config
 }
