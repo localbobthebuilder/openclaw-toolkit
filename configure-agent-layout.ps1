@@ -1699,17 +1699,27 @@ function Resolve-AgentFallbackModelRefs {
 }
 
 function Wait-ForGateway {
-    param([string]$HealthUrl = "http://127.0.0.1:18789/healthz")
+    param(
+        [string]$HealthUrl = "http://127.0.0.1:18789/healthz",
+        [int]$MaxAttempts = 45,
+        [int]$DelaySeconds = 2
+    )
 
-    for ($i = 0; $i -lt 20; $i++) {
+    $lastOutput = ""
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
         $health = Invoke-External -FilePath "curl.exe" -Arguments @("-s", $HealthUrl) -AllowFailure
         if ($health.ExitCode -eq 0 -and $health.Output -match '"ok"\s*:\s*true') {
             return
         }
-        Start-Sleep -Seconds 2
+
+        if (-not [string]::IsNullOrWhiteSpace($health.Output)) {
+            $lastOutput = $health.Output.Trim()
+        }
+        Start-Sleep -Seconds $DelaySeconds
     }
 
-    throw "Gateway did not become healthy after restart."
+    $detail = if ([string]::IsNullOrWhiteSpace($lastOutput)) { "" } else { "`nLast health response/output: $lastOutput" }
+    throw "Gateway did not become healthy after restart at $HealthUrl after $($MaxAttempts * $DelaySeconds)s.$detail"
 }
 
 if (-not (Test-Path $ConfigPath)) {

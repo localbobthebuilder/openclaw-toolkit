@@ -41,6 +41,7 @@ const defaultWhisperModels = [
 // Simulate terminal \r handling and strip spinner noise from command output
 function cleanOutputChunk(raw) {
   return raw
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
     .split('\n')
     .map(line => {
       // \r means "overwrite current line" — keep only the last non-empty segment

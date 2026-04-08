@@ -103,8 +103,6 @@
   "clearRedundantDangerousNodeDenyCommands": true,
   "telegram": {
     "enabled": true,
-    "botToken": "",
-    "tokenFile": "",
     "dmPolicy": "allowlist",
     "allowFrom": [
       "8674459047"
@@ -360,15 +358,16 @@
     {
       "key": "local",
       "default": true,
+      "telemetry": {
+        "kind": "local-nvidia-smi"
+      },
       "agents": [
         "main",
         "chat-local",
         "review-local",
-        "coder-local"
+        "coder-local",
+        "notes-helper"
       ],
-      "telemetry": {
-        "kind": "local-nvidia-smi"
-      },
       "hostedModels": [
         {
           "modelRef": "openai-codex/gpt-5.4",
@@ -586,14 +585,14 @@
     {
       "key": "review-pc",
       "default": false,
-      "agents": [
-        "review-remote",
-        "coder-remote"
-      ],
       "telemetry": {
         "kind": "static-gpu-total",
         "gpuTotalMiB": 8192
       },
+      "agents": [
+        "review-remote",
+        "coder-remote"
+      ],
       "hostedModels": [],
       "ollama": {
         "enabled": true,
@@ -706,183 +705,6 @@
     "applyPatchWorkspaceOnly": true
   },
   "agents": {
-    "list": [
-      {
-        "key": "strongAgent",
-        "id": "main",
-        "name": "Strong Coder",
-        "enabled": true,
-        "rolePolicyKey": "orchestrator",
-        "isMain": true,
-        "default": true,
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": false,
-          "requireAgentId": true,
-          "allowAgents": [
-            "research",
-            "review-local",
-            "review-remote",
-            "coder-local",
-            "coder-remote"
-          ]
-        },
-        "modelRef": "ollama/gemma4:latest",
-        "candidateModelRefs": [
-          "ollama/gemma4:latest",
-          "ollama/gemma4:26b",
-          "ollama/qwen3-coder:30b",
-          "ollama/qwen3.5:35b-a3b",
-          "openai-codex/gpt-5.4",
-          "anthropic/claude-sonnet-4-6",
-          "google/gemini-3.1-flash-lite-preview"
-        ],
-        "allowLocalFallback": true
-      },
-      {
-        "key": "researchAgent",
-        "id": "research",
-        "name": "Gemini Research",
-        "enabled": true,
-        "rolePolicyKey": "research",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "google/gemini-3.1-flash-lite-preview",
-        "candidateModelRefs": [
-          "google/gemini-3.1-flash-lite-preview"
-        ]
-      },
-      {
-        "key": "localChatAgent",
-        "id": "chat-local",
-        "name": "Local Chat",
-        "enabled": true,
-        "rolePolicyKey": "trustedChat",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/glm-4.7-flash:latest",
-        "routeTrustedTelegramGroups": true,
-        "routeTrustedTelegramDms": true
-      },
-      {
-        "key": "hostedTelegramAgent",
-        "id": "chat-openai",
-        "name": "Telegram OpenAI",
-        "enabled": false,
-        "rolePolicyKey": "trustedChat",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "openai-codex/gpt-5.4",
-        "candidateModelRefs": [
-          "openai-codex/gpt-5.4"
-        ]
-      },
-      {
-        "key": "localReviewAgent",
-        "id": "review-local",
-        "name": "Local Reviewer",
-        "enabled": true,
-        "rolePolicyKey": "review",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/qwen3-coder:30b"
-      },
-      {
-        "key": "localCoderAgent",
-        "id": "coder-local",
-        "name": "Coder Delegate",
-        "enabled": true,
-        "rolePolicyKey": "codingDelegate",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "openai-codex/gpt-5.4",
-        "candidateModelRefs": [
-          "openai-codex/gpt-5.4",
-          "anthropic/claude-sonnet-4-6",
-          "google/gemini-3.1-flash-lite-preview",
-          "ollama/qwen3-coder:30b",
-          "ollama/qwen3.5:35b-a3b"
-        ],
-        "allowLocalFallback": true
-      },
-      {
-        "key": "remoteReviewAgent",
-        "id": "review-remote",
-        "name": "Remote Reviewer",
-        "enabled": true,
-        "rolePolicyKey": "review",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/qwen2.5-coder:3b",
-        "candidateModelRefs": [
-          "ollama/qwen2.5-coder:3b",
-          "ollama/qwen2.5-coder:1.5b",
-          "ollama/qwen3:4b",
-          "ollama/qwen3:8b",
-          "ollama/qwen2.5:7b"
-        ]
-      },
-      {
-        "key": "remoteCoderAgent",
-        "id": "coder-remote",
-        "name": "Remote Coder",
-        "enabled": true,
-        "rolePolicyKey": "codingDelegate",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/qwen2.5-coder:3b",
-        "candidateModelRefs": [
-          "ollama/qwen2.5-coder:3b",
-          "ollama/qwen2.5-coder:1.5b",
-          "ollama/qwen3:4b",
-          "ollama/qwen3:8b",
-          "ollama/qwen2.5:7b"
-        ]
-      },
-      {
-        "id": "notes-helper",
-        "name": "Notes Helper",
-        "enabled": true,
-        "rolePolicyKey": "research",
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "google/gemini-3.1-flash-lite-preview",
-        "candidateModelRefs": [
-          "google/gemini-3.1-flash-lite-preview"
-        ]
-      }
-    ],
     "rolePolicies": {
       "sharedWorkspace": [
         "# AGENTS.md - Shared Project Workspace",
@@ -994,7 +816,186 @@
       "targetAgentId": "chat-local",
       "routeTrustedTelegramGroups": true,
       "routeTrustedTelegramDms": true
-    }
+    },
+    "list": [
+      {
+        "key": "strongAgent",
+        "id": "main",
+        "name": "Strong Coder",
+        "enabled": true,
+        "rolePolicyKey": "orchestrator",
+        "isMain": true,
+        "default": true,
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": false,
+          "requireAgentId": true,
+          "allowAgents": [
+            "research",
+            "review-local",
+            "review-remote",
+            "coder-local",
+            "coder-remote"
+          ]
+        },
+        "modelRef": "ollama/gemma4:latest",
+        "candidateModelRefs": [
+          "ollama/gemma4:latest",
+          "ollama/gemma4:26b",
+          "ollama/qwen3-coder:30b",
+          "ollama/qwen3.5:35b-a3b",
+          "openai-codex/gpt-5.4",
+          "anthropic/claude-sonnet-4-6",
+          "google/gemini-3.1-flash-lite-preview"
+        ],
+        "allowLocalFallback": true
+      },
+      {
+        "key": "researchAgent",
+        "id": "research",
+        "name": "Gemini Research",
+        "enabled": true,
+        "rolePolicyKey": "research",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "candidateModelRefs": [
+          "google/gemini-3.1-flash-lite-preview"
+        ]
+      },
+      {
+        "key": "localChatAgent",
+        "id": "chat-local",
+        "name": "Local Chat",
+        "enabled": true,
+        "rolePolicyKey": "trustedChat",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/glm-4.7-flash:latest",
+        "routeTrustedTelegramGroups": true,
+        "routeTrustedTelegramDms": true,
+        "candidateModelRefs": []
+      },
+      {
+        "key": "hostedTelegramAgent",
+        "id": "chat-openai",
+        "name": "Telegram OpenAI",
+        "enabled": false,
+        "rolePolicyKey": "trustedChat",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "openai-codex/gpt-5.4",
+        "candidateModelRefs": [
+          "openai-codex/gpt-5.4"
+        ]
+      },
+      {
+        "key": "localReviewAgent",
+        "id": "review-local",
+        "name": "Local Reviewer",
+        "enabled": true,
+        "rolePolicyKey": "review",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/qwen3-coder:30b",
+        "candidateModelRefs": []
+      },
+      {
+        "key": "localCoderAgent",
+        "id": "coder-local",
+        "name": "Coder Delegate",
+        "enabled": true,
+        "rolePolicyKey": "codingDelegate",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "openai-codex/gpt-5.4",
+        "candidateModelRefs": [
+          "openai-codex/gpt-5.4",
+          "anthropic/claude-sonnet-4-6",
+          "google/gemini-3.1-flash-lite-preview",
+          "ollama/qwen3-coder:30b",
+          "ollama/qwen3.5:35b-a3b"
+        ],
+        "allowLocalFallback": true
+      },
+      {
+        "key": "remoteReviewAgent",
+        "id": "review-remote",
+        "name": "Remote Reviewer",
+        "enabled": true,
+        "rolePolicyKey": "review",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/qwen2.5-coder:3b",
+        "candidateModelRefs": [
+          "ollama/qwen2.5-coder:3b",
+          "ollama/qwen2.5-coder:1.5b",
+          "ollama/qwen3:4b",
+          "ollama/qwen3:8b",
+          "ollama/qwen2.5:7b"
+        ]
+      },
+      {
+        "key": "remoteCoderAgent",
+        "id": "coder-remote",
+        "name": "Remote Coder",
+        "enabled": true,
+        "rolePolicyKey": "codingDelegate",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "ollama/qwen2.5-coder:3b",
+        "candidateModelRefs": [
+          "ollama/qwen2.5-coder:3b",
+          "ollama/qwen2.5-coder:1.5b",
+          "ollama/qwen3:4b",
+          "ollama/qwen3:8b",
+          "ollama/qwen2.5:7b"
+        ]
+      },
+      {
+        "id": "notes-helper",
+        "name": "Notes Helper",
+        "enabled": true,
+        "rolePolicyKey": "research",
+        "sandboxMode": "off",
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        },
+        "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "candidateModelRefs": [
+          "google/gemini-3.1-flash-lite-preview"
+        ]
+      }
+    ]
   },
   "workspaces": [
     {
@@ -1014,7 +1015,8 @@
         "coder-local",
         "review-remote",
         "coder-remote"
-      ]
+      ],
+      "sharedWorkspaceIds": []
     },
     {
       "id": "workspace-notes-helper",
