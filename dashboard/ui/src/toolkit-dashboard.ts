@@ -2,12 +2,20 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 
-const VALID_BOOTSTRAP_MARKDOWN_FILES = [
+const VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'SOUL.md',
   'IDENTITY.md',
-  'USER.md'
+  'USER.md',
+  'HEARTBEAT.md',
+  'MEMORY.md'
+] as const;
+
+const VALID_WORKSPACE_MARKDOWN_FILES = [
+  ...VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES,
+  'BOOTSTRAP.md',
+  'BOOT.md'
 ] as const;
 
 @customElement('toolkit-dashboard')
@@ -26,6 +34,10 @@ export class ToolkitDashboard extends LitElement {
   @state() private activeTab: string = 'status';
   @state() private configSection: string = 'general';
   @state() private editingAgentKey: string | null = null;
+  @state() private editingAgentDraft: any = null;
+  @state() private editingAgentTemplateDraft: any = null;
+  @state() private editingAgentInitialDraft: any = null;
+  @state() private editingAgentInitialTemplateDraft: any = null;
   @state() private editingEndpointKey: string | null = null;
   @state() private editingWorkspaceId: string | null = null;
   @state() private topologyLinkSourceAgentId: string | null = null;
@@ -252,7 +264,89 @@ export class ToolkitDashboard extends LitElement {
   get hasUnsavedChanges() {
     if (!this.config || !this.savedConfig) return false;
     return JSON.stringify(this.config) !== JSON.stringify(this.savedConfig) ||
-      JSON.stringify(this.templateFiles) !== JSON.stringify(this.savedTemplateFiles);
+      JSON.stringify(this.templateFiles) !== JSON.stringify(this.savedTemplateFiles) ||
+      this.isEditingAgentDirty();
+  }
+
+  normalizeAgentId(agentId: any) {
+    return typeof agentId === 'string' ? agentId.trim() : '';
+  }
+
+  getAgentIdConflict(agentId: any, excludingKey?: string, sourceConfig: any = this.config) {
+    const normalizedAgentId = this.normalizeAgentId(agentId);
+    if (!normalizedAgentId) {
+      return null;
+    }
+
+    const agents = Array.isArray(sourceConfig?.agents?.list) ? sourceConfig.agents.list : [];
+    for (let idx = 0; idx < agents.length; idx++) {
+      const agent = agents[idx];
+      const key = typeof agent?.key === 'string' && agent.key.trim().length > 0 ? agent.key : `agent:${idx}`;
+      if (excludingKey && key === excludingKey) {
+        continue;
+      }
+      if (this.normalizeAgentId(agent?.id) === normalizedAgentId) {
+        return { key, agent };
+      }
+    }
+
+    return null;
+  }
+
+  getDuplicateAgentIds(sourceConfig: any = this.config) {
+    const counts = new Map<string, number>();
+    const agents = Array.isArray(sourceConfig?.agents?.list) ? sourceConfig.agents.list : [];
+    for (const agent of agents) {
+      const normalizedAgentId = this.normalizeAgentId(agent?.id);
+      if (!normalizedAgentId) {
+        continue;
+      }
+      counts.set(normalizedAgentId, (counts.get(normalizedAgentId) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([agentId]) => agentId);
+  }
+
+  getConfigValidationErrors(sourceConfig: any = this.config) {
+    const errors: string[] = [];
+    const duplicateAgentIds = this.getDuplicateAgentIds(sourceConfig);
+    for (const agentId of duplicateAgentIds) {
+      errors.push(`Agent ID "${agentId}" is used more than once. Agent IDs must be unique.`);
+    }
+    return errors;
+  }
+
+  getEditingAgentValidationError() {
+    if (!this.editingAgentDraft) {
+      return '';
+    }
+
+    const normalizedAgentId = this.normalizeAgentId(this.editingAgentDraft.id);
+    if (!normalizedAgentId) {
+      return 'Agent ID cannot be empty.';
+    }
+
+    const conflict = this.getAgentIdConflict(normalizedAgentId, this.editingAgentKey || undefined);
+    if (conflict) {
+      const conflictLabel = conflict.agent?.name ? `${conflict.agent.name} (${conflict.agent.id})` : conflict.agent?.id;
+      return `Agent ID "${normalizedAgentId}" is already used by ${conflictLabel}. Agent IDs must be unique.`;
+    }
+
+    return '';
+  }
+
+  getValidationErrors() {
+    const errors = this.getConfigValidationErrors();
+    const editingError = this.getEditingAgentValidationError();
+    if (editingError) {
+      errors.unshift(editingError);
+    }
+    return errors;
+  }
+
+  get hasConfigValidationErrors() {
+    return this.getValidationErrors().length > 0;
   }
 
   connectWS() {
@@ -333,7 +427,15 @@ export class ToolkitDashboard extends LitElement {
   }
 
   async saveConfig() {
+    const originalConfig = this.cloneValue(this.config);
+    const originalTemplateFiles = this.cloneTemplateState(this.templateFiles);
     try {
+      const validationErrors = this.getValidationErrors();
+      if (validationErrors.length > 0) {
+        alert(validationErrors[0]);
+        return false;
+      }
+      const currentEditingAgentId = this.applyEditingAgentDraftToState();
       this.syncAllAgentModelSources();
       const persistedConfig = this.buildPersistedConfig(this.config);
       this.ensureAllTemplateFiles(persistedConfig);
@@ -347,24 +449,47 @@ export class ToolkitDashboard extends LitElement {
       });
       if (res.ok) {
         this.config = this.sanitizeConfigModelNames(persistedConfig);
-        this.savedConfig = JSON.parse(JSON.stringify(this.config));
+        this.savedConfig = this.cloneValue(this.config);
+        this.templateFiles = this.cloneTemplateState(this.templateFiles);
+        if (currentEditingAgentId) {
+          const updatedEntry = this.getManagedAgentEntries().find(({ agent }: any) => String(agent?.id || '') === currentEditingAgentId);
+          if (updatedEntry) {
+            this.setEditingAgentDraft(updatedEntry.key, updatedEntry.agent, this.ensureAgentTemplateFiles(updatedEntry.agent));
+          } else {
+            this.clearEditingAgentDraft();
+          }
+        }
         this.savedTemplateFiles = this.cloneTemplateState(this.templateFiles);
         alert('Configuration saved successfully.');
+        return true;
       } else throw new Error('Failed to save');
     } catch (err) {
+      this.config = originalConfig;
+      this.templateFiles = originalTemplateFiles;
       alert('Error saving configuration.');
+      return false;
     }
   }
 
   discardChanges() {
     if (confirm('Discard all unsaved changes?')) {
-      this.config = JSON.parse(JSON.stringify(this.savedConfig));
+      this.config = this.cloneValue(this.savedConfig);
       this.templateFiles = this.cloneTemplateState(this.savedTemplateFiles);
+      if (this.editingAgentKey) {
+        if (this.editingAgentKey.startsWith('draft:')) {
+          this.clearEditingAgentDraft();
+        } else {
+          this.startEditingAgent(this.editingAgentKey);
+        }
+      }
     }
   }
 
   async applyAndRestart() {
-    await this.saveConfig();
+    const saved = await this.saveConfig();
+    if (!saved) {
+      return;
+    }
     this.runCommand('agents');
   }
 
@@ -396,7 +521,7 @@ export class ToolkitDashboard extends LitElement {
               <span>You have unsaved changes!</span>
               <div>
                 <button class="btn btn-secondary" style="background: rgba(0,0,0,0.2); color: #000;" @click=${this.discardChanges}>Discard</button>
-                <button class="btn btn-primary" style="background: #000; color: #ff9800;" @click=${this.saveConfig}>Save</button>
+                <button class="btn btn-primary" style="background: #000; color: #ff9800;" ?disabled=${this.hasConfigValidationErrors} @click=${this.saveConfig}>Save</button>
               </div>
             </div>
           ` : ''}
@@ -743,58 +868,245 @@ export class ToolkitDashboard extends LitElement {
     return this.config.agents.telegramRouting;
   }
 
+  buildTemplateGuidance(lines: string[]) {
+    return lines.join('\n').trimEnd();
+  }
+
   buildDefaultAgentBootstrapFile(agent: any, fileName: string) {
-    const agentName = agent?.name || agent?.id || 'Agent';
-    const agentId = agent?.id || 'agent';
     switch (fileName) {
       case 'AGENTS.md': {
         const lines = this.getRolePolicyLines(agent?.rolePolicyKey);
         return lines.length > 0
           ? lines.join('\n')
-          : `# AGENTS.md - ${agentName}\n\n## Role\n- Add runtime instructions for ${agentName} (${agentId}) here.\n`;
+          : '';
       }
       case 'TOOLS.md':
-        return `# TOOLS.md - ${agentName}\n\nAdd tool-use guidance for ${agentName} here.\n`;
+        return '';
       case 'SOUL.md':
-        return `# SOUL.md - ${agentName}\n\nAdd style, tone, and operating principles for ${agentName} here.\n`;
+        return '';
       case 'IDENTITY.md':
-        return `# IDENTITY.md - ${agentName}\n\nDescribe ${agentName}'s identity, scope, and responsibilities here.\n`;
+        return '';
       case 'USER.md':
-        return `# USER.md - ${agentName}\n\nAdd user-specific reminders or preferences for ${agentName} here.\n`;
+        return '';
+      case 'HEARTBEAT.md':
+        return '';
+      case 'MEMORY.md':
+        return '';
+      default:
+        return '';
+    }
+  }
+
+  buildAgentBootstrapPlaceholder(agent: any, fileName: string) {
+    const agentName = agent?.name || agent?.id || 'Agent';
+    const agentId = agent?.id || 'agent';
+    switch (fileName) {
+      case 'AGENTS.md':
+        return this.buildTemplateGuidance([
+          `# AGENTS.md - ${agentName}`,
+          '',
+          '## Role',
+          `- Add runtime instructions for ${agentName} (${agentId}) here.`
+        ]);
+      case 'TOOLS.md':
+        return this.buildTemplateGuidance([
+          `# TOOLS.md - ${agentName}`,
+          '',
+          `Add tool-use guidance for ${agentName} here.`
+        ]);
+      case 'SOUL.md':
+        return this.buildTemplateGuidance([
+          `# SOUL.md - ${agentName}`,
+          '',
+          `Add style, tone, and operating principles for ${agentName} here.`
+        ]);
+      case 'IDENTITY.md':
+        return this.buildTemplateGuidance([
+          `# IDENTITY.md - ${agentName}`,
+          '',
+          `Describe ${agentName}'s identity, scope, and responsibilities here.`
+        ]);
+      case 'USER.md':
+        return this.buildTemplateGuidance([
+          `# USER.md - ${agentName}`,
+          '',
+          `Add user-specific reminders or preferences for ${agentName} here.`
+        ]);
+      case 'HEARTBEAT.md':
+        return this.buildTemplateGuidance([
+          `# HEARTBEAT.md - ${agentName}`,
+          '',
+          '- Add a tiny checklist for heartbeat runs.',
+          '- Keep it short so recurring checks do not burn unnecessary tokens.'
+        ]);
+      case 'MEMORY.md':
+        return this.buildTemplateGuidance([
+          `# MEMORY.md - ${agentName}`,
+          '',
+          `Add curated long-term memory that should stay available for ${agentName}'s normal sessions.`
+        ]);
       default:
         return '';
     }
   }
 
   buildDefaultWorkspaceAgentsFile(workspace: any) {
-    const workspaceName = workspace?.name || workspace?.id || 'Workspace';
     if (workspace?.mode === 'shared') {
       const lines = this.getRolePolicyLines(workspace?.rolePolicyKey || 'sharedWorkspace');
       if (lines.length > 0) {
         return lines.join('\n');
       }
-      return `# AGENTS.md - ${workspaceName}\n\n## Workspace Role\n- This is the shared collaboration workspace.\n- Keep collaborative repos, durable notes, and handoff artifacts here.\n- Agent-specific bootstrap files are injected separately from each agent bootstrap folder.\n`;
+      return '';
     }
 
-    const workspaceAgents = Array.isArray(workspace?.agents) ? workspace.agents.join(', ') : '';
-    return `# AGENTS.md - ${workspaceName}\n\n## Workspace Role\n- This is a private workspace for ${workspaceAgents || 'one agent'}.\n- Keep drafts, scratch work, and agent-specific notes here.\n- Agent-specific bootstrap files are injected separately from each agent bootstrap folder.\n`;
+    return '';
   }
 
   buildDefaultWorkspaceBootstrapFile(workspace: any, fileName: string) {
-    const workspaceName = workspace?.name || workspace?.id || 'Workspace';
     switch (fileName) {
       case 'AGENTS.md':
         return this.buildDefaultWorkspaceAgentsFile(workspace);
       case 'TOOLS.md':
-        return `# TOOLS.md - ${workspaceName}\n\nAdd workspace-level tool guidance for ${workspaceName} here.\n`;
+        return '';
       case 'SOUL.md':
-        return `# SOUL.md - ${workspaceName}\n\nAdd shared tone, culture, and collaboration principles for ${workspaceName} here.\n`;
+        return '';
       case 'IDENTITY.md':
-        return `# IDENTITY.md - ${workspaceName}\n\nDescribe what this workspace is for and how it should be used.\n`;
+        return '';
       case 'USER.md':
-        return `# USER.md - ${workspaceName}\n\nAdd workspace-specific user reminders, conventions, or handoff notes here.\n`;
+        return '';
+      case 'HEARTBEAT.md':
+        return '';
+      case 'MEMORY.md':
+        return '';
+      case 'BOOTSTRAP.md':
+        return '';
+      case 'BOOT.md':
+        return '';
       default:
         return '';
+    }
+  }
+
+  buildWorkspaceBootstrapPlaceholder(workspace: any, fileName: string) {
+    const workspaceName = workspace?.name || workspace?.id || 'Workspace';
+    const workspaceAgents = Array.isArray(workspace?.agents) ? workspace.agents.join(', ') : '';
+    switch (fileName) {
+      case 'AGENTS.md':
+        if (workspace?.mode === 'shared') {
+          return this.buildTemplateGuidance([
+            `# AGENTS.md - ${workspaceName}`,
+            '',
+            '## Workspace Role',
+            '- This is the shared collaboration workspace.',
+            '- Keep collaborative repos, durable notes, and handoff artifacts here.',
+            '- Agent-specific bootstrap files are injected separately from each agent bootstrap folder.'
+          ]);
+        }
+        return this.buildTemplateGuidance([
+          `# AGENTS.md - ${workspaceName}`,
+          '',
+          '## Workspace Role',
+          `- This is a private workspace for ${workspaceAgents || 'one agent'}.`,
+          '- Keep drafts, scratch work, and agent-specific notes here.',
+          '- Agent-specific bootstrap files are injected separately from each agent bootstrap folder.'
+        ]);
+      case 'TOOLS.md':
+        return this.buildTemplateGuidance([
+          `# TOOLS.md - ${workspaceName}`,
+          '',
+          `Add workspace-level tool guidance for ${workspaceName} here.`
+        ]);
+      case 'SOUL.md':
+        return this.buildTemplateGuidance([
+          `# SOUL.md - ${workspaceName}`,
+          '',
+          `Add shared tone, culture, and collaboration principles for ${workspaceName} here.`
+        ]);
+      case 'IDENTITY.md':
+        return this.buildTemplateGuidance([
+          `# IDENTITY.md - ${workspaceName}`,
+          '',
+          'Describe what this workspace is for and how it should be used.'
+        ]);
+      case 'USER.md':
+        return this.buildTemplateGuidance([
+          `# USER.md - ${workspaceName}`,
+          '',
+          'Add workspace-specific user reminders, conventions, or handoff notes here.'
+        ]);
+      case 'HEARTBEAT.md':
+        return this.buildTemplateGuidance([
+          `# HEARTBEAT.md - ${workspaceName}`,
+          '',
+          '- Add a tiny recurring checklist for heartbeat runs in this workspace.',
+          '- Keep it short and focused.'
+        ]);
+      case 'MEMORY.md':
+        return this.buildTemplateGuidance([
+          `# MEMORY.md - ${workspaceName}`,
+          '',
+          'Add curated long-term memory that should be available in normal sessions for this workspace.'
+        ]);
+      case 'BOOTSTRAP.md':
+        return this.buildTemplateGuidance([
+          `# BOOTSTRAP.md - ${workspaceName}`,
+          '',
+          '## First Run Ritual',
+          '- Use this only for a brand-new workspace.',
+          '- Capture one-time setup steps, identity questions, or initial conventions here.',
+          '- Delete it from the live workspace after the ritual is complete.'
+        ]);
+      case 'BOOT.md':
+        return this.buildTemplateGuidance([
+          `# BOOT.md - ${workspaceName}`,
+          '',
+          '## Startup Checklist',
+          '- Add short, explicit instructions that should run when the gateway starts.',
+          '- Keep it brief.',
+          '- If a task needs to send a message, the boot-md hook should send it and then exit silently.'
+        ]);
+      default:
+        return '';
+    }
+  }
+
+  getMarkdownFileHelpText(fileName: string, scope: 'agent' | 'workspace') {
+    switch (fileName) {
+      case 'AGENTS.md':
+        return scope === 'agent'
+          ? 'Always-loaded operating instructions for this agent overlay.'
+          : 'Always-loaded operating instructions for this workspace.';
+      case 'TOOLS.md':
+        return 'Guidance about tool use and local conventions. This does not grant capabilities by itself.';
+      case 'SOUL.md':
+        return 'Persona, tone, and operating style loaded into normal sessions.';
+      case 'IDENTITY.md':
+        return 'Identity, role, and self-description for the agent or workspace.';
+      case 'USER.md':
+        return 'User preferences, reminders, and relationship context.';
+      case 'HEARTBEAT.md':
+        return 'Optional tiny checklist for heartbeat runs. Keep it short to avoid token burn.';
+      case 'MEMORY.md':
+        return 'Optional curated long-term memory for normal sessions.';
+      case 'BOOTSTRAP.md':
+        return 'One-time first-run ritual for a brand-new workspace. The toolkit seeds it once and does not recreate it after the live file is deleted.';
+      case 'BOOT.md':
+        return 'Optional startup checklist run by the boot-md hook when the gateway starts.';
+      default:
+        return '';
+    }
+  }
+
+  getMarkdownEditorRows(fileName: string) {
+    switch (fileName) {
+      case 'AGENTS.md':
+        return 10;
+      case 'BOOTSTRAP.md':
+      case 'BOOT.md':
+      case 'MEMORY.md':
+        return 8;
+      default:
+        return 6;
     }
   }
 
@@ -809,7 +1121,7 @@ export class ToolkitDashboard extends LitElement {
     if (!this.templateFiles.agents[agentId] || typeof this.templateFiles.agents[agentId] !== 'object') {
       this.templateFiles.agents[agentId] = {};
     }
-    for (const fileName of VALID_BOOTSTRAP_MARKDOWN_FILES) {
+    for (const fileName of VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) {
       if (typeof this.templateFiles.agents[agentId][fileName] !== 'string') {
         this.templateFiles.agents[agentId][fileName] = this.buildDefaultAgentBootstrapFile(agent, fileName);
       }
@@ -828,7 +1140,7 @@ export class ToolkitDashboard extends LitElement {
     if (!this.templateFiles.workspaces[workspaceId] || typeof this.templateFiles.workspaces[workspaceId] !== 'object') {
       this.templateFiles.workspaces[workspaceId] = {};
     }
-    for (const fileName of VALID_BOOTSTRAP_MARKDOWN_FILES) {
+    for (const fileName of VALID_WORKSPACE_MARKDOWN_FILES) {
       if (typeof this.templateFiles.workspaces[workspaceId][fileName] !== 'string') {
         this.templateFiles.workspaces[workspaceId][fileName] = this.buildDefaultWorkspaceBootstrapFile(workspace, fileName);
       }
@@ -843,6 +1155,137 @@ export class ToolkitDashboard extends LitElement {
     for (const workspace of Array.isArray(sourceConfig?.workspaces) ? sourceConfig.workspaces : []) {
       this.ensureWorkspaceTemplateFiles(workspace);
     }
+  }
+
+  cloneValue<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  buildAgentTemplateDraft(agent: any, existingTemplates?: any) {
+    const templates = existingTemplates && typeof existingTemplates === 'object'
+      ? this.cloneValue(existingTemplates)
+      : {};
+    for (const fileName of VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) {
+      if (typeof templates[fileName] !== 'string') {
+        templates[fileName] = this.buildDefaultAgentBootstrapFile(agent, fileName);
+      }
+    }
+    return templates;
+  }
+
+  ensureEditingAgentTemplateFiles() {
+    if (!this.editingAgentDraft) {
+      return {};
+    }
+    if (!this.editingAgentTemplateDraft || typeof this.editingAgentTemplateDraft !== 'object') {
+      this.editingAgentTemplateDraft = this.buildAgentTemplateDraft(this.editingAgentDraft);
+    }
+    for (const fileName of VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) {
+      if (typeof this.editingAgentTemplateDraft[fileName] !== 'string') {
+        this.editingAgentTemplateDraft[fileName] = this.buildDefaultAgentBootstrapFile(this.editingAgentDraft, fileName);
+      }
+    }
+    return this.editingAgentTemplateDraft;
+  }
+
+  setEditingAgentDraft(key: string, agent: any, templateFiles?: any) {
+    this.editingAgentKey = key;
+    this.editingAgentDraft = this.cloneValue(agent);
+    this.editingAgentTemplateDraft = this.buildAgentTemplateDraft(this.editingAgentDraft, templateFiles);
+    this.editingAgentInitialDraft = this.cloneValue(this.editingAgentDraft);
+    this.editingAgentInitialTemplateDraft = this.cloneValue(this.editingAgentTemplateDraft);
+  }
+
+  clearEditingAgentDraft() {
+    this.editingAgentKey = null;
+    this.editingAgentDraft = null;
+    this.editingAgentTemplateDraft = null;
+    this.editingAgentInitialDraft = null;
+    this.editingAgentInitialTemplateDraft = null;
+  }
+
+  startEditingAgent(key: string) {
+    const entry = this.getManagedAgentEntries().find((candidate: any) => candidate.key === key);
+    if (!entry?.agent) {
+      return;
+    }
+    this.setEditingAgentDraft(key, entry.agent, this.ensureAgentTemplateFiles(entry.agent));
+  }
+
+  startNewAgentDraft() {
+    const draftKey = `draft:agent:${Date.now()}`;
+    const newAgent = {
+      enabled: true,
+      id: 'new-agent-' + Date.now(),
+      name: 'New Agent',
+      rolePolicyKey: 'codingDelegate',
+      sandboxMode: 'off',
+      modelRef: 'ollama/qwen2.5-coder:3b',
+      candidateModelRefs: [],
+      subagents: {
+        enabled: true,
+        requireAgentId: true,
+        allowAgents: []
+      }
+    };
+    this.setEditingAgentDraft(draftKey, newAgent);
+  }
+
+  isEditingAgentDirty() {
+    if (!this.editingAgentDraft) {
+      return false;
+    }
+    return JSON.stringify(this.editingAgentDraft) !== JSON.stringify(this.editingAgentInitialDraft) ||
+      JSON.stringify(this.ensureEditingAgentTemplateFiles()) !== JSON.stringify(this.editingAgentInitialTemplateDraft);
+  }
+
+  closeEditingAgentEditor() {
+    if (this.isEditingAgentDirty() && !confirm('Discard unsaved changes for this agent?')) {
+      return;
+    }
+    this.clearEditingAgentDraft();
+  }
+
+  applyEditingAgentDraftToState() {
+    if (!this.editingAgentDraft || !this.editingAgentKey) {
+      return '';
+    }
+
+    if (!this.config.agents || typeof this.config.agents !== 'object') {
+      this.config.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
+    }
+    if (!Array.isArray(this.config.agents.list)) {
+      this.config.agents.list = [];
+    }
+
+    const draftAgent = this.cloneValue(this.editingAgentDraft);
+    const draftTemplates = this.cloneValue(this.ensureEditingAgentTemplateFiles());
+    const existingIndex = this.config.agents.list.findIndex((candidate: any, idx: number) => {
+      const candidateKey = typeof candidate?.key === 'string' && candidate.key.trim().length > 0 ? candidate.key : `agent:${idx}`;
+      return candidateKey === this.editingAgentKey;
+    });
+
+    if (existingIndex >= 0) {
+      const existingAgent = this.config.agents.list[existingIndex];
+      const previousAgentId = this.normalizeAgentId(existingAgent?.id);
+      const nextAgentId = this.normalizeAgentId(draftAgent.id);
+      if (previousAgentId && nextAgentId && previousAgentId !== nextAgentId) {
+        this.renameAgentIdEverywhere(previousAgentId, nextAgentId);
+      }
+      if (typeof existingAgent?.key === 'string' && existingAgent.key.trim().length > 0) {
+        draftAgent.key = existingAgent.key;
+      }
+      this.config.agents.list[existingIndex] = draftAgent;
+    } else {
+      delete draftAgent.key;
+      this.config.agents.list.push(draftAgent);
+    }
+
+    if (!this.templateFiles?.agents || typeof this.templateFiles.agents !== 'object') {
+      this.templateFiles = this.cloneTemplateState(this.templateFiles);
+    }
+    this.templateFiles.agents[this.normalizeAgentId(draftAgent.id)] = draftTemplates;
+    return this.normalizeAgentId(draftAgent.id);
   }
 
   renameAgentIdEverywhere(oldId: string, newId: string) {
@@ -1611,10 +2054,16 @@ export class ToolkitDashboard extends LitElement {
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
         </div>
         <div style="display: flex; gap: 10px;">
-           <button class="btn btn-ghost" @click=${this.saveConfig}>Save Only</button>
-           <button class="btn btn-primary" @click=${this.applyAndRestart}>Save & Apply (Restart Agents)</button>
+           <button class="btn btn-ghost" ?disabled=${this.hasConfigValidationErrors} @click=${this.saveConfig}>Save Only</button>
+           <button class="btn btn-primary" ?disabled=${this.hasConfigValidationErrors} @click=${this.applyAndRestart}>Save & Apply (Restart Agents)</button>
         </div>
       </header>
+
+      ${this.hasConfigValidationErrors ? html`
+        <div class="card" style="border-color: #ff9800; margin-bottom: 20px;">
+          <div class="help-text" style="color: #ff9800; margin: 0;">${this.getValidationErrors()[0]}</div>
+        </div>
+      ` : ''}
 
       ${this.renderConfigSection()}
     `;
@@ -2187,7 +2636,12 @@ export class ToolkitDashboard extends LitElement {
 
   buildPersistedConfig(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
-    const migrated = clone.multiAgent ? this.buildAgentsSchemaFromLegacy(clone) : {
+    const hasFirstClassAgentSchema = !!(clone.agents && typeof clone.agents === 'object');
+    const hasFirstClassWorkspaceSchema = Array.isArray(clone.workspaces);
+    const migrated = (hasFirstClassAgentSchema || hasFirstClassWorkspaceSchema) ? {
+      agents: clone.agents,
+      workspaces: clone.workspaces
+    } : clone.multiAgent ? this.buildAgentsSchemaFromLegacy(clone) : {
       agents: clone.agents,
       workspaces: clone.workspaces
     };
@@ -2749,7 +3203,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   openTopologyAgentEditor(agentKey: string) {
-    this.editingAgentKey = agentKey;
+    this.startEditingAgent(agentKey);
     this.activeTab = 'config';
     this.configSection = 'agents';
   }
@@ -3223,7 +3677,7 @@ export class ToolkitDashboard extends LitElement {
               <span class="item-sub">ID: ${agent.id} | Home Base: ${this.getWorkspaceDisplayLabel(this.getWorkspaceForAgentId(agent.id))} | Sandbox: ${this.getAgentEffectiveSandboxMode(agent)} | Model: ${agent.modelRef || '(unset)'}</span>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary" @click=${() => this.editingAgentKey = agent.key}>Configure</button>
+              <button class="btn btn-secondary" @click=${() => this.startEditingAgent(agent.key)}>Configure</button>
               ${this.canRemoveAgent(agent.key, agent) ? html`
                 <button class="btn btn-danger" @click=${() => this.removeAgentByKey(agent.key)}>Remove</button>
               ` : ''}
@@ -3235,21 +3689,19 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getEditingAgent() {
-      if (!this.editingAgentKey) return null;
-      const entry = this.getManagedAgentEntries().find((candidate: any) => candidate.key === this.editingAgentKey);
-      return entry?.agent || null;
+      return this.editingAgentDraft;
   }
 
   renderAgentEditor(key: string) {
     const agent = this.getEditingAgent();
     if (!agent) return html`Agent not found`;
     const isMain = this.isMainAgentEntry(key, agent);
-    const previousAgentId = typeof agent.id === 'string' ? agent.id : '';
 
     const endpoints = this.getSortedConfigEndpoints();
     const roles = Object.keys(this.getRolePoliciesRoot());
     const subagents = this.ensureSubagentsConfig(agent);
-    const agentTemplateFiles = this.ensureAgentTemplateFiles(agent);
+    const agentTemplateFiles = this.ensureEditingAgentTemplateFiles();
+    const agentIdValidationError = this.getEditingAgentValidationError();
     const primaryWorkspace = this.getWorkspaceForAgentId(agent.id);
     const accessibleSharedWorkspaces = primaryWorkspace?.mode === 'private'
       ? this.getWorkspaceSharedAccessIds(primaryWorkspace).map((workspaceId: string) => this.getWorkspaceById(workspaceId)).filter(Boolean)
@@ -3267,7 +3719,7 @@ export class ToolkitDashboard extends LitElement {
         <div class="card">
             <div class="card-header">
                 <h3>Edit Agent: ${agent.name}</h3>
-                <button class="btn btn-ghost" @click=${() => this.editingAgentKey = null}>Back to List</button>
+                <button class="btn btn-ghost" @click=${() => this.closeEditingAgentEditor()}>Back to List</button>
             </div>
 
             <div class="card" style="margin-bottom: 20px; border-color: ${agent.enabled ? '#00bcd4' : '#f44336'};">
@@ -3289,11 +3741,10 @@ export class ToolkitDashboard extends LitElement {
                 <div class="form-group">
                     <label>Agent ID</label>
                     <input type="text" .value=${agent.id} ?disabled=${isMain} @input=${(e: any) => {
-                        const nextId = e.target.value;
-                        this.renameAgentIdEverywhere(previousAgentId, nextId);
-                        agent.id = nextId;
+                        agent.id = e.target.value;
                         this.requestUpdate();
                     }}>
+                    ${agentIdValidationError ? html`<div class="help-text" style="color: #f44336;">${agentIdValidationError}</div>` : ''}
                 </div>
             </div>
 
@@ -3456,12 +3907,13 @@ export class ToolkitDashboard extends LitElement {
 
             <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
                 <div class="card-header"><h3>Agent Bootstrap Markdown</h3></div>
-                <p class="help-text">These files are stored in <code>openclaw-toolkit\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> and copied into <code>.openclaw\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> when the toolkit applies agent configuration.</p>
-                ${VALID_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => html`
+                <p class="help-text">These files are stored in <code>openclaw-toolkit\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> and copied into <code>.openclaw\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> as agent-specific bootstrap overlays. Workspace-only lifecycle files such as <code>BOOT.md</code> and one-time <code>BOOTSTRAP.md</code> live on the workspace page instead.</p>
+                ${VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => html`
                     <div class="form-group">
                         <label>${fileName}</label>
-                        <textarea rows=${fileName === 'AGENTS.md' ? 10 : 6} .value=${agentTemplateFiles[fileName] || ''} @input=${(e: any) => {
-                            this.ensureAgentTemplateFiles(agent)[fileName] = e.target.value;
+                        <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'agent')}</div>
+                        <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${agentTemplateFiles[fileName] || ''} placeholder=${this.buildAgentBootstrapPlaceholder(agent, fileName)} @input=${(e: any) => {
+                            agentTemplateFiles[fileName] = e.target.value;
                             this.requestUpdate();
                         }}></textarea>
                     </div>
@@ -3866,10 +4318,12 @@ export class ToolkitDashboard extends LitElement {
 
         <div class="card" style="margin-top: 20px;">
           <div class="card-header"><h3>Workspace Markdown</h3></div>
-          ${Object.entries(this.ensureWorkspaceTemplateFiles(workspace)).map(([fileName, content]: [string, any]) => html`
+          <p class="help-text">These files are stored in <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code> and synced into the live workspace home base. <code>BOOT.md</code> is a startup checklist. <code>BOOTSTRAP.md</code> is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.</p>
+          ${VALID_WORKSPACE_MARKDOWN_FILES.map((fileName) => html`
             <div class="form-group" style="margin-bottom: 20px;">
               <label>${fileName}</label>
-              <textarea rows="8" .value=${content || ''} @input=${(e: any) => {
+              <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'workspace')}</div>
+              <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${this.ensureWorkspaceTemplateFiles(workspace)[fileName] || ''} placeholder=${this.buildWorkspaceBootstrapPlaceholder(workspace, fileName)} @input=${(e: any) => {
                 this.templateFiles.workspaces[workspace.id][fileName] = e.target.value;
                 this.requestUpdate();
               }}></textarea>
@@ -3882,27 +4336,7 @@ export class ToolkitDashboard extends LitElement {
 
   // Helpers
   addAgent() {
-      if (!this.config.agents || typeof this.config.agents !== 'object') {
-          this.config.agents = { rolePolicies: {}, telegramRouting: {}, list: [] };
-      }
-      if (!Array.isArray(this.config.agents.list)) this.config.agents.list = [];
-      const newAgent = {
-          enabled: true,
-          id: 'new-agent-' + Date.now(),
-          name: 'New Agent',
-          rolePolicyKey: 'codingDelegate',
-          sandboxMode: 'off',
-          modelRef: 'ollama/qwen2.5-coder:3b',
-          candidateModelRefs: [],
-          subagents: {
-              enabled: true,
-              requireAgentId: true,
-              allowAgents: []
-          }
-      };
-      this.config.agents.list.push(newAgent);
-      this.ensureAgentTemplateFiles(newAgent);
-      this.editingAgentKey = `agent:${this.config.agents.list.length - 1}`;
+      this.startNewAgentDraft();
   }
 
   addExtraAgent() {

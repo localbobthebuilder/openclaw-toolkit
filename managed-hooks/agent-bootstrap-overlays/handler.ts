@@ -8,6 +8,8 @@ const VALID_BOOTSTRAP_FILES = [
   "SOUL.md",
   "IDENTITY.md",
   "USER.md",
+  "HEARTBEAT.md",
+  "MEMORY.md",
 ] as const;
 
 function isAgentBootstrapEvent(

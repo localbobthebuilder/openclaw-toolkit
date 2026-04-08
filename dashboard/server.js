@@ -14,12 +14,19 @@ const app = express();
 const port = 18791;
 const toolkitDir = path.resolve(__dirname, '..');
 const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
-const validBootstrapMarkdownFiles = [
+const validAgentBootstrapMarkdownFiles = [
   'AGENTS.md',
   'TOOLS.md',
   'SOUL.md',
   'IDENTITY.md',
-  'USER.md'
+  'USER.md',
+  'HEARTBEAT.md',
+  'MEMORY.md'
+];
+const validWorkspaceMarkdownFiles = [
+  ...validAgentBootstrapMarkdownFiles,
+  'BOOTSTRAP.md',
+  'BOOT.md'
 ];
 const defaultWhisperModels = [
   'tiny',
@@ -106,24 +113,24 @@ function isSafeIdSegment(value) {
   return typeof value === 'string' && value.trim().length > 0 && !value.includes('..') && !path.isAbsolute(value) && !/[\\/]/.test(value);
 }
 
-function normalizeTemplateFileName(fileName) {
+function normalizeTemplateFileName(fileName, validFileNames) {
   if (typeof fileName !== 'string') {
     return '';
   }
   const trimmed = fileName.trim();
-  if (!validBootstrapMarkdownFiles.includes(trimmed)) {
+  if (!validFileNames.includes(trimmed)) {
     return '';
   }
   return trimmed;
 }
 
-function loadTemplateFileMap(baseDir) {
+function loadTemplateFileMap(baseDir, validFileNames) {
   const files = {};
   if (!fs.existsSync(baseDir)) {
     return files;
   }
 
-  for (const fileName of validBootstrapMarkdownFiles) {
+  for (const fileName of validFileNames) {
     const filePath = path.join(baseDir, fileName);
     if (!fs.existsSync(filePath)) {
       continue;
@@ -134,12 +141,12 @@ function loadTemplateFileMap(baseDir) {
   return files;
 }
 
-function writeTemplateFileMap(baseDir, fileMap) {
+function writeTemplateFileMap(baseDir, fileMap, validFileNames) {
   fs.mkdirSync(baseDir, { recursive: true });
   const entries = fileMap && typeof fileMap === 'object' ? fileMap : {};
 
-  for (const fileName of validBootstrapMarkdownFiles) {
-    const normalizedName = normalizeTemplateFileName(fileName);
+  for (const fileName of validFileNames) {
+    const normalizedName = normalizeTemplateFileName(fileName, validFileNames);
     const rawContent = normalizedName ? entries[normalizedName] : '';
     const content = typeof rawContent === 'string' ? rawContent.replace(/\r\n/g, '\n').trimEnd() : '';
     const filePath = path.join(baseDir, fileName);
@@ -161,14 +168,14 @@ function loadToolkitTemplates(config) {
     if (!isSafeIdSegment(agent?.id)) {
       continue;
     }
-    templates.agents[agent.id] = loadTemplateFileMap(path.join(toolkitDir, 'agents', agent.id, 'bootstrap'));
+    templates.agents[agent.id] = loadTemplateFileMap(path.join(toolkitDir, 'agents', agent.id, 'bootstrap'), validAgentBootstrapMarkdownFiles);
   }
 
   for (const workspace of workspaces) {
     if (!isSafeIdSegment(workspace?.id)) {
       continue;
     }
-    templates.workspaces[workspace.id] = loadTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'));
+    templates.workspaces[workspace.id] = loadTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), validWorkspaceMarkdownFiles);
   }
 
   return templates;
@@ -184,14 +191,14 @@ function saveToolkitTemplates(config, templates) {
     if (!isSafeIdSegment(agent?.id)) {
       continue;
     }
-    writeTemplateFileMap(path.join(toolkitDir, 'agents', agent.id, 'bootstrap'), agentTemplates[agent.id]);
+    writeTemplateFileMap(path.join(toolkitDir, 'agents', agent.id, 'bootstrap'), agentTemplates[agent.id], validAgentBootstrapMarkdownFiles);
   }
 
   for (const workspace of workspaces) {
     if (!isSafeIdSegment(workspace?.id)) {
       continue;
     }
-    writeTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), workspaceTemplates[workspace.id]);
+    writeTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), workspaceTemplates[workspace.id], validWorkspaceMarkdownFiles);
   }
 }
 

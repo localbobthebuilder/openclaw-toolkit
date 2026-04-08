@@ -409,7 +409,9 @@ function Remove-ManagedTextFileIfPresent {
     Remove-Item -LiteralPath $Path -Force
 }
 
-$script:ManagedBootstrapMarkdownFiles = @("AGENTS.md", "TOOLS.md", "SOUL.md", "IDENTITY.md", "USER.md")
+$script:ManagedAgentBootstrapOverlayFiles = @("AGENTS.md", "TOOLS.md", "SOUL.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "MEMORY.md")
+$script:ManagedWorkspaceMarkdownFiles = @("AGENTS.md", "TOOLS.md", "SOUL.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "MEMORY.md", "BOOT.md")
+$script:ManagedWorkspaceSeedOnceMarkdownFiles = @("BOOTSTRAP.md")
 
 function Get-ToolkitAgentBootstrapTemplateDir {
     param([Parameter(Mandatory = $true)][string]$AgentId)
@@ -426,7 +428,7 @@ function Get-ToolkitWorkspaceMarkdownTemplateDir {
 function Get-ManagedMarkdownTemplateMap {
     param(
         [Parameter(Mandatory = $true)][string]$SourceDir,
-        [string[]]$FileNames = $script:ManagedBootstrapMarkdownFiles
+        [string[]]$FileNames = $script:ManagedAgentBootstrapOverlayFiles
     )
 
     $templateMap = [ordered]@{}
@@ -450,7 +452,7 @@ function Ensure-ManagedMarkdownFiles {
     param(
         [Parameter(Mandatory = $true)][string]$TargetDir,
         $TemplateMap,
-        [string[]]$AllowedFileNames = $script:ManagedBootstrapMarkdownFiles
+        [string[]]$AllowedFileNames = $script:ManagedAgentBootstrapOverlayFiles
     )
 
     $writtenPaths = New-Object System.Collections.Generic.List[string]
@@ -474,6 +476,150 @@ function Ensure-ManagedMarkdownFiles {
         }
         else {
             Remove-ManagedTextFileIfPresent -Path $targetPath
+        }
+    }
+
+    return @($writtenPaths.ToArray())
+}
+
+function Get-WorkspaceBootstrapStatePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    return (Join-Path (Join-Path $TargetDir ".openclaw") "workspace-state.json")
+}
+
+function Get-WorkspaceBootstrapState {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    $state = [pscustomobject][ordered]@{
+        version           = 1
+        bootstrapSeededAt = $null
+        setupCompletedAt  = $null
+    }
+
+    $statePath = Get-WorkspaceBootstrapStatePath -TargetDir $TargetDir
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        return $state
+    }
+
+    try {
+        $rawState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        if ($null -ne $rawState) {
+            if ($rawState.PSObject.Properties.Name -contains "version" -and $rawState.version) {
+                $state.version = [int]$rawState.version
+            }
+            if ($rawState.PSObject.Properties.Name -contains "bootstrapSeededAt" -and $rawState.bootstrapSeededAt) {
+                $state.bootstrapSeededAt = [string]$rawState.bootstrapSeededAt
+            }
+            if ($rawState.PSObject.Properties.Name -contains "setupCompletedAt" -and $rawState.setupCompletedAt) {
+                $state.setupCompletedAt = [string]$rawState.setupCompletedAt
+            }
+        }
+    }
+    catch {
+    }
+
+    return $state
+}
+
+function Save-WorkspaceBootstrapState {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir,
+        [Parameter(Mandatory = $true)]$State
+    )
+
+    $statePath = Get-WorkspaceBootstrapStatePath -TargetDir $TargetDir
+    $stateDir = Split-Path -Parent $statePath
+    if (-not (Test-Path -LiteralPath $stateDir)) {
+        New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    }
+
+    Set-Content -LiteralPath $statePath -Value ($State | ConvertTo-Json -Depth 10) -Encoding UTF8
+}
+
+function Update-WorkspaceBootstrapStateFromLiveFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    $state = Get-WorkspaceBootstrapState -TargetDir $TargetDir
+    $bootstrapPath = Join-Path $TargetDir "BOOTSTRAP.md"
+    $stateChanged = $false
+    $nowIso = (Get-Date).ToString("o")
+
+    if ((Test-Path -LiteralPath $bootstrapPath) -and [string]::IsNullOrWhiteSpace([string]$state.bootstrapSeededAt)) {
+        $state.bootstrapSeededAt = $nowIso
+        $stateChanged = $true
+    }
+
+    if (-not (Test-Path -LiteralPath $bootstrapPath) -and
+        -not [string]::IsNullOrWhiteSpace([string]$state.bootstrapSeededAt) -and
+        [string]::IsNullOrWhiteSpace([string]$state.setupCompletedAt)) {
+        $state.setupCompletedAt = $nowIso
+        $stateChanged = $true
+    }
+
+    if ($stateChanged) {
+        Save-WorkspaceBootstrapState -TargetDir $TargetDir -State $state
+    }
+}
+
+function Test-WorkspaceCanSeedOneTimeMarkdown {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    $state = Get-WorkspaceBootstrapState -TargetDir $TargetDir
+    if (-not [string]::IsNullOrWhiteSpace([string]$state.bootstrapSeededAt) -or
+        -not [string]::IsNullOrWhiteSpace([string]$state.setupCompletedAt)) {
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $TargetDir)) {
+        return $true
+    }
+
+    $meaningfulEntries = @(
+        Get-ChildItem -LiteralPath $TargetDir -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne ".openclaw" }
+    )
+    return @($meaningfulEntries).Count -eq 0
+}
+
+function Ensure-ManagedSeedOnceMarkdownFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir,
+        $TemplateMap,
+        [string[]]$AllowedFileNames = $script:ManagedWorkspaceSeedOnceMarkdownFiles
+    )
+
+    $writtenPaths = New-Object System.Collections.Generic.List[string]
+    $targetDirCanSeed = Test-WorkspaceCanSeedOneTimeMarkdown -TargetDir $TargetDir
+
+    foreach ($fileName in @($AllowedFileNames)) {
+        if ($null -eq $TemplateMap -or -not $TemplateMap.Contains($fileName)) {
+            continue
+        }
+
+        $contentLines = @($TemplateMap[$fileName])
+        $hasMeaningfulContent = @($contentLines | Where-Object { $null -ne $_ }).Count -gt 0 -and -not [string]::IsNullOrWhiteSpace((@($contentLines) -join ""))
+        if (-not $hasMeaningfulContent) {
+            continue
+        }
+
+        $targetPath = Join-Path $TargetDir $fileName
+        if ((-not (Test-Path -LiteralPath $targetPath)) -and -not $targetDirCanSeed) {
+            continue
+        }
+
+        $writtenPath = Ensure-ManagedTextFile -Path $targetPath -ContentLines @($contentLines)
+        Update-WorkspaceBootstrapStateFromLiveFiles -TargetDir $TargetDir
+        if ($writtenPath) {
+            $writtenPaths.Add($writtenPath)
         }
     }
 
@@ -530,7 +676,7 @@ function Get-AgentBootstrapTemplateMap {
         [string[]]$FallbackAgentsLines
     )
 
-    $templateMap = Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitAgentBootstrapTemplateDir -AgentId $AgentId)
+    $templateMap = Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitAgentBootstrapTemplateDir -AgentId $AgentId) -FileNames $script:ManagedAgentBootstrapOverlayFiles
     if ((-not $templateMap.Contains("AGENTS.md")) -and @($FallbackAgentsLines).Count -gt 0) {
         $templateMap["AGENTS.md"] = @($FallbackAgentsLines)
     }
@@ -549,7 +695,7 @@ function Get-WorkspaceMarkdownTemplateMap {
 
     $workspaceId = if ($Workspace.PSObject.Properties.Name -contains "id" -and $Workspace.id) { [string]$Workspace.id } else { $null }
     $templateMap = if ($workspaceId) {
-        Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitWorkspaceMarkdownTemplateDir -WorkspaceId $workspaceId)
+        Get-ManagedMarkdownTemplateMap -SourceDir (Get-ToolkitWorkspaceMarkdownTemplateDir -WorkspaceId $workspaceId) -FileNames @($script:ManagedWorkspaceMarkdownFiles + $script:ManagedWorkspaceSeedOnceMarkdownFiles)
     }
     else {
         [ordered]@{}
@@ -1986,7 +2132,7 @@ foreach ($managedExtraAgentId in @($currentManagedExtraAgentIds)) {
 $sharedWorkspacePath = Get-SharedWorkspacePath -Config $config -MultiConfig $multi
 foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
     $staleOverlayDir = Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName
-    foreach ($fileName in @($script:ManagedBootstrapMarkdownFiles)) {
+    foreach ($fileName in @($script:ManagedAgentBootstrapOverlayFiles)) {
         Remove-ManagedTextFileIfPresent -Path (Join-Path $staleOverlayDir $fileName)
     }
 }
@@ -2008,7 +2154,7 @@ foreach ($desiredAgent in @($desiredAgents)) {
     $agentSharedWorkspacePaths = @(Get-AgentAccessibleSharedWorkspacePaths -Config $config -AgentConfig $agentConfig)
     $agentPolicyLines = Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $policyKey -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePath $sharedWorkspacePath -SharedWorkspacePaths $agentSharedWorkspacePaths -IncludeSharedWorkspaceAccess:(Test-AgentCanAccessSharedWorkspace -Config $config -MultiConfig $multi -AgentConfig $agentConfig)
     $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentId ([string]$desiredAgent.id) -FallbackAgentsLines $agentPolicyLines
-    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap)
+    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap -AllowedFileNames $script:ManagedAgentBootstrapOverlayFiles)
 }
 
 foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
@@ -2025,7 +2171,7 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
             $staleWorkspacePath = [string]$staleExistingAgent.workspace
             if ([string]::IsNullOrWhiteSpace($sharedWorkspacePath) -or $staleWorkspacePath -ne $sharedWorkspacePath) {
                 $staleWorkspaceDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $staleWorkspacePath
-                foreach ($fileName in @($script:ManagedBootstrapMarkdownFiles)) {
+                foreach ($fileName in @($script:ManagedWorkspaceMarkdownFiles + $script:ManagedWorkspaceSeedOnceMarkdownFiles)) {
                     Remove-ManagedTextFileIfPresent -Path (Join-Path $staleWorkspaceDir $fileName)
                 }
             }
@@ -2055,7 +2201,9 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
             "sharedWorkspace"
         }
         $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -FallbackAgentsLines (Get-EffectiveRolePolicyLines -RolePolicies $rolePolicies -PolicyKey $sharedPolicyKey -WorkspacePath $workspacePath -SharedWorkspacePath $workspacePath -SharedWorkspacePaths @($workspacePath)) -SharedWorkspacePaths @()
-        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath) -TemplateMap $sharedTemplateMap)
+        $workspaceHostDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath
+        $managedAgentsFiles += @(Ensure-ManagedSeedOnceMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceSeedOnceMarkdownFiles)
+        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles)
         continue
     }
 
@@ -2076,7 +2224,9 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
         }
     )
     $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -AgentName $workspaceAgentName -SharedWorkspacePaths $sharedWorkspacePathsForPrivateWorkspace
-    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath) -TemplateMap $workspaceTemplateMap)
+    $workspaceHostDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath
+    $managedAgentsFiles += @(Ensure-ManagedSeedOnceMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceSeedOnceMarkdownFiles)
+    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles)
 }
 
 Write-Host "Configured agents:" -ForegroundColor Green
