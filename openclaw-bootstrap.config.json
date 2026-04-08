@@ -591,9 +591,17 @@
       },
       "agents": [
         "review-remote",
-        "coder-remote"
+        "coder-remote",
+        "research"
       ],
-      "hostedModels": [],
+      "hostedModels": [
+        {
+          "modelRef": "google/gemini-3.1-flash-lite-preview",
+          "fallbackModelIds": [
+            "qwen3:4b"
+          ]
+        }
+      ],
       "ollama": {
         "enabled": true,
         "providerId": "ollama-review-pc",
