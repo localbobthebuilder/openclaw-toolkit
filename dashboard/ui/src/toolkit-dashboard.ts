@@ -1882,6 +1882,7 @@ export class ToolkitDashboard extends LitElement {
     return models.map((model: any) => {
       const clone = JSON.parse(JSON.stringify(model));
       delete clone.name;
+      this.setOrderedFallbackModelIds(clone, this.getOrderedFallbackModelIds(clone));
       return clone;
     });
   }
@@ -1889,8 +1890,105 @@ export class ToolkitDashboard extends LitElement {
   sanitizeSharedCatalogEntries(models: any[] | undefined) {
     return this.sanitizeModelEntries(models).map((model: any) => {
       delete model.fallbackModelId;
+      delete model.fallbackModelIds;
       return model;
     });
+  }
+
+  getOrderedFallbackModelIds(model: any) {
+    const fallbackIds: string[] = [];
+    if (Array.isArray(model?.fallbackModelIds)) {
+      for (const rawFallbackId of model.fallbackModelIds) {
+        const fallbackId = String(rawFallbackId || '').trim();
+        if (fallbackId && !fallbackIds.includes(fallbackId)) {
+          fallbackIds.push(fallbackId);
+        }
+      }
+    } else if (typeof model?.fallbackModelId === 'string') {
+      const fallbackId = model.fallbackModelId.trim();
+      if (fallbackId) {
+        fallbackIds.push(fallbackId);
+      }
+    }
+    return fallbackIds;
+  }
+
+  setOrderedFallbackModelIds(model: any, fallbackIds: string[]) {
+    const normalized: string[] = [];
+    const selfId = typeof model?.id === 'string' ? model.id.trim() : '';
+    for (const rawFallbackId of Array.isArray(fallbackIds) ? fallbackIds : []) {
+      const fallbackId = String(rawFallbackId || '').trim();
+      if (!fallbackId || fallbackId === selfId || normalized.includes(fallbackId)) {
+        continue;
+      }
+      normalized.push(fallbackId);
+    }
+
+    if (normalized.length > 0) {
+      model.fallbackModelIds = normalized;
+    } else {
+      delete model.fallbackModelIds;
+    }
+    delete model.fallbackModelId;
+  }
+
+  describeOrderedLocalFallbacks(model: any) {
+    const fallbackIds = this.getOrderedFallbackModelIds(model);
+    if (fallbackIds.length === 0) {
+      return 'No local fallbacks';
+    }
+    return `Fallback order: ${fallbackIds.map((fallbackId: string) => `ollama/${fallbackId}`).join(' -> ')}`;
+  }
+
+  renderOrderedLocalFallbackEditor(model: any, availableModelIds: string[]) {
+    const fallbackIds = this.getOrderedFallbackModelIds(model);
+    const availableFallbackIds = availableModelIds.filter((fallbackId: string) => fallbackId !== String(model?.id || '') && !fallbackIds.includes(fallbackId));
+    return html`
+      <div class="form-group" style="margin-bottom: 0; min-width: 320px;">
+        <label>Ordered Local Fallbacks</label>
+        <div class="help-text" style="margin-top: 0;">OpenClaw tries fallbacks top-to-bottom. The toolkit also uses this order when it needs to step down to a smaller local model.</div>
+        ${fallbackIds.length > 0 ? html`
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+            ${fallbackIds.map((fallbackId: string, index: number) => html`
+              <div class="tag" style="border-radius: 8px; justify-content: space-between; width: 100%;">
+                <span>${index + 1}. ollama/${fallbackId}</span>
+                <span style="display: flex; gap: 6px;">
+                  <button class="btn btn-ghost" style="padding: 4px 8px;" ?disabled=${index === 0} @click=${() => {
+                    const nextFallbackIds = [...fallbackIds];
+                    [nextFallbackIds[index - 1], nextFallbackIds[index]] = [nextFallbackIds[index], nextFallbackIds[index - 1]];
+                    this.setOrderedFallbackModelIds(model, nextFallbackIds);
+                    this.requestUpdate();
+                  }}>Up</button>
+                  <button class="btn btn-ghost" style="padding: 4px 8px;" ?disabled=${index === fallbackIds.length - 1} @click=${() => {
+                    const nextFallbackIds = [...fallbackIds];
+                    [nextFallbackIds[index], nextFallbackIds[index + 1]] = [nextFallbackIds[index + 1], nextFallbackIds[index]];
+                    this.setOrderedFallbackModelIds(model, nextFallbackIds);
+                    this.requestUpdate();
+                  }}>Down</button>
+                  <button class="btn btn-danger" style="padding: 4px 8px;" @click=${() => {
+                    this.setOrderedFallbackModelIds(model, fallbackIds.filter((_: string, candidateIndex: number) => candidateIndex !== index));
+                    this.requestUpdate();
+                  }}>Remove</button>
+                </span>
+              </div>
+            `)}
+          </div>
+        ` : html`<div class="item-sub" style="margin-top: 10px;">No local fallbacks configured.</div>`}
+        ${availableFallbackIds.length > 0 ? html`
+          <select style="margin-top: 10px;" @change=${(e: any) => {
+            const value = String(e.target.value || '').trim();
+            if (value) {
+              this.setOrderedFallbackModelIds(model, [...fallbackIds, value]);
+              this.requestUpdate();
+            }
+            e.target.value = '';
+          }}>
+            <option value="">+ Add fallback at the end</option>
+            ${availableFallbackIds.map((fallbackId: string) => html`<option value=${fallbackId}>${fallbackId}</option>`)}
+          </select>
+        ` : ''}
+      </div>
+    `;
   }
 
   getLegacyManagedAgentKeys() {
@@ -2301,6 +2399,7 @@ export class ToolkitDashboard extends LitElement {
     const clone = JSON.parse(JSON.stringify(model));
     delete clone.name;
     delete clone.fallbackModelId;
+    delete clone.fallbackModelIds;
     return clone;
   }
 
@@ -2341,19 +2440,19 @@ export class ToolkitDashboard extends LitElement {
     const models: any[] = [];
     const seen = new Set<string>();
 
-    for (const model of this.getSharedModelCatalog()) {
-      if (this.isHostedCatalogModel(model) && !seen.has(model.modelRef)) {
-        seen.add(model.modelRef);
-        models.push(model);
-      }
-    }
-
     for (const endpoint of this.getConfigEndpoints()) {
       for (const model of this.getEndpointHostedModels(endpoint)) {
         if (this.isHostedCatalogModel(model) && !seen.has(model.modelRef)) {
           seen.add(model.modelRef);
           models.push(model);
         }
+      }
+    }
+
+    for (const model of this.getSharedModelCatalog()) {
+      if (this.isHostedCatalogModel(model) && !seen.has(model.modelRef)) {
+        seen.add(model.modelRef);
+        models.push(model);
       }
     }
 
@@ -2389,8 +2488,7 @@ export class ToolkitDashboard extends LitElement {
         options.push({
           ref,
           label: model.id,
-          kind: 'local',
-          fallbackModelId: model.fallbackModelId || ''
+          kind: 'local'
         });
       }
     }
@@ -2402,8 +2500,7 @@ export class ToolkitDashboard extends LitElement {
         options.push({
           ref,
           label: ref,
-          kind: 'hosted',
-          fallbackModelId: model.fallbackModelId || ''
+          kind: 'hosted'
         });
       }
     }
@@ -2893,33 +2990,20 @@ export class ToolkitDashboard extends LitElement {
             </div>
 
             <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine.</p>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine. When a model has fallbacks, both toolkit fit checks and OpenClaw runtime fallbacks follow the order shown here.</p>
              
             ${endpointModels.map((mo: any, idx: number) => html`
-                <div class="item-row">
+                <div class="item-row" style="align-items: flex-start; gap: 16px;">
                     <div class="item-info">
                         <span class="item-title">${mo.id}</span>
-                        <span class="item-sub">${mo.fallbackModelId ? `Local fallback: ollama/${mo.fallbackModelId} | ` : ''}Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}</span>
+                        <span class="item-sub">${this.describeOrderedLocalFallbacks(mo)} | Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}</span>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        ${endpointModels.length > 1 ? html`
-                            <select @change=${(e: any) => {
-                                const value = e.target.value;
-                                if (value) {
-                                    mo.fallbackModelId = value;
-                                } else {
-                                    delete mo.fallbackModelId;
-                                }
-                                this.requestUpdate();
-                            }}>
-                                <option value="" ?selected=${!mo.fallbackModelId}>No local fallback</option>
-                                ${endpointModels
-                                    .filter((localModel: any) => localModel.id !== mo.id)
-                                    .map((localModel: any) => html`<option value=${localModel.id} ?selected=${mo.fallbackModelId === localModel.id}>${localModel.id}</option>`)}
-                            </select>
-                        ` : ''}
-                        <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
-                        <button class="btn btn-danger" @click=${() => { endpointModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        ${endpointModels.length > 1 ? this.renderOrderedLocalFallbackEditor(mo, endpointModels.map((localModel: any) => localModel.id)) : ''}
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
+                            <button class="btn btn-danger" @click=${() => { endpointModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                        </div>
                     </div>
                 </div>
             `)}
@@ -2932,30 +3016,19 @@ export class ToolkitDashboard extends LitElement {
             `}
 
             <h4 style="color: #666; margin-top: 24px;">Hosted Models</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models available from this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs.</p>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models available from this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs. If the primary hosted model fails, OpenClaw tries the local fallbacks below in order.</p>
 
             ${endpointHostedModels.map((model: any, idx: number) => html`
-                <div class="item-row">
+                <div class="item-row" style="align-items: flex-start; gap: 16px;">
                     <div class="item-info">
                         <span class="item-title">${model.modelRef}</span>
-                        <span class="item-sub">${model.fallbackModelId ? `Local fallback: ollama/${model.fallbackModelId}` : 'Hosted provider model'}</span>
+                        <span class="item-sub">${this.describeOrderedLocalFallbacks(model)}</span>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        ${endpointModels.length > 0 ? html`
-                            <select @change=${(e: any) => {
-                                const value = e.target.value;
-                                if (value) {
-                                    model.fallbackModelId = value;
-                                } else {
-                                    delete model.fallbackModelId;
-                                }
-                                this.requestUpdate();
-                            }}>
-                                <option value="" ?selected=${!model.fallbackModelId}>No local fallback</option>
-                                ${endpointModels.map((localModel: any) => html`<option value=${localModel.id} ?selected=${model.fallbackModelId === localModel.id}>${localModel.id}</option>`)}
-                            </select>
-                        ` : ''}
-                        <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        ${endpointModels.length > 0 ? this.renderOrderedLocalFallbackEditor(model, endpointModels.map((localModel: any) => localModel.id)) : ''}
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
+                        </div>
                     </div>
                 </div>
             `)}
@@ -3008,7 +3081,7 @@ export class ToolkitDashboard extends LitElement {
               alert(`Hosted model "${modelId}" is already added to endpoint "${endpoint.key}".`);
               return;
           }
-          endpoint.hostedModels.push(this.cloneModelCatalogEntry(catalogEntry));
+          endpoint.hostedModels.push(this.sanitizeModelEntries([catalogEntry])[0]);
           this.requestUpdate();
       } else if (this.selectorTarget === 'candidate') {
           const agent = this.getEditingAgent();

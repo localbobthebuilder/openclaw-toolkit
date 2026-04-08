@@ -14,6 +14,7 @@ param(
     [int]$MinimumContextWindow = 24576,
     [double]$RawSizeLimitRatio = 0.70,
     [string]$FallbackModel,
+    [string[]]$FallbackModels,
     [string]$AssignTo,
     [string]$ConfigPath,
     [switch]$SkipBootstrap,
@@ -359,7 +360,7 @@ function New-ManagedEndpointModelEntry {
         [Parameter(Mandatory = $true)][int]$ContextWindow,
         [Parameter(Mandatory = $true)][int]$MaxTokensValue,
         [int]$MinimumContextWindowValue = 24576,
-        [string]$FallbackModelId
+        [string[]]$FallbackModelIds = @()
     )
 
     $entry = [ordered]@{}
@@ -391,10 +392,26 @@ function New-ManagedEndpointModelEntry {
         $entry.Remove("reasoning")
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($FallbackModelId)) {
-        $entry.fallbackModelId = $FallbackModelId
+    $normalizedFallbackIds = New-Object System.Collections.Generic.List[string]
+    foreach ($rawFallbackId in @($FallbackModelIds)) {
+        $fallbackId = [string]$rawFallbackId
+        if ([string]::IsNullOrWhiteSpace($fallbackId) -or
+            $fallbackId -eq $ModelId -or
+            $fallbackId -in @($normalizedFallbackIds)) {
+            continue
+        }
+
+        $normalizedFallbackIds.Add($fallbackId)
     }
-    elseif ($entry.Contains("fallbackModelId")) {
+
+    if ($normalizedFallbackIds.Count -gt 0) {
+        $entry.fallbackModelIds = @($normalizedFallbackIds.ToArray())
+    }
+    elseif ($entry.Contains("fallbackModelIds")) {
+        $entry.Remove("fallbackModelIds")
+    }
+
+    if ($entry.Contains("fallbackModelId")) {
         $entry.Remove("fallbackModelId")
     }
 
@@ -468,7 +485,7 @@ function Set-SharedCatalogLocalModelEntry {
 
     $catalogEntry = [ordered]@{}
     foreach ($property in $ModelEntry.PSObject.Properties) {
-        if ([string]$property.Name -eq "fallbackModelId") {
+        if ([string]$property.Name -in @("fallbackModelId", "fallbackModelIds")) {
             continue
         }
 
@@ -499,24 +516,41 @@ function Set-SharedCatalogLocalModelEntry {
     $Config.modelCatalog = $entries.ToArray()
 }
 
-function Resolve-ConfiguredFallbackModelId {
+function Resolve-ConfiguredFallbackModelIds {
     param(
         [Parameter(Mandatory = $true)]$Config,
         [string]$EndpointKey,
         [Parameter(Mandatory = $true)][string]$ModelId,
-        [string]$ExplicitFallbackModel
+        [string]$ExplicitFallbackModel,
+        [string[]]$ExplicitFallbackModels = @()
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($ExplicitFallbackModel)) {
-        return $ExplicitFallbackModel
+    $fallbackIds = New-Object System.Collections.Generic.List[string]
+    foreach ($rawFallbackId in @($ExplicitFallbackModels)) {
+        $fallbackId = [string]$rawFallbackId
+        if ([string]::IsNullOrWhiteSpace($fallbackId) -or
+            $fallbackId -eq $ModelId -or
+            $fallbackId -in @($fallbackIds)) {
+            continue
+        }
+
+        $fallbackIds.Add($fallbackId)
+    }
+
+    if ($fallbackIds.Count -gt 0) {
+        return @($fallbackIds.ToArray())
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitFallbackModel) -and $ExplicitFallbackModel -ne $ModelId) {
+        return @([string]$ExplicitFallbackModel)
     }
 
     $entry = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
-    if ($entry -and $entry.PSObject.Properties.Name -contains "fallbackModelId" -and $entry.fallbackModelId) {
-        return [string]$entry.fallbackModelId
+    if ($entry) {
+        return @(Get-ToolkitConfiguredModelFallbackIds -ModelEntry $entry | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and [string]$_ -ne $ModelId })
     }
 
-    return $null
+    return @()
 }
 
 function Resolve-UpperContextBound {
@@ -545,7 +579,8 @@ function Resolve-ModelPlan {
         [Parameter(Mandatory = $true)]$Endpoint,
         [Parameter(Mandatory = $true)][string]$ModelId,
         [string]$DisplayName,
-        [string]$FallbackModelId,
+        [string[]]$FallbackModelIds = @(),
+        [string[]]$InstalledModelIds = @(),
         [bool]$AlreadyInstalled,
         [System.Collections.Generic.HashSet[string]]$Visited
     )
@@ -562,10 +597,24 @@ function Resolve-ModelPlan {
     $diskFreeBytes = $null
     $requiredDiskBytes = [int64][math]::Ceiling($rawBytes * 1.10)
 
+    $remainingFallbackModelIds = New-Object System.Collections.Generic.List[string]
+    foreach ($rawFallbackModelId in @($FallbackModelIds)) {
+        $fallbackModelId = [string]$rawFallbackModelId
+        if ([string]::IsNullOrWhiteSpace($fallbackModelId) -or
+            $fallbackModelId -eq $ModelId -or
+            $fallbackModelId -in @($remainingFallbackModelIds)) {
+            continue
+        }
+
+        $remainingFallbackModelIds.Add($fallbackModelId)
+    }
+
     if ($rawMiB -gt $rawLimitMiB) {
-        if ($FallbackModelId) {
-            Write-Warning "Skipping $ModelId on endpoint '$($Endpoint.key)': raw size ${rawMiB}MiB exceeds 70% VRAM threshold (${rawLimitMiB}MiB). Falling back to $FallbackModelId."
-            return (Resolve-ModelPlan -Config $Config -Endpoint $Endpoint -ModelId $FallbackModelId -DisplayName $DisplayName -FallbackModelId (Resolve-ConfiguredFallbackModelId -Config $Config -EndpointKey $Endpoint.key -ModelId $FallbackModelId) -AlreadyInstalled:$false -Visited $Visited)
+        if ($remainingFallbackModelIds.Count -gt 0) {
+            $nextFallbackModelId = [string]$remainingFallbackModelIds[0]
+            $subsequentFallbackModelIds = @($remainingFallbackModelIds.ToArray() | Select-Object -Skip 1)
+            Write-Warning "Skipping $ModelId on endpoint '$($Endpoint.key)': raw size ${rawMiB}MiB exceeds 70% VRAM threshold (${rawLimitMiB}MiB). Falling back to $nextFallbackModelId."
+            return (Resolve-ModelPlan -Config $Config -Endpoint $Endpoint -ModelId $nextFallbackModelId -DisplayName $DisplayName -FallbackModelIds $subsequentFallbackModelIds -InstalledModelIds $InstalledModelIds -AlreadyInstalled:($nextFallbackModelId -in @($InstalledModelIds)) -Visited $Visited)
         }
 
         throw "Model '$ModelId' raw size ${rawMiB}MiB exceeds 70% of endpoint GPU VRAM (${rawLimitMiB}MiB). Configure a smaller fallback model."
@@ -582,11 +631,12 @@ function Resolve-ModelPlan {
     }
 
     return [pscustomobject]@{
-        ModelId     = $ModelId
-        DisplayName = if ([string]::IsNullOrWhiteSpace($DisplayName)) { $ModelId } else { $DisplayName }
-        RawBytes    = [int64]$rawBytes
-        RawMiB      = [int]$rawMiB
-        GpuTotalMiB = [int]$gpuTotalMiB
+        ModelId           = $ModelId
+        DisplayName       = if ([string]::IsNullOrWhiteSpace($DisplayName)) { $ModelId } else { $DisplayName }
+        RawBytes          = [int64]$rawBytes
+        RawMiB            = [int]$rawMiB
+        GpuTotalMiB       = [int]$gpuTotalMiB
+        FallbackModelIds  = @($remainingFallbackModelIds.ToArray())
     }
 }
 
@@ -614,8 +664,8 @@ $alreadyInstalled = $Model -in $installed
 
 $upperContextBound = Resolve-UpperContextBound -RequestedMaxContextWindow $MaxContextWindow -LegacyContexts $Contexts
 $visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-$fallbackModelId = Resolve-ConfiguredFallbackModelId -Config $config -EndpointKey $endpoint.key -ModelId $Model -ExplicitFallbackModel $FallbackModel
-$plan = Resolve-ModelPlan -Config $config -Endpoint $endpoint -ModelId $Model -DisplayName $Name -FallbackModelId $fallbackModelId -AlreadyInstalled:$alreadyInstalled -Visited $visited
+$fallbackModelIds = Resolve-ConfiguredFallbackModelIds -Config $config -EndpointKey $endpoint.key -ModelId $Model -ExplicitFallbackModel $FallbackModel -ExplicitFallbackModels $FallbackModels
+$plan = Resolve-ModelPlan -Config $config -Endpoint $endpoint -ModelId $Model -DisplayName $Name -FallbackModelIds $fallbackModelIds -InstalledModelIds $installed -AlreadyInstalled:$alreadyInstalled -Visited $visited
 
 if ($plan.ModelId -notin $installed) {
     Write-Step "Pulling Ollama model $($plan.ModelId) on endpoint $($endpoint.key)"
@@ -647,10 +697,11 @@ $probeResult = $probeJsonLine | ConvertFrom-Json -Depth 20
 $selectedContextWindow = if ($null -ne $probeResult.selectedContextWindow) { [int]$probeResult.selectedContextWindow } else { $null }
 
 if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumContextWindow) {
-    $finalFallback = Resolve-ConfiguredFallbackModelId -Config $config -EndpointKey $endpoint.key -ModelId $plan.ModelId -ExplicitFallbackModel $FallbackModel
+    $finalFallbackIds = @($plan.FallbackModelIds)
+    $finalFallback = if (@($finalFallbackIds).Count -gt 0) { [string]$finalFallbackIds[0] } else { $null }
     if ($finalFallback -and $finalFallback -ne $plan.ModelId) {
         Write-Warning "Model '$($plan.ModelId)' did not fit with a useful context on endpoint '$($endpoint.key)'. Falling back to '$finalFallback'."
-        & $PSCommandPath -Model $finalFallback -Name $Name -EndpointKey $endpoint.key -InputKinds $InputKinds -Reasoning:$Reasoning -MaxTokens $MaxTokens -StartContextWindow $StartContextWindow -ContextStep $ContextStep -MaxContextWindow $upperContextBound -HeadroomMiB $HeadroomMiB -MinimumContextWindow $MinimumContextWindow -RawSizeLimitRatio $RawSizeLimitRatio -AssignTo $AssignTo -ConfigPath $ConfigPath -SkipBootstrap:$SkipBootstrap
+        & $PSCommandPath -Model $finalFallback -Name $Name -EndpointKey $endpoint.key -InputKinds $InputKinds -Reasoning:$Reasoning -MaxTokens $MaxTokens -StartContextWindow $StartContextWindow -ContextStep $ContextStep -MaxContextWindow $upperContextBound -HeadroomMiB $HeadroomMiB -MinimumContextWindow $MinimumContextWindow -RawSizeLimitRatio $RawSizeLimitRatio -FallbackModels @($finalFallbackIds | Select-Object -Skip 1) -AssignTo $AssignTo -ConfigPath $ConfigPath -SkipBootstrap:$SkipBootstrap
         exit $LASTEXITCODE
     }
 
@@ -662,7 +713,7 @@ if ($null -eq $selectedContextWindow -or $selectedContextWindow -lt $MinimumCont
 }
 
 $existingEntry = Get-ToolkitEffectiveLocalModelEntry -Config $config -ModelId $plan.ModelId -EndpointKey $endpoint.key
-$newEntry = New-ManagedEndpointModelEntry -ExistingEntry $existingEntry -ModelId $plan.ModelId -Inputs $InputKinds -ReasoningModel:$Reasoning -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelId $fallbackModelId
+$newEntry = New-ManagedEndpointModelEntry -ExistingEntry $existingEntry -ModelId $plan.ModelId -Inputs $InputKinds -ReasoningModel:$Reasoning -ContextWindow $selectedContextWindow -MaxTokensValue $MaxTokens -MinimumContextWindowValue $MinimumContextWindow -FallbackModelIds $plan.FallbackModelIds
 
 Write-Step "Updating bootstrap config"
 Set-EndpointModelEntry -Config $config -EndpointKey $endpoint.key -ModelEntry $newEntry

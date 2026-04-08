@@ -1597,6 +1597,7 @@ function Resolve-AgentFallbackModelRefs {
     $candidateRefs = @(Get-AgentCandidateModelRefs -AgentConfig $AgentConfig)
 
     $modelSource = Get-ToolkitAgentModelPreference -Config $Config -AgentConfig $AgentConfig
+    $endpointSpecificFallbackRefs = @(Resolve-ToolkitEndpointModelFallbackRefs -Config $Config -AgentConfig $AgentConfig -ModelRef $PrimaryModelRef -AvailableOllamaRefs $availableOllamaRefs -UseAvailableRefsOnly:$UseAvailableRefsOnly)
 
     $fallbacks = @()
     if ($modelSource -eq "hosted") {
@@ -1634,6 +1635,12 @@ function Resolve-AgentFallbackModelRefs {
         }
 
         if ($allowLocalFallback) {
+            foreach ($fallbackRef in @($endpointSpecificFallbackRefs)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$fallbackRef) -and [string]$fallbackRef -ne $PrimaryModelRef) {
+                    $fallbacks = Add-UniqueString -List $fallbacks -Value ([string]$fallbackRef)
+                }
+            }
+
             foreach ($candidateRef in @($candidateRefs)) {
                 $candidateRefText = [string]$candidateRef
                 if ([string]::IsNullOrWhiteSpace($candidateRefText)) {
@@ -1662,6 +1669,12 @@ function Resolve-AgentFallbackModelRefs {
         }
     }
     elseif ($modelSource -eq "local") {
+        foreach ($fallbackRef in @($endpointSpecificFallbackRefs)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$fallbackRef) -and [string]$fallbackRef -ne $PrimaryModelRef) {
+                $fallbacks = Add-UniqueString -List $fallbacks -Value ([string]$fallbackRef)
+            }
+        }
+
         foreach ($candidateRef in @($candidateRefs)) {
             $candidateRefText = [string]$candidateRef
             if ([string]::IsNullOrWhiteSpace($candidateRefText)) {

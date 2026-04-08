@@ -85,6 +85,67 @@ function Set-ToolkitArrayDefaultProperty {
     }
 }
 
+function Get-ToolkitNormalizedFallbackModelIds {
+    param($ModelEntry)
+
+    $fallbackIds = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $ModelEntry) {
+        return @()
+    }
+
+    if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelIds" -and $null -ne $ModelEntry.fallbackModelIds) {
+        foreach ($rawFallbackId in @($ModelEntry.fallbackModelIds)) {
+            $fallbackId = [string]$rawFallbackId
+            if ([string]::IsNullOrWhiteSpace($fallbackId) -or $fallbackId -in @($fallbackIds)) {
+                continue
+            }
+
+            $fallbackIds.Add($fallbackId)
+        }
+    }
+    elseif ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelId" -and
+        -not [string]::IsNullOrWhiteSpace([string]$ModelEntry.fallbackModelId)) {
+        $fallbackIds.Add([string]$ModelEntry.fallbackModelId)
+    }
+
+    return @($fallbackIds.ToArray())
+}
+
+function Normalize-ToolkitModelEntry {
+    param(
+        $ModelEntry,
+        [switch]$AllowFallbacks
+    )
+
+    if ($null -eq $ModelEntry) {
+        return $null
+    }
+
+    if ($AllowFallbacks) {
+        $fallbackIds = @(Get-ToolkitNormalizedFallbackModelIds -ModelEntry $ModelEntry)
+        if (@($fallbackIds).Count -gt 0) {
+            if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelIds") {
+                $ModelEntry.fallbackModelIds = @($fallbackIds)
+            }
+            else {
+                Add-Member -InputObject $ModelEntry -NotePropertyName "fallbackModelIds" -NotePropertyValue @($fallbackIds) -Force
+            }
+        }
+        elseif ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelIds") {
+            $ModelEntry.PSObject.Properties.Remove("fallbackModelIds")
+        }
+    }
+    elseif ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelIds") {
+        $ModelEntry.PSObject.Properties.Remove("fallbackModelIds")
+    }
+
+    if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelId") {
+        $ModelEntry.PSObject.Properties.Remove("fallbackModelId")
+    }
+
+    return $ModelEntry
+}
+
 function Get-ToolkitMutableEndpointsCollection {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -235,6 +296,11 @@ function Normalize-ToolkitConfigDefaults {
 
     if ($Config.PSObject.Properties.Name -contains "ollama" -and $null -ne $Config.ollama) {
         Set-ToolkitBooleanDefaultProperty -Object $Config.ollama -PropertyName "enabled" -DefaultValue $true
+        if ($Config.ollama.PSObject.Properties.Name -contains "models" -and $null -ne $Config.ollama.models) {
+            foreach ($modelEntry in @($Config.ollama.models)) {
+                Normalize-ToolkitModelEntry -ModelEntry $modelEntry -AllowFallbacks | Out-Null
+            }
+        }
     }
 
     if ($Config.PSObject.Properties.Name -contains "sandbox" -and $null -ne $Config.sandbox) {
@@ -267,14 +333,18 @@ function Normalize-ToolkitConfigDefaults {
         }
     }
 
-    if ($Config.PSObject.Properties.Name -contains "endpoints" -and $null -ne $Config.endpoints) {
-        foreach ($endpoint in @($Config.endpoints)) {
+    foreach ($endpoint in @(Get-ToolkitMutableEndpointsCollection -Config $Config)) {
             if ($null -eq $endpoint) {
                 continue
             }
 
             Set-ToolkitBooleanDefaultProperty -Object $endpoint -PropertyName "default" -DefaultValue $false
             Set-ToolkitArrayDefaultProperty -Object $endpoint -PropertyName "agents"
+            if ($endpoint.PSObject.Properties.Name -contains "hostedModels" -and $null -ne $endpoint.hostedModels) {
+                foreach ($modelEntry in @($endpoint.hostedModels)) {
+                    Normalize-ToolkitModelEntry -ModelEntry $modelEntry -AllowFallbacks | Out-Null
+                }
+            }
             $hasRuntime = ($endpoint.PSObject.Properties.Name -contains "ollama" -and $null -ne $endpoint.ollama) -or
                 ($endpoint.PSObject.Properties.Name -contains "baseUrl" -and $endpoint.baseUrl) -or
                 ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) -or
@@ -292,7 +362,22 @@ function Normalize-ToolkitConfigDefaults {
 
                 Set-ToolkitBooleanDefaultProperty -Object $runtime -PropertyName "enabled" -DefaultValue $true
                 Set-ToolkitBooleanDefaultProperty -Object $runtime -PropertyName "autoPullMissingModels" -DefaultValue $true
+                if ($runtime.PSObject.Properties.Name -contains "models" -and $null -ne $runtime.models) {
+                    foreach ($modelEntry in @($runtime.models)) {
+                        Normalize-ToolkitModelEntry -ModelEntry $modelEntry -AllowFallbacks | Out-Null
+                    }
+                }
+                if ($runtime.PSObject.Properties.Name -contains "modelOverrides" -and $null -ne $runtime.modelOverrides) {
+                    foreach ($modelEntry in @($runtime.modelOverrides)) {
+                        Normalize-ToolkitModelEntry -ModelEntry $modelEntry -AllowFallbacks | Out-Null
+                    }
+                }
             }
+    }
+
+    if ($Config.PSObject.Properties.Name -contains "modelCatalog" -and $null -ne $Config.modelCatalog) {
+        foreach ($modelEntry in @($Config.modelCatalog)) {
+            Normalize-ToolkitModelEntry -ModelEntry $modelEntry | Out-Null
         }
     }
 

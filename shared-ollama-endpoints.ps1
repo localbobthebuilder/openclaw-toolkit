@@ -4,6 +4,9 @@ function Normalize-ToolkitOllamaModelEntries {
     $normalized = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @($Entries)) {
         if ($entry -and $entry.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$entry.id)) {
+            if (Get-Command "Normalize-ToolkitModelEntry" -ErrorAction SilentlyContinue) {
+                Normalize-ToolkitModelEntry -ModelEntry $entry -AllowFallbacks | Out-Null
+            }
             $normalized.Add($entry)
         }
     }
@@ -17,6 +20,9 @@ function Normalize-ToolkitHostedModelEntries {
     $normalized = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @($Entries)) {
         if ($entry -and $entry.PSObject.Properties.Name -contains "modelRef" -and -not [string]::IsNullOrWhiteSpace([string]$entry.modelRef)) {
+            if (Get-Command "Normalize-ToolkitModelEntry" -ErrorAction SilentlyContinue) {
+                Normalize-ToolkitModelEntry -ModelEntry $entry -AllowFallbacks | Out-Null
+            }
             $normalized.Add($entry)
         }
     }
@@ -715,6 +721,76 @@ function Get-ToolkitEffectiveLocalModelEntry {
     }
 
     return (Get-ToolkitLocalModelEntry -Config $Config -ModelId $ModelId)
+}
+
+function Get-ToolkitConfiguredModelFallbackIds {
+    param($ModelEntry)
+
+    if ($null -eq $ModelEntry) {
+        return @()
+    }
+
+    if (Get-Command "Get-ToolkitNormalizedFallbackModelIds" -ErrorAction SilentlyContinue) {
+        return @(Get-ToolkitNormalizedFallbackModelIds -ModelEntry $ModelEntry)
+    }
+
+    if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelIds" -and $null -ne $ModelEntry.fallbackModelIds) {
+        return @($ModelEntry.fallbackModelIds)
+    }
+
+    if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelId" -and $ModelEntry.fallbackModelId) {
+        return @([string]$ModelEntry.fallbackModelId)
+    }
+
+    return @()
+}
+
+function Resolve-ToolkitEndpointModelFallbackRefs {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $AgentConfig,
+        [string]$ModelRef,
+        [string[]]$AvailableOllamaRefs = @(),
+        [switch]$UseAvailableRefsOnly
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ModelRef)) {
+        return @()
+    }
+
+    $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+    if ([string]::IsNullOrWhiteSpace($endpointKey)) {
+        return @()
+    }
+
+    $modelEntry = $null
+    if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $ModelRef) -or $ModelRef.StartsWith("ollama/")) {
+        $modelEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId (Get-ToolkitModelIdFromRef -ModelRef $ModelRef) -EndpointKey $endpointKey
+    }
+    else {
+        foreach ($hostedModel in @(Get-ToolkitEndpointHostedModelCatalog -Config $Config -EndpointKey $endpointKey)) {
+            if ($hostedModel -and [string]$hostedModel.modelRef -eq [string]$ModelRef) {
+                $modelEntry = $hostedModel
+                break
+            }
+        }
+    }
+
+    $fallbackRefs = @()
+    foreach ($fallbackModelId in @(Get-ToolkitConfiguredModelFallbackIds -ModelEntry $modelEntry)) {
+        if ([string]::IsNullOrWhiteSpace([string]$fallbackModelId)) {
+            continue
+        }
+
+        $fallbackRef = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$fallbackModelId) -EndpointKey $endpointKey
+        if ($UseAvailableRefsOnly -and $fallbackRef -notin @($AvailableOllamaRefs)) {
+            continue
+        }
+
+        $fallbackRefs = Add-UniqueString -List $fallbackRefs -Value $fallbackRef
+    }
+
+    return @($fallbackRefs)
 }
 
 function Get-ToolkitOllamaRegistryModelSizeMiB {

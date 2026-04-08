@@ -372,15 +372,21 @@
       "hostedModels": [
         {
           "modelRef": "openai-codex/gpt-5.4",
-          "fallbackModelId": "qwen3-coder:30b"
+          "fallbackModelIds": [
+            "qwen3-coder:30b"
+          ]
         },
         {
           "modelRef": "anthropic/claude-sonnet-4-6",
-          "fallbackModelId": "qwen3-coder:30b"
+          "fallbackModelIds": [
+            "qwen3-coder:30b"
+          ]
         },
         {
           "modelRef": "google/gemini-3.1-flash-lite-preview",
-          "fallbackModelId": "qwen3:4b"
+          "fallbackModelIds": [
+            "qwen3:4b"
+          ]
         }
       ],
       "ollama": {
@@ -405,7 +411,9 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 24576,
-            "fallbackModelId": "qwen3-coder:30b",
+            "fallbackModelIds": [
+              "qwen3-coder:30b"
+            ],
             "contextWindow": 128000,
             "maxTokens": 8192,
             "vramEstimateMiB": 22528
@@ -455,7 +463,9 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 16384,
-            "fallbackModelId": "qwen3:4b",
+            "fallbackModelIds": [
+              "qwen3:4b"
+            ],
             "contextWindow": 32768,
             "maxTokens": 4096,
             "vramEstimateMiB": 4864
@@ -486,7 +496,9 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 16384,
-            "fallbackModelId": "qwen3:4b",
+            "fallbackModelIds": [
+              "qwen3:4b"
+            ],
             "vramEstimateMiB": 5376
           },
           {
@@ -501,7 +513,9 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 24576,
-            "fallbackModelId": "qwen2.5-coder:1.5b",
+            "fallbackModelIds": [
+              "qwen2.5-coder:1.5b"
+            ],
             "vramEstimateMiB": 2048
           },
           {
@@ -603,7 +617,9 @@
             "minimumContextWindow": 24576,
             "contextWindow": 32768,
             "maxTokens": 8192,
-            "fallbackModelId": "qwen2.5-coder:1.5b",
+            "fallbackModelIds": [
+              "qwen2.5-coder:1.5b"
+            ],
             "vramEstimateMiB": 2048
           },
           {
@@ -646,7 +662,9 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 16384,
-            "fallbackModelId": "qwen3:4b",
+            "fallbackModelIds": [
+              "qwen3:4b"
+            ],
             "vramEstimateMiB": 5376
           },
           {
@@ -661,7 +679,9 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 16384,
-            "fallbackModelId": "qwen3:4b",
+            "fallbackModelIds": [
+              "qwen3:4b"
+            ],
             "contextWindow": 32768,
             "maxTokens": 4096,
             "vramEstimateMiB": 4864
