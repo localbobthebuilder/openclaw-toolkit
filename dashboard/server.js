@@ -215,38 +215,6 @@ function writeMarkdownTemplateLibrary(scope, validFileNames, library) {
   }
 }
 
-function applyLegacyRolePolicyTemplates(config, libraries) {
-  const rolePolicies = config?.agents?.rolePolicies && typeof config.agents.rolePolicies === 'object'
-    ? config.agents.rolePolicies
-    : {};
-  const agentLibrary = libraries.agents?.['AGENTS.md'] && typeof libraries.agents['AGENTS.md'] === 'object'
-    ? libraries.agents['AGENTS.md']
-    : (libraries.agents['AGENTS.md'] = {});
-  const workspaceLibrary = libraries.workspaces?.['AGENTS.md'] && typeof libraries.workspaces['AGENTS.md'] === 'object'
-    ? libraries.workspaces['AGENTS.md']
-    : (libraries.workspaces['AGENTS.md'] = {});
-
-  for (const [key, value] of Object.entries(rolePolicies)) {
-    if (!isSafeIdSegment(key)) {
-      continue;
-    }
-    const content = Array.isArray(value)
-      ? value.map((line) => String(line ?? '')).join('\n').trimEnd()
-      : typeof value === 'string'
-        ? value.trimEnd()
-        : '';
-    if (!content) {
-      continue;
-    }
-    if (key !== 'sharedWorkspace' && !agentLibrary[key]) {
-      agentLibrary[key] = content;
-    }
-    if (key === 'sharedWorkspace' && !workspaceLibrary[key]) {
-      workspaceLibrary[key] = content;
-    }
-  }
-}
-
 function pruneMisplacedTemplateLibraryEntries(libraries) {
   const agentAgentsLibrary = libraries?.agents?.['AGENTS.md'];
   if (agentAgentsLibrary && typeof agentAgentsLibrary === 'object' && Object.prototype.hasOwnProperty.call(agentAgentsLibrary, 'sharedWorkspace')) {
@@ -299,7 +267,6 @@ function loadToolkitTemplates(config) {
     templates.workspaces[workspace.id] = loadTemplateFileMap(path.join(toolkitDir, 'workspaces', workspace.id, 'markdown'), validWorkspaceMarkdownFiles);
   }
 
-  applyLegacyRolePolicyTemplates(config, templates.libraries);
   pruneMisplacedTemplateLibraryEntries(templates.libraries);
   return templates;
 }

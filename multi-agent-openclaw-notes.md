@@ -141,9 +141,9 @@ against the official OpenClaw docs/source in `<repo-dir>`.
 - Extra agents use the same model resolution, workspace-mode, subagent, and
   managed `AGENTS.md` machinery as the built-ins.
 - Extra agents can either:
-  reuse a built-in role policy/tool profile such as `research`, `review`, or
-  `codingDelegate`, or
-  define their own `tools` and `rolePolicyKey`.
+  reuse a built-in AGENTS template/tool profile such as `research`, `review`,
+  or `codingDelegate`, or
+  define their own `tools` plus `markdownTemplateKeys`.
 - Removing an extra agent from `multiAgent.extraAgents` now removes that managed
   agent from `agents.list` and cleans up the toolkit-managed prompt marker/files.
 

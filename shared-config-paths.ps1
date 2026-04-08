@@ -85,6 +85,52 @@ function Set-ToolkitArrayDefaultProperty {
     }
 }
 
+function Ensure-ToolkitMarkdownTemplateKeysProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object
+    )
+
+    if (-not ($Object.PSObject.Properties.Name -contains "markdownTemplateKeys") -or $null -eq $Object.markdownTemplateKeys) {
+        Add-Member -InputObject $Object -NotePropertyName "markdownTemplateKeys" -NotePropertyValue ([pscustomobject][ordered]@{}) -Force
+    }
+    elseif ($Object.markdownTemplateKeys -is [hashtable]) {
+        $Object.markdownTemplateKeys = [pscustomobject]$Object.markdownTemplateKeys
+    }
+
+    return $Object.markdownTemplateKeys
+}
+
+function Set-ToolkitMarkdownTemplateSelection {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [string]$TemplateKey
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TemplateKey)) {
+        return
+    }
+
+    $selectionRoot = Ensure-ToolkitMarkdownTemplateKeysProperty -Object $Object
+    if ($selectionRoot.PSObject.Properties.Name -contains $FileName) {
+        $selectionRoot.$FileName = [string]$TemplateKey
+    }
+    else {
+        Add-Member -InputObject $selectionRoot -NotePropertyName $FileName -NotePropertyValue ([string]$TemplateKey) -Force
+    }
+}
+
+function Get-ToolkitDerivedToolProfile {
+    param([string]$LegacyRolePolicyKey)
+
+    switch (([string]$LegacyRolePolicyKey).Trim().ToLowerInvariant()) {
+        "research" { return "research" }
+        "review" { return "review" }
+        "codingdelegate" { return "codingDelegate" }
+        default { return $null }
+    }
+}
+
 function Get-ToolkitNormalizedFallbackModelIds {
     param($ModelEntry)
 
@@ -183,6 +229,34 @@ function Normalize-ToolkitAgentConfig {
         Set-ToolkitBooleanDefaultProperty -Object $AgentConfig.subagents -PropertyName "enabled" -DefaultValue $true
         Set-ToolkitBooleanDefaultProperty -Object $AgentConfig.subagents -PropertyName "requireAgentId" -DefaultValue $true
         Set-ToolkitArrayDefaultProperty -Object $AgentConfig.subagents -PropertyName "allowAgents"
+    }
+
+    $legacyRolePolicyKey = if ($AgentConfig.PSObject.Properties.Name -contains "rolePolicyKey" -and
+        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.rolePolicyKey)) {
+        [string]$AgentConfig.rolePolicyKey
+    }
+    else {
+        $null
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($legacyRolePolicyKey)) {
+        $selectionRoot = Ensure-ToolkitMarkdownTemplateKeysProperty -Object $AgentConfig
+        if (-not ($selectionRoot.PSObject.Properties.Name -contains "AGENTS.md") -or
+            [string]::IsNullOrWhiteSpace([string]$selectionRoot.'AGENTS.md')) {
+            Set-ToolkitMarkdownTemplateSelection -Object $AgentConfig -FileName "AGENTS.md" -TemplateKey $legacyRolePolicyKey
+        }
+
+        if ((-not ($AgentConfig.PSObject.Properties.Name -contains "toolProfile")) -or
+            [string]::IsNullOrWhiteSpace([string]$AgentConfig.toolProfile)) {
+            $derivedToolProfile = Get-ToolkitDerivedToolProfile -LegacyRolePolicyKey $legacyRolePolicyKey
+            if (-not [string]::IsNullOrWhiteSpace([string]$derivedToolProfile)) {
+                Add-Member -InputObject $AgentConfig -NotePropertyName "toolProfile" -NotePropertyValue ([string]$derivedToolProfile) -Force
+            }
+        }
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "rolePolicyKey") {
+        $AgentConfig.PSObject.Properties.Remove("rolePolicyKey")
     }
 
     return $AgentConfig
@@ -423,6 +497,23 @@ function Normalize-ToolkitConfigDefaults {
             Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "enableAgentToAgent" -DefaultValue $false
             Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "manageWorkspaceAgentsMd" -DefaultValue $false
             Set-ToolkitArrayDefaultProperty -Object $workspace -PropertyName "agents"
+            $legacyWorkspaceRolePolicyKey = if ($workspace.PSObject.Properties.Name -contains "rolePolicyKey" -and
+                -not [string]::IsNullOrWhiteSpace([string]$workspace.rolePolicyKey)) {
+                [string]$workspace.rolePolicyKey
+            }
+            else {
+                $null
+            }
+            if (-not [string]::IsNullOrWhiteSpace($legacyWorkspaceRolePolicyKey)) {
+                $workspaceSelectionRoot = Ensure-ToolkitMarkdownTemplateKeysProperty -Object $workspace
+                if (-not ($workspaceSelectionRoot.PSObject.Properties.Name -contains "AGENTS.md") -or
+                    [string]::IsNullOrWhiteSpace([string]$workspaceSelectionRoot.'AGENTS.md')) {
+                    Set-ToolkitMarkdownTemplateSelection -Object $workspace -FileName "AGENTS.md" -TemplateKey $legacyWorkspaceRolePolicyKey
+                }
+            }
+            if ($workspace.PSObject.Properties.Name -contains "rolePolicyKey") {
+                $workspace.PSObject.Properties.Remove("rolePolicyKey")
+            }
             if ([string]$workspace.mode -eq "private") {
                 Set-ToolkitArrayDefaultProperty -Object $workspace -PropertyName "sharedWorkspaceIds"
             }
@@ -550,7 +641,6 @@ function Get-ToolkitAgentsContainer {
     if ($Config.PSObject.Properties.Name -contains "multiAgent" -and $null -ne $Config.multiAgent) {
         return [pscustomobject]@{
             list            = @(Get-ToolkitAgentList -Config $Config)
-            rolePolicies    = if ($Config.multiAgent.PSObject.Properties.Name -contains "rolePolicies") { $Config.multiAgent.rolePolicies } else { $null }
             telegramRouting = if ($Config.multiAgent.PSObject.Properties.Name -contains "telegramRouting") { $Config.multiAgent.telegramRouting } else { $null }
         }
     }
@@ -633,19 +723,6 @@ function Get-ToolkitAgentByKey {
     return $null
 }
 
-function Get-ToolkitRolePolicies {
-    param([Parameter(Mandatory = $true)]$Config)
-
-    $agentsContainer = Get-ToolkitAgentsContainer -Config $Config
-    if ($null -ne $agentsContainer -and
-        $agentsContainer.PSObject.Properties.Name -contains "rolePolicies" -and
-        $null -ne $agentsContainer.rolePolicies) {
-        return $agentsContainer.rolePolicies
-    }
-
-    return $null
-}
-
 function Get-ToolkitTelegramRouting {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -684,12 +761,14 @@ function Get-ToolkitWorkspaceList {
                 }
             }
 
-            $workspaces.Add([pscustomobject]@{
+                $workspaces.Add([pscustomobject]@{
                     id                   = "shared"
                     name                 = "Shared Workspace"
                     mode                 = "shared"
                     path                 = if ($Config.multiAgent.sharedWorkspace.path) { [string]$Config.multiAgent.sharedWorkspace.path } else { "/home/node/.openclaw/workspace" }
-                    rolePolicyKey        = if ($Config.multiAgent.sharedWorkspace.rolePolicyKey) { [string]$Config.multiAgent.sharedWorkspace.rolePolicyKey } else { "sharedWorkspace" }
+                    markdownTemplateKeys = [pscustomobject][ordered]@{
+                        "AGENTS.md" = if ($Config.multiAgent.sharedWorkspace.rolePolicyKey) { [string]$Config.multiAgent.sharedWorkspace.rolePolicyKey } else { "sharedWorkspace" }
+                    }
                     enableAgentToAgent   = [bool]$Config.multiAgent.enableAgentToAgent
                     manageWorkspaceAgentsMd = [bool]$Config.multiAgent.manageWorkspaceAgentsMd
                     agents               = @($sharedAgents)
@@ -1120,16 +1199,14 @@ function Get-ToolkitLegacyMultiAgentConfig {
                 }
             }
         ).Count -gt 0
-        rolePolicies         = Get-ToolkitRolePolicies -Config $Config
         telegramRouting      = Get-ToolkitTelegramRouting -Config $Config
         extraAgents          = @()
     }
 
     if ($null -ne $primarySharedWorkspace) {
         $legacy.sharedWorkspace = [ordered]@{
-            enabled       = $true
-            path          = [string]$primarySharedWorkspace.path
-            rolePolicyKey = if ($primarySharedWorkspace.PSObject.Properties.Name -contains "rolePolicyKey" -and $primarySharedWorkspace.rolePolicyKey) { [string]$primarySharedWorkspace.rolePolicyKey } else { "sharedWorkspace" }
+            enabled = $true
+            path    = [string]$primarySharedWorkspace.path
         }
     }
     else {
@@ -1246,7 +1323,7 @@ function Convert-ToolkitConfigToPersistedSchema {
             }
         }
 
-        foreach ($propertyName in @("modelSource", "workspaceMode", "workspace", "sharedWorkspaceAccess")) {
+        foreach ($propertyName in @("modelSource", "workspaceMode", "workspace", "sharedWorkspaceAccess", "rolePolicyKey")) {
             if ($clone.PSObject.Properties.Name -contains $propertyName) {
                 $clone.PSObject.Properties.Remove($propertyName)
             }
@@ -1299,7 +1376,9 @@ function Convert-ToolkitConfigToPersistedSchema {
                 name                    = "Shared Workspace"
                 mode                    = "shared"
                 path                    = if ($multi.sharedWorkspace.path) { [string]$multi.sharedWorkspace.path } else { "/home/node/.openclaw/workspace" }
-                rolePolicyKey           = if ($multi.sharedWorkspace.rolePolicyKey) { [string]$multi.sharedWorkspace.rolePolicyKey } else { "sharedWorkspace" }
+                markdownTemplateKeys    = [pscustomobject][ordered]@{
+                    "AGENTS.md" = if ($multi.sharedWorkspace.rolePolicyKey) { [string]$multi.sharedWorkspace.rolePolicyKey } else { "sharedWorkspace" }
+                }
                 enableAgentToAgent      = [bool]$multi.enableAgentToAgent
                 manageWorkspaceAgentsMd = [bool]$multi.manageWorkspaceAgentsMd
                 agents                  = @($sharedAgentIds.ToArray())
@@ -1311,7 +1390,6 @@ function Convert-ToolkitConfigToPersistedSchema {
 
     $agentsContainer = [pscustomobject][ordered]@{
         list            = @($agentsList.ToArray())
-        rolePolicies    = if ($multi.PSObject.Properties.Name -contains "rolePolicies") { $multi.rolePolicies } else { @{} }
         telegramRouting = if ($multi.PSObject.Properties.Name -contains "telegramRouting") { $multi.telegramRouting } else { $null }
     }
 

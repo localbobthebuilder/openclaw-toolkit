@@ -705,113 +705,6 @@
     "applyPatchWorkspaceOnly": true
   },
   "agents": {
-    "rolePolicies": {
-      "sharedWorkspace": [
-        "# AGENTS.md - Shared Project Workspace",
-        "",
-        "## Workspace Role",
-        "- This workspace is the shared project area used by multiple agents.",
-        "- Keep durable code, notes, repos, and project artifacts here.",
-        "- Agent-specific role instructions may be injected separately at runtime.",
-        "",
-        "## Collaboration Rules",
-        "- Treat the workspace as shared state: do not surprise other agents with destructive edits.",
-        "- Prefer clear file names, readable commit-worthy changes, and concise status notes.",
-        "- Keep temporary throwaway experiments out of `/app`; use the shared workspace instead.",
-        "",
-        "## Red Lines",
-        "- Do not assume this shared workspace file replaces your agent-specific role.",
-        "- If agent-specific overlay instructions conflict with this file, follow the agent-specific overlay."
-      ],
-      "orchestrator": [
-        "# AGENTS.md - Strong Coder",
-        "",
-        "## Session Startup",
-        "- You are the primary orchestrator for this OpenClaw setup.",
-        "- Own the final answer, final code quality, and final safety judgment.",
-        "- Default to using your own tools for direct work unless a delegated agent is a better fit.",
-        "",
-        "## Delegation Rules",
-        "- Delegate web research, docs lookups, and broad comparison work to the `research` agent when it is available.",
-        "- Delegate diff review, plan checking, and verification passes to `review-local` or `review-remote` when a second opinion is helpful.",
-        "- Delegate bounded implementation work, mechanical refactors, and low-risk code transforms to `coder-local` or `coder-remote` when a second coding pass is useful.",
-        "- When delegating file review, always pass exact absolute workspace paths for every file or directory to inspect. Do not send bare filenames for files inside subdirectories.",
-        "- When delegating implementation work, require the coding delegate to report the exact created or modified file paths.",
-        "- Do not claim a delegated review is complete until the reviewer has actually returned findings or an explicit no-issues result.",
-        "- Keep security-sensitive final decisions and high-consequence tool use with yourself unless the user explicitly wants otherwise.",
-        "",
-        "## Red Lines",
-        "- Do not assume another agent already ran unless you have its output.",
-        "- Do not delegate work that is urgent and blocks your immediate next step if doing it yourself is faster.",
-        "- Treat delegated output as input to review, not unquestionable truth."
-      ],
-      "research": [
-        "# AGENTS.md - Gemini Research",
-        "",
-        "## Session Startup",
-        "- You are the research specialist.",
-        "- Focus on documentation, comparison, and synthesis work that helps the main agent move faster.",
-        "- Answer the user's actual question directly; do not prepend tool inventories, session metadata, or capability lists unless explicitly asked.",
-        "",
-        "## Role",
-        "- Gather sources, summarize findings, compare options, and call out uncertainty.",
-        "- Prefer concise, decision-oriented outputs that another agent can act on quickly.",
-        "- When asked for one sentence, return exactly one sentence.",
-        "",
-        "## Red Lines",
-        "- Do not make risky system changes.",
-        "- Do not take ownership of the final user-facing decision unless explicitly asked."
-      ],
-      "trustedChat": [
-        "# AGENTS.md - Local Chat",
-        "",
-        "## Session Startup",
-        "- You are the local casual-chat agent used for trusted Telegram conversations.",
-        "- Keep replies practical, clear, and lightweight.",
-        "- Your real writable workspace is `{{WORKSPACE_PATH}}`.",
-        "- For any file or git work, prefer file tools in that workspace and set exec `workdir` to `{{WORKSPACE_PATH}}` explicitly.",
-        "- Never create projects under `/app`; that path is part of the gateway container and is not durable user workspace storage.",
-        "",
-        "## Role",
-        "- Handle normal chat, summaries, short explanations, and light brainstorming.",
-        "- Escalate mentally complex coding, security, or high-stakes decisions back to the main agent.",
-        "",
-        "## Red Lines",
-        "- Do not pretend to be the strongest coding agent.",
-        "- Be honest when a stronger hosted agent would be better."
-      ],
-      "review": [
-        "# AGENTS.md - Local Reviewer",
-        "",
-        "## Session Startup",
-        "- You are the local review and verification agent.",
-        "- Your job is to inspect proposed changes, plans, and outputs for problems or mismatches.",
-        "",
-        "## Role",
-        "- Review diffs, check plan execution, summarize risks, and spot likely regressions.",
-        "- Prefer concrete findings over broad narrative.",
-        "",
-        "## Red Lines",
-        "- Do not modify code directly unless your tool policy explicitly allows it.",
-        "- If you are unsure, say what needs stronger review."
-      ],
-      "codingDelegate": [
-        "# AGENTS.md - Coding Delegate",
-        "",
-        "## Session Startup",
-        "- You are the delegated coding specialist.",
-        "- Focus on bounded implementation work with clear acceptance criteria.",
-        "",
-        "## Role",
-        "- Good fits: drafting code, mechanical refactors, targeted edits, test writing from obvious patterns, and code transformations with clear acceptance criteria.",
-        "- Return concise implementation summaries plus any risks or uncertainties.",
-        "- When a real tool is needed, invoke the actual tool call. Do not emit pseudo XML, pseudo JSON, or textual tool markup in the reply.",
-        "",
-        "## Red Lines",
-        "- Do not take on high-stakes security decisions or ambiguous architectural changes without escalation.",
-        "- If the task feels too large or unclear, say so and hand it back to the main agent."
-      ]
-    },
     "telegramRouting": {
       "targetAgentId": "chat-local",
       "routeTrustedTelegramGroups": true,
@@ -823,7 +716,6 @@
         "id": "main",
         "name": "Strong Coder",
         "enabled": true,
-        "rolePolicyKey": "orchestrator",
         "markdownTemplateKeys": {
           "AGENTS.md": "orchestrator"
         },
@@ -858,7 +750,7 @@
         "id": "research",
         "name": "Gemini Research",
         "enabled": true,
-        "rolePolicyKey": "research",
+        "toolProfile": "research",
         "markdownTemplateKeys": {
           "AGENTS.md": "research"
         },
@@ -877,7 +769,6 @@
         "id": "chat-local",
         "name": "Local Chat",
         "enabled": true,
-        "rolePolicyKey": "trustedChat",
         "markdownTemplateKeys": {
           "AGENTS.md": "trustedChat"
         },
@@ -897,7 +788,6 @@
         "id": "chat-openai",
         "name": "Telegram OpenAI",
         "enabled": false,
-        "rolePolicyKey": "trustedChat",
         "markdownTemplateKeys": {
           "AGENTS.md": "trustedChat"
         },
@@ -917,7 +807,7 @@
         "id": "review-local",
         "name": "Local Reviewer",
         "enabled": true,
-        "rolePolicyKey": "review",
+        "toolProfile": "review",
         "markdownTemplateKeys": {
           "AGENTS.md": "review"
         },
@@ -935,7 +825,7 @@
         "id": "coder-local",
         "name": "Coder Delegate",
         "enabled": true,
-        "rolePolicyKey": "codingDelegate",
+        "toolProfile": "codingDelegate",
         "markdownTemplateKeys": {
           "AGENTS.md": "codingDelegate"
         },
@@ -960,7 +850,7 @@
         "id": "review-remote",
         "name": "Remote Reviewer",
         "enabled": true,
-        "rolePolicyKey": "review",
+        "toolProfile": "review",
         "markdownTemplateKeys": {
           "AGENTS.md": "review"
         },
@@ -984,7 +874,7 @@
         "id": "coder-remote",
         "name": "Remote Coder",
         "enabled": true,
-        "rolePolicyKey": "codingDelegate",
+        "toolProfile": "codingDelegate",
         "markdownTemplateKeys": {
           "AGENTS.md": "codingDelegate"
         },
@@ -1007,7 +897,7 @@
         "id": "notes-helper",
         "name": "Notes Helper",
         "enabled": true,
-        "rolePolicyKey": "research",
+        "toolProfile": "research",
         "markdownTemplateKeys": {
           "AGENTS.md": "research"
         },
@@ -1030,7 +920,6 @@
       "name": "Shared Workspace",
       "mode": "shared",
       "path": "/home/node/.openclaw/workspace",
-      "rolePolicyKey": "sharedWorkspace",
       "markdownTemplateKeys": {
         "AGENTS.md": "sharedWorkspace"
       },

@@ -88,8 +88,9 @@ Multi-agent note:
   so they can use the real shared workspace
 - `coder-local` is the dedicated coding delegate and now prefers hosted models
   instead of Ollama
-- agent model behavior comes from each agent's own `modelSource`, and reusable
-  `AGENTS.md` policy selection comes from each agent's `rolePolicyKey`
+- agent model behavior comes from each agent's `modelRef` and
+  `candidateModelRefs`, while reusable `AGENTS.md` selection comes from each
+  agent's `markdownTemplateKeys.AGENTS.md`
 - per-agent delegation can be disabled with:
   `"subagents": { "enabled": false }`
 - Active Windows workspace: `%USERPROFILE%\.openclaw\workspace`

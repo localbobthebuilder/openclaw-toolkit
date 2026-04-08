@@ -628,12 +628,14 @@ The current starter layout creates:
 
 Agent config note:
 
-- model resolution is now driven by each agent's own `modelSource`
-- use `modelSource: "hosted"` for hosted-provider candidate selection
-- use `modelSource: "local"` for Ollama-backed selection
-- use `rolePolicyKey` on the agent config to choose which entry under
-  `multiAgent.rolePolicies` is written into managed `AGENTS.md`
-- policy keys are reusable, so multiple agents can share one policy on purpose
+- model resolution is now driven by each agent's own `modelRef` plus
+  `candidateModelRefs`
+- use `markdownTemplateKeys.AGENTS.md` on the agent config to choose which
+  reusable AGENTS template is written into managed `AGENTS.md`
+- AGENTS template keys are reusable, so multiple agents can intentionally share
+  one template
+- use `toolProfile` to reuse the built-in tool presets such as `research`,
+  `review`, or `codingDelegate`
 
 It also enables `tools.agentToAgent` so your stronger agent can delegate to the
 other configured agents.
@@ -686,8 +688,10 @@ Example extra agent:
     "enabled": true,
     "id": "notes-helper",
     "name": "Notes Helper",
-    "rolePolicyKey": "research",
-    "modelSource": "hosted",
+    "toolProfile": "research",
+    "markdownTemplateKeys": {
+      "AGENTS.md": "research"
+    },
     "workspaceMode": "private",
     "sharedWorkspaceAccess": true,
     "workspace": "/home/node/.openclaw/workspace-notes-helper",
@@ -710,7 +714,8 @@ Notes for `extraAgents`:
   `workspaceMode: "private"`
 - private extra agents can still collaborate through
   `sharedWorkspaceAccess: true`
-- `rolePolicyKey` controls which managed `AGENTS.md` policy block is written
+- `markdownTemplateKeys.AGENTS.md` controls which managed `AGENTS.md` template
+  is written
 - `toolProfile` can be used to reuse the built-in tool presets such as
   `research`, `review`, or `codingDelegate`
 - or you can provide an explicit `tools` object directly on the extra agent
@@ -724,8 +729,10 @@ Example mixed layout:
   "enabled": true,
   "id": "research",
   "name": "Gemini Research",
-  "rolePolicyKey": "research",
-  "modelSource": "hosted",
+  "toolProfile": "research",
+  "markdownTemplateKeys": {
+    "AGENTS.md": "research"
+  },
   "workspaceMode": "private",
   "sharedWorkspaceAccess": true,
   "workspace": "/home/node/.openclaw/workspace-research",
