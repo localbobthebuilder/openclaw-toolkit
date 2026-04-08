@@ -238,12 +238,19 @@ function applyLegacyRolePolicyTemplates(config, libraries) {
     if (!content) {
       continue;
     }
-    if (!agentLibrary[key]) {
+    if (key !== 'sharedWorkspace' && !agentLibrary[key]) {
       agentLibrary[key] = content;
     }
     if (key === 'sharedWorkspace' && !workspaceLibrary[key]) {
       workspaceLibrary[key] = content;
     }
+  }
+}
+
+function pruneMisplacedTemplateLibraryEntries(libraries) {
+  const agentAgentsLibrary = libraries?.agents?.['AGENTS.md'];
+  if (agentAgentsLibrary && typeof agentAgentsLibrary === 'object' && Object.prototype.hasOwnProperty.call(agentAgentsLibrary, 'sharedWorkspace')) {
+    delete agentAgentsLibrary.sharedWorkspace;
   }
 }
 
@@ -274,6 +281,7 @@ function loadToolkitTemplates(config) {
       workspaces: loadMarkdownTemplateLibrary('workspaces', validWorkspaceMarkdownFiles)
     }
   };
+  pruneMisplacedTemplateLibraryEntries(templates.libraries);
   const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
   const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
 
@@ -292,6 +300,7 @@ function loadToolkitTemplates(config) {
   }
 
   applyLegacyRolePolicyTemplates(config, templates.libraries);
+  pruneMisplacedTemplateLibraryEntries(templates.libraries);
   return templates;
 }
 
@@ -301,6 +310,8 @@ function saveToolkitTemplates(config, templates) {
   const libraries = templates?.libraries && typeof templates.libraries === 'object' ? templates.libraries : {};
   const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
   const workspaces = Array.isArray(config?.workspaces) ? config.workspaces : [];
+
+  pruneMisplacedTemplateLibraryEntries(libraries);
 
   for (const agent of agents) {
     if (!isSafeIdSegment(agent?.id)) {
