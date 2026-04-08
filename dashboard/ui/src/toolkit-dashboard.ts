@@ -61,7 +61,7 @@ export class ToolkitDashboard extends LitElement {
     .form-group { margin-bottom: 15px; }
     label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
     .help-text { display: block; margin-top: 6px; font-size: 0.85rem; color: #888; }
-    input, select, textarea { width: 100%; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
+    input, select, textarea { width: 100%; box-sizing: border-box; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
     input:focus, select:focus, textarea:focus { border-color: #00bcd4; outline: none; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .btn { padding: 10px 18px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: opacity 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
