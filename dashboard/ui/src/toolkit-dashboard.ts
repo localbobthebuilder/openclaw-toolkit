@@ -74,6 +74,12 @@ export class ToolkitDashboard extends LitElement {
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
     .card-header h3 { margin: 0; font-size: 1.1rem; color: #00bcd4; }
     .form-group { margin-bottom: 15px; }
+    .fallback-editor { margin-top: 12px; margin-bottom: 0; width: 100%; min-width: 0; max-width: none; }
+    .fallback-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; width: 100%; }
+    .fallback-row { width: 100%; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid #444; border-radius: 8px; background: #2a2a2a; }
+    .fallback-label { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+    .fallback-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .fallback-select { margin-top: 10px; width: 100%; box-sizing: border-box; }
     label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
     .help-text { display: block; margin-top: 6px; font-size: 0.85rem; color: #888; }
     input, select, textarea { width: 100%; box-sizing: border-box; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
@@ -89,7 +95,7 @@ export class ToolkitDashboard extends LitElement {
     .log-container { background: #000; height: 500px; overflow-y: auto; padding: 15px; border-radius: 6px; font-family: monospace; border: 1px solid #333; }
     .log-entry { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
     .item-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #252525; border: 1px solid #333; border-radius: 4px; margin-bottom: 8px; }
-    .item-info { display: flex; flex-direction: column; gap: 4px; }
+    .item-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
     .item-title { font-weight: bold; color: #fff; }
     .item-sub { font-size: 0.75rem; color: #777; }
     .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -2479,15 +2485,15 @@ export class ToolkitDashboard extends LitElement {
     const fallbackIds = this.getOrderedFallbackModelIds(model);
     const availableFallbackIds = availableModelIds.filter((fallbackId: string) => fallbackId !== String(model?.id || '') && !fallbackIds.includes(fallbackId));
     return html`
-      <div class="form-group" style="margin-bottom: 0; min-width: 320px;">
+      <div class="form-group fallback-editor">
         <label>Ordered Local Fallbacks</label>
         <div class="help-text" style="margin-top: 0;">OpenClaw tries fallbacks top-to-bottom. The toolkit also uses this order when it needs to step down to a smaller local model.</div>
         ${fallbackIds.length > 0 ? html`
-          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+          <div class="fallback-list">
             ${fallbackIds.map((fallbackId: string, index: number) => html`
-              <div class="tag" style="border-radius: 8px; justify-content: space-between; width: 100%;">
-                <span>${index + 1}. ollama/${fallbackId}</span>
-                <span style="display: flex; gap: 6px;">
+              <div class="fallback-row">
+                <span class="fallback-label">${index + 1}. ollama/${fallbackId}</span>
+                <span class="fallback-actions">
                   <button class="btn btn-ghost" style="padding: 4px 8px;" ?disabled=${index === 0} @click=${() => {
                     const nextFallbackIds = [...fallbackIds];
                     [nextFallbackIds[index - 1], nextFallbackIds[index]] = [nextFallbackIds[index], nextFallbackIds[index - 1]];
@@ -2510,7 +2516,7 @@ export class ToolkitDashboard extends LitElement {
           </div>
         ` : html`<div class="item-sub" style="margin-top: 10px;">No local fallbacks configured.</div>`}
         ${availableFallbackIds.length > 0 ? html`
-          <select style="margin-top: 10px;" @change=${(e: any) => {
+          <select class="fallback-select" @change=${(e: any) => {
             const value = String(e.target.value || '').trim();
             if (value) {
               this.setOrderedFallbackModelIds(model, [...fallbackIds, value]);
@@ -3370,10 +3376,10 @@ export class ToolkitDashboard extends LitElement {
                 <div class="item-row" style="align-items: flex-start; gap: 16px;">
                     <div class="item-info">
                         <span class="item-title">${mo.id}</span>
-                        <span class="item-sub">${this.describeOrderedLocalFallbacks(mo)} | Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}</span>
-                    </div>
-                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        <span class="item-sub">Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}</span>
                         ${endpointModels.length > 1 ? this.renderOrderedLocalFallbackEditor(mo, endpointModels.map((localModel: any) => localModel.id)) : ''}
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: flex-start; flex-shrink: 0;">
                         <div style="display: flex; flex-direction: column; gap: 8px;">
                             <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
                             <button class="btn btn-danger" @click=${() => { endpointModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
@@ -3396,10 +3402,9 @@ export class ToolkitDashboard extends LitElement {
                 <div class="item-row" style="align-items: flex-start; gap: 16px;">
                     <div class="item-info">
                         <span class="item-title">${model.modelRef}</span>
-                        <span class="item-sub">${this.describeOrderedLocalFallbacks(model)}</span>
-                    </div>
-                    <div style="display: flex; gap: 12px; align-items: flex-start;">
                         ${endpointModels.length > 0 ? this.renderOrderedLocalFallbackEditor(model, endpointModels.map((localModel: any) => localModel.id)) : ''}
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: flex-start; flex-shrink: 0;">
                         <div style="display: flex; flex-direction: column; gap: 8px;">
                             <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
                         </div>
@@ -3408,7 +3413,7 @@ export class ToolkitDashboard extends LitElement {
             `)}
 
             <div style="margin-top: 20px;">
-                <button class="btn btn-secondary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model from Catalog</button>
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model from Catalog</button>
             </div>
         </div>
       `;
