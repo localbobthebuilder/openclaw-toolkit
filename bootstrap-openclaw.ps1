@@ -1823,13 +1823,13 @@ function Ensure-OllamaState {
             continue
         }
 
-        foreach ($desiredModelId in @(Get-ToolkitEndpointDesiredModelIds -Config $Config -EndpointKey ([string]$endpoint.key))) {
-            if (-not [string]::IsNullOrWhiteSpace([string]$desiredModelId)) {
-                $requestKey = "$([string]$endpoint.key)::$([string]$desiredModelId)"
+        foreach ($configuredModelId in @(Get-ToolkitEndpointConfiguredModelIds -Config $Config -EndpointKey ([string]$endpoint.key))) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$configuredModelId)) {
+                $requestKey = "$([string]$endpoint.key)::$([string]$configuredModelId)"
                 if ($referencedLocalModelKeys.Add($requestKey)) {
                     $referencedLocalModels.Add([pscustomobject]@{
                             endpointKey = [string]$endpoint.key
-                            modelId     = [string]$desiredModelId
+                            modelId     = [string]$configuredModelId
                         })
                 }
             }

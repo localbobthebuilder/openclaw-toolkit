@@ -88,7 +88,7 @@ Main operator wrapper:
 - `.\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
 - `.\run-openclaw.cmd add-local-model -Model <ollama-model> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
-  Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, optionally write `fallbackModelId`, and optionally assign it to an agent before reapplying bootstrap.
+  Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, optionally write ordered `fallbackModelIds`, and optionally assign it to an agent before reapplying bootstrap.
 - `.\run-openclaw.cmd remove-local-model -Model <ollama-model> [-ReplaceWith <other-ollama-model>]`
   Remove a local Ollama model from managed config and host Ollama storage. If the model is managed, retarget any managed local-agent references before reapplying bootstrap.
 - `.\run-openclaw.cmd compact-storage`
@@ -494,7 +494,7 @@ If you want that managed model entry to carry a fallback model, pass it explicit
 ```
 
 `-FallbackModel` takes an Ollama model ID and writes it to the managed
-`fallbackModelId` field for that local model entry.
+`fallbackModelIds` array for that local model entry.
 
 That one command will:
 

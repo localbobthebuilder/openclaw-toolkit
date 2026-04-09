@@ -2421,7 +2421,7 @@ export class ToolkitDashboard extends LitElement {
     if (endpoint?.ollama && typeof endpoint.ollama === 'object') {
       return endpoint.ollama;
     }
-    if (endpoint && (endpoint.baseUrl || endpoint.hostBaseUrl || endpoint.providerId || Array.isArray(endpoint.models) || Array.isArray(endpoint.modelOverrides))) {
+    if (endpoint && (endpoint.baseUrl || endpoint.hostBaseUrl || endpoint.providerId || Array.isArray(endpoint.models))) {
       return endpoint;
     }
     return null;
@@ -2454,9 +2454,6 @@ export class ToolkitDashboard extends LitElement {
     if (Array.isArray(runtime?.models)) {
       return runtime.models;
     }
-    if (Array.isArray(runtime?.modelOverrides)) {
-      return runtime.modelOverrides;
-    }
     return [];
   }
 
@@ -2472,7 +2469,6 @@ export class ToolkitDashboard extends LitElement {
 
   sanitizeSharedCatalogEntries(models: any[] | undefined) {
     return this.sanitizeModelEntries(models).map((model: any) => {
-      delete model.fallbackModelId;
       delete model.fallbackModelIds;
       return model;
     });
@@ -2486,11 +2482,6 @@ export class ToolkitDashboard extends LitElement {
         if (fallbackId && !fallbackIds.includes(fallbackId)) {
           fallbackIds.push(fallbackId);
         }
-      }
-    } else if (typeof model?.fallbackModelId === 'string') {
-      const fallbackId = model.fallbackModelId.trim();
-      if (fallbackId) {
-        fallbackIds.push(fallbackId);
       }
     }
     return fallbackIds;
@@ -2512,7 +2503,11 @@ export class ToolkitDashboard extends LitElement {
     } else {
       delete model.fallbackModelIds;
     }
-    delete model.fallbackModelId;
+    for (const key of Object.keys(model || {})) {
+      if (key.startsWith('fallbackModel') && key !== 'fallbackModelIds') {
+        delete model[key];
+      }
+    }
   }
 
   describeOrderedLocalFallbacks(model: any) {
@@ -2759,9 +2754,7 @@ export class ToolkitDashboard extends LitElement {
         !!endpoint?.baseUrl ||
         !!endpoint?.hostBaseUrl ||
         !!endpoint?.providerId ||
-        Array.isArray(endpoint?.models) ||
-        Array.isArray(endpoint?.modelOverrides) ||
-        Array.isArray(endpoint?.desiredModelIds);
+        Array.isArray(endpoint?.models);
 
       if (hasRuntime) {
         const runtime: any = {};
@@ -2773,8 +2766,6 @@ export class ToolkitDashboard extends LitElement {
         runtime.autoPullMissingModels = this.normalizeBoolean(rawRuntime?.autoPullMissingModels, true);
         if (Array.isArray(rawRuntime?.models)) {
           runtime.models = this.sanitizeModelEntries(rawRuntime.models);
-        } else if (Array.isArray(rawRuntime?.modelOverrides)) {
-          runtime.models = this.sanitizeModelEntries(rawRuntime.modelOverrides);
         }
         normalized.ollama = runtime;
       }
@@ -2842,7 +2833,6 @@ export class ToolkitDashboard extends LitElement {
   cloneModelCatalogEntry(model: any) {
     const clone = JSON.parse(JSON.stringify(model));
     delete clone.name;
-    delete clone.fallbackModelId;
     delete clone.fallbackModelIds;
     return clone;
   }

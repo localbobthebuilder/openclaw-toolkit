@@ -149,11 +149,6 @@ function Get-ToolkitNormalizedFallbackModelIds {
             $fallbackIds.Add($fallbackId)
         }
     }
-    elseif ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelId" -and
-        -not [string]::IsNullOrWhiteSpace([string]$ModelEntry.fallbackModelId)) {
-        $fallbackIds.Add([string]$ModelEntry.fallbackModelId)
-    }
-
     return @($fallbackIds.ToArray())
 }
 
@@ -185,8 +180,10 @@ function Normalize-ToolkitModelEntry {
         $ModelEntry.PSObject.Properties.Remove("fallbackModelIds")
     }
 
-    if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelId") {
-        $ModelEntry.PSObject.Properties.Remove("fallbackModelId")
+    foreach ($propertyName in @($ModelEntry.PSObject.Properties.Name)) {
+        if ($propertyName -like "fallbackModel*" -and $propertyName -ne "fallbackModelIds") {
+            $ModelEntry.PSObject.Properties.Remove($propertyName)
+        }
     }
 
     return $ModelEntry
@@ -423,9 +420,7 @@ function Normalize-ToolkitConfigDefaults {
                 ($endpoint.PSObject.Properties.Name -contains "baseUrl" -and $endpoint.baseUrl) -or
                 ($endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -and $endpoint.hostBaseUrl) -or
                 ($endpoint.PSObject.Properties.Name -contains "providerId" -and $endpoint.providerId) -or
-                ($endpoint.PSObject.Properties.Name -contains "models" -and $null -ne $endpoint.models) -or
-                ($endpoint.PSObject.Properties.Name -contains "modelOverrides" -and $null -ne $endpoint.modelOverrides) -or
-                ($endpoint.PSObject.Properties.Name -contains "desiredModelIds" -and $null -ne $endpoint.desiredModelIds)
+                ($endpoint.PSObject.Properties.Name -contains "models" -and $null -ne $endpoint.models)
             if ($hasRuntime) {
                 $runtime = if ($endpoint.PSObject.Properties.Name -contains "ollama" -and $null -ne $endpoint.ollama) {
                     $endpoint.ollama
@@ -438,11 +433,6 @@ function Normalize-ToolkitConfigDefaults {
                 Set-ToolkitBooleanDefaultProperty -Object $runtime -PropertyName "autoPullMissingModels" -DefaultValue $true
                 if ($runtime.PSObject.Properties.Name -contains "models" -and $null -ne $runtime.models) {
                     foreach ($modelEntry in @($runtime.models)) {
-                        Normalize-ToolkitModelEntry -ModelEntry $modelEntry -AllowFallbacks | Out-Null
-                    }
-                }
-                if ($runtime.PSObject.Properties.Name -contains "modelOverrides" -and $null -ne $runtime.modelOverrides) {
-                    foreach ($modelEntry in @($runtime.modelOverrides)) {
                         Normalize-ToolkitModelEntry -ModelEntry $modelEntry -AllowFallbacks | Out-Null
                     }
                 }

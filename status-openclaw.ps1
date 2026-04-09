@@ -633,12 +633,12 @@ function Get-OllamaEndpointSnapshots {
             }
         }
 
-        $desiredModelIds = @(Get-ToolkitEndpointDesiredModelIds -Config $BootstrapConfig -EndpointKey ([string]$endpoint.key))
-        if ($reachable -and $desiredModelIds.Count -gt 0) {
+        $configuredModelIds = @(Get-ToolkitEndpointConfiguredModelIds -Config $BootstrapConfig -EndpointKey ([string]$endpoint.key))
+        if ($reachable -and $configuredModelIds.Count -gt 0) {
             $missingDesiredIds = @(
-                foreach ($desiredId in $desiredModelIds) {
-                    if ([string]$desiredId -notin $modelIds) {
-                        [string]$desiredId
+                foreach ($configuredId in $configuredModelIds) {
+                    if ([string]$configuredId -notin $modelIds) {
+                        [string]$configuredId
                     }
                 }
             )

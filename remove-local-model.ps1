@@ -231,34 +231,6 @@ function Remove-ModelEntry {
                 $changed.Add("$([string]$endpoint.key).models")
             }
         }
-
-        if ($runtime.PSObject.Properties.Name -contains "desiredModelIds") {
-            $newDesiredIds = @(
-                foreach ($desiredId in @($runtime.desiredModelIds)) {
-                    if ([string]$desiredId -ne $ModelId) {
-                        [string]$desiredId
-                    }
-                }
-            )
-            if (@($newDesiredIds).Count -ne @($runtime.desiredModelIds).Count) {
-                $runtime.desiredModelIds = $newDesiredIds
-                $changed.Add("$([string]$endpoint.key).desiredModelIds")
-            }
-        }
-
-        if ($runtime.PSObject.Properties.Name -contains "modelOverrides") {
-            $newOverrides = @(
-                foreach ($override in @($runtime.modelOverrides)) {
-                    if ($override -and [string]$override.id -ne $ModelId) {
-                        $override
-                    }
-                }
-            )
-            if (@($newOverrides).Count -ne @($runtime.modelOverrides).Count) {
-                $runtime.modelOverrides = $newOverrides
-                $changed.Add("$([string]$endpoint.key).modelOverrides")
-            }
-        }
     }
 
     return @($changed)

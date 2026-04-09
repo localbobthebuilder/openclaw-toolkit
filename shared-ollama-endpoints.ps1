@@ -44,7 +44,7 @@ function Get-ToolkitSharedModelCatalog {
     return @()
 }
 
-function Get-ToolkitLegacyLocalModelCatalog {
+function Get-ToolkitSharedLocalModelCatalog {
     param([Parameter(Mandatory = $true)]$Config)
 
     return @(Normalize-ToolkitOllamaModelEntries -Entries (Get-ToolkitSharedModelCatalog -Config $Config))
@@ -118,9 +118,7 @@ function Get-ToolkitEndpoints {
         elseif ($endpoint.PSObject.Properties.Name -contains "baseUrl" -or
                 $endpoint.PSObject.Properties.Name -contains "hostBaseUrl" -or
                 $endpoint.PSObject.Properties.Name -contains "providerId" -or
-                $endpoint.PSObject.Properties.Name -contains "models" -or
-                $endpoint.PSObject.Properties.Name -contains "desiredModelIds" -or
-                $endpoint.PSObject.Properties.Name -contains "modelOverrides") {
+                $endpoint.PSObject.Properties.Name -contains "models") {
             $rawOllama = $endpoint
         }
 
@@ -160,20 +158,6 @@ function Get-ToolkitEndpoints {
                     models                = @(
                         if ($rawOllama.PSObject.Properties.Name -contains "models" -and $rawOllama.models) {
                             Normalize-ToolkitOllamaModelEntries -Entries $rawOllama.models
-                        }
-                    )
-                    legacyDesiredModelIds = @(
-                        if ($rawOllama.PSObject.Properties.Name -contains "desiredModelIds" -and $rawOllama.desiredModelIds) {
-                            foreach ($modelId in @($rawOllama.desiredModelIds)) {
-                                if (-not [string]::IsNullOrWhiteSpace([string]$modelId)) {
-                                    [string]$modelId
-                                }
-                            }
-                        }
-                    )
-                    legacyModelOverrides  = @(
-                        if ($rawOllama.PSObject.Properties.Name -contains "modelOverrides" -and $rawOllama.modelOverrides) {
-                            Normalize-ToolkitOllamaModelEntries -Entries $rawOllama.modelOverrides
                         }
                     )
                 }
@@ -261,8 +245,6 @@ function Get-ToolkitOllamaEndpoints {
             autoPullMissingModels = [bool]$runtime.autoPullMissingModels
             usesEndpointModels    = [bool]$runtime.usesEndpointModels
             models                = @($runtime.models)
-            legacyDesiredModelIds = @($runtime.legacyDesiredModelIds)
-            legacyModelOverrides  = @($runtime.legacyModelOverrides)
             hostedModels          = @($endpoint.hostedModels)
         }
 
@@ -549,34 +531,7 @@ function Get-AgentOllamaEndpointKey {
     return $null
 }
 
-function Merge-ToolkitConfigObjects {
-    param(
-        $BaseObject,
-        $OverrideObject
-    )
-
-    $merged = [ordered]@{}
-    if ($null -ne $BaseObject) {
-        foreach ($property in $BaseObject.PSObject.Properties) {
-            $merged[$property.Name] = $property.Value
-        }
-    }
-    if ($null -ne $OverrideObject) {
-        foreach ($property in $OverrideObject.PSObject.Properties) {
-            if ($null -ne $property.Value) {
-                $merged[$property.Name] = $property.Value
-            }
-        }
-    }
-
-    if ($merged.Count -eq 0) {
-        return $null
-    }
-
-    return [pscustomobject]$merged
-}
-
-function Get-ToolkitEndpointDesiredModelIds {
+function Get-ToolkitEndpointConfiguredModelIds {
     param(
         [Parameter(Mandatory = $true)]$Config,
         [string]$EndpointKey
@@ -597,7 +552,7 @@ function Get-ToolkitEndpointDesiredModelIds {
         )
     }
 
-    return @($endpoint.legacyDesiredModelIds)
+    return @()
 }
 
 function Get-ToolkitEndpointModelCatalog {
@@ -611,55 +566,7 @@ function Get-ToolkitEndpointModelCatalog {
         return @()
     }
 
-    if ($endpoint.usesEndpointModels) {
-        return @($endpoint.models)
-    }
-
-    $legacyCatalog = @(Get-ToolkitLegacyLocalModelCatalog -Config $Config)
-    $requestedIds = New-Object System.Collections.Generic.List[string]
-    foreach ($modelId in @($endpoint.legacyDesiredModelIds)) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$modelId) -and [string]$modelId -notin @($requestedIds)) {
-            $requestedIds.Add([string]$modelId)
-        }
-    }
-    foreach ($override in @($endpoint.legacyModelOverrides)) {
-        if ($override -and $override.id -and [string]$override.id -notin @($requestedIds)) {
-            $requestedIds.Add([string]$override.id)
-        }
-    }
-    if ($requestedIds.Count -eq 0) {
-        foreach ($legacyModel in @($legacyCatalog)) {
-            if ($legacyModel -and $legacyModel.id -and [string]$legacyModel.id -notin @($requestedIds)) {
-                $requestedIds.Add([string]$legacyModel.id)
-            }
-        }
-    }
-
-    $effectiveCatalog = New-Object System.Collections.Generic.List[object]
-    foreach ($modelId in @($requestedIds)) {
-        $baseEntry = $null
-        foreach ($entry in @($legacyCatalog)) {
-            if ($entry -and [string]$entry.id -eq $modelId) {
-                $baseEntry = $entry
-                break
-            }
-        }
-
-        $overrideEntry = $null
-        foreach ($entry in @($endpoint.legacyModelOverrides)) {
-            if ($entry -and [string]$entry.id -eq $modelId) {
-                $overrideEntry = $entry
-                break
-            }
-        }
-
-        $effectiveEntry = Merge-ToolkitConfigObjects -BaseObject $baseEntry -OverrideObject $overrideEntry
-        if ($null -ne $effectiveEntry) {
-            $effectiveCatalog.Add($effectiveEntry)
-        }
-    }
-
-    return $effectiveCatalog.ToArray()
+    return @($endpoint.models)
 }
 
 function Get-ToolkitLocalModelCatalog {
@@ -680,7 +587,7 @@ function Get-ToolkitLocalModelCatalog {
         return $catalog.ToArray()
     }
 
-    return @(Get-ToolkitLegacyLocalModelCatalog -Config $Config)
+    return @(Get-ToolkitSharedLocalModelCatalog -Config $Config)
 }
 
 function Get-ToolkitLocalModelEntry {
@@ -738,10 +645,6 @@ function Get-ToolkitConfiguredModelFallbackIds {
         return @($ModelEntry.fallbackModelIds)
     }
 
-    if ($ModelEntry.PSObject.Properties.Name -contains "fallbackModelId" -and $ModelEntry.fallbackModelId) {
-        return @([string]$ModelEntry.fallbackModelId)
-    }
-
     return @()
 }
 
@@ -777,12 +680,12 @@ function Resolve-ToolkitEndpointModelFallbackRefs {
     }
 
     $fallbackRefs = @()
-    foreach ($fallbackModelId in @(Get-ToolkitConfiguredModelFallbackIds -ModelEntry $modelEntry)) {
-        if ([string]::IsNullOrWhiteSpace([string]$fallbackModelId)) {
+    foreach ($fallbackId in @(Get-ToolkitConfiguredModelFallbackIds -ModelEntry $modelEntry)) {
+        if ([string]::IsNullOrWhiteSpace([string]$fallbackId)) {
             continue
         }
 
-        $fallbackRef = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$fallbackModelId) -EndpointKey $endpointKey
+        $fallbackRef = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$fallbackId) -EndpointKey $endpointKey
         if ($UseAvailableRefsOnly -and $fallbackRef -notin @($AvailableOllamaRefs)) {
             continue
         }

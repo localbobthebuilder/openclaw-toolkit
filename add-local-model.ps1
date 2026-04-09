@@ -411,8 +411,10 @@ function New-ManagedEndpointModelEntry {
         $entry.Remove("fallbackModelIds")
     }
 
-    if ($entry.Contains("fallbackModelId")) {
-        $entry.Remove("fallbackModelId")
+    foreach ($propertyName in @($entry.Keys)) {
+        if ($propertyName -like "fallbackModel*" -and $propertyName -ne "fallbackModelIds") {
+            $entry.Remove($propertyName)
+        }
     }
 
     return [pscustomobject]$entry
@@ -465,12 +467,6 @@ function Set-EndpointModelEntry {
         }
 
         $runtime.models = $models.ToArray()
-        if ($runtime.PSObject.Properties.Name -contains "desiredModelIds") {
-            $null = $runtime.PSObject.Properties.Remove("desiredModelIds")
-        }
-        if ($runtime.PSObject.Properties.Name -contains "modelOverrides") {
-            $null = $runtime.PSObject.Properties.Remove("modelOverrides")
-        }
         return
     }
 
@@ -485,7 +481,7 @@ function Set-SharedCatalogLocalModelEntry {
 
     $catalogEntry = [ordered]@{}
     foreach ($property in $ModelEntry.PSObject.Properties) {
-        if ([string]$property.Name -in @("fallbackModelId", "fallbackModelIds")) {
+        if ([string]$property.Name -like "fallbackModel*") {
             continue
         }
 
@@ -598,15 +594,15 @@ function Resolve-ModelPlan {
     $requiredDiskBytes = [int64][math]::Ceiling($rawBytes * 1.10)
 
     $remainingFallbackModelIds = New-Object System.Collections.Generic.List[string]
-    foreach ($rawFallbackModelId in @($FallbackModelIds)) {
-        $fallbackModelId = [string]$rawFallbackModelId
-        if ([string]::IsNullOrWhiteSpace($fallbackModelId) -or
-            $fallbackModelId -eq $ModelId -or
-            $fallbackModelId -in @($remainingFallbackModelIds)) {
+    foreach ($rawFallbackId in @($FallbackModelIds)) {
+        $fallbackId = [string]$rawFallbackId
+        if ([string]::IsNullOrWhiteSpace($fallbackId) -or
+            $fallbackId -eq $ModelId -or
+            $fallbackId -in @($remainingFallbackModelIds)) {
             continue
         }
 
-        $remainingFallbackModelIds.Add($fallbackModelId)
+        $remainingFallbackModelIds.Add($fallbackId)
     }
 
     if ($rawMiB -gt $rawLimitMiB) {
