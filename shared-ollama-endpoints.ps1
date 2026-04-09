@@ -57,27 +57,6 @@ function Get-ToolkitEndpoints {
     if ($Config.PSObject.Properties.Name -contains "endpoints" -and $Config.endpoints) {
         $rawEndpoints = @($Config.endpoints)
     }
-    elseif ($Config.ollama -and $Config.ollama.PSObject.Properties.Name -contains "endpoints" -and $Config.ollama.endpoints) {
-        $rawEndpoints = @($Config.ollama.endpoints)
-    }
-    elseif ($Config.ollama -and $Config.ollama.enabled) {
-        $legacy = [ordered]@{
-            key      = "local"
-            default  = $true
-            telemetry = [ordered]@{
-                kind = "local-nvidia-smi"
-            }
-            ollama   = [ordered]@{
-                enabled             = $true
-                providerId          = "ollama"
-                baseUrl             = if ($Config.ollama.baseUrl) { [string]$Config.ollama.baseUrl } else { "http://127.0.0.1:11434" }
-                hostBaseUrl         = if ($Config.ollama.hostBaseUrl) { [string]$Config.ollama.hostBaseUrl } else { "http://127.0.0.1:11434" }
-                apiKey              = if ($Config.ollama.apiKey) { [string]$Config.ollama.apiKey } else { "ollama-local" }
-                autoPullMissingModels = $true
-            }
-        }
-        $rawEndpoints = @([pscustomobject]$legacy)
-    }
 
     $normalized = New-Object System.Collections.Generic.List[object]
     $sawDefault = $false

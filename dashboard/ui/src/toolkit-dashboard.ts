@@ -716,11 +716,7 @@ export class ToolkitDashboard extends LitElement {
     normalized.mode = normalized.mode === 'private' ? 'private' : 'shared';
     normalized.enableAgentToAgent = this.normalizeBoolean(normalized.enableAgentToAgent, false);
     normalized.manageWorkspaceAgentsMd = this.normalizeBoolean(normalized.manageWorkspaceAgentsMd, false);
-    const legacyRoleKey = typeof normalized.rolePolicyKey === 'string' ? normalized.rolePolicyKey.trim() : '';
     normalized.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(normalized, VALID_WORKSPACE_MARKDOWN_FILES);
-    if (legacyRoleKey && !normalized.markdownTemplateKeys['AGENTS.md']) {
-      normalized.markdownTemplateKeys['AGENTS.md'] = legacyRoleKey;
-    }
     if (!Array.isArray(normalized.agents)) {
       normalized.agents = [];
     }
@@ -761,9 +757,6 @@ export class ToolkitDashboard extends LitElement {
     if (Array.isArray(config?.endpoints)) {
       return config.endpoints;
     }
-    if (Array.isArray(config?.ollama?.endpoints)) {
-      return config.ollama.endpoints;
-    }
     return [];
   }
 
@@ -784,8 +777,6 @@ export class ToolkitDashboard extends LitElement {
     const endpoints = this.getConfigEndpointsFrom(config).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(config?.endpoints)) {
       config.endpoints = endpoints;
-    } else if (Array.isArray(config?.ollama?.endpoints)) {
-      config.ollama.endpoints = endpoints;
     }
 
     const agents = Array.isArray(config?.agents?.list) ? config.agents.list : [];
@@ -794,15 +785,6 @@ export class ToolkitDashboard extends LitElement {
         .map((agent: any) => String(agent?.id || '').trim())
         .filter((agentId: string) => agentId.length > 0)
     );
-    const legacyAssignments = new Map<string, string>();
-    for (const agent of agents) {
-      const agentId = String(agent?.id || '').trim();
-      if (!agentId) continue;
-      const legacyEndpointKey = typeof agent?.endpointKey === 'string' ? agent.endpointKey.trim() : '';
-      if (legacyEndpointKey) {
-        legacyAssignments.set(agentId, legacyEndpointKey);
-      }
-    }
 
     const assignedAgentIds = new Set<string>();
     for (const endpoint of endpoints) {
@@ -815,18 +797,6 @@ export class ToolkitDashboard extends LitElement {
         assignedAgentIds.add(agentId);
       }
       endpoint.agents = cleanedAgentIds;
-    }
-
-    for (const [agentId, endpointKey] of legacyAssignments.entries()) {
-      if (assignedAgentIds.has(agentId)) {
-        continue;
-      }
-      const endpoint = endpoints.find((candidate: any) => String(candidate?.key || '') === endpointKey);
-      if (!endpoint) {
-        continue;
-      }
-      endpoint.agents = [...this.getEndpointAgentIds(endpoint), agentId];
-      assignedAgentIds.add(agentId);
     }
 
     for (const agent of agents) {
@@ -878,19 +848,6 @@ export class ToolkitDashboard extends LitElement {
     }
     record.markdownTemplateKeys = normalized;
     return normalized;
-  }
-
-  getLegacyToolProfile(roleKey: string | null | undefined) {
-    switch ((typeof roleKey === 'string' ? roleKey.trim().toLowerCase() : '')) {
-      case 'research':
-        return 'research';
-      case 'review':
-        return 'review';
-      case 'codingdelegate':
-        return 'codingDelegate';
-      default:
-        return '';
-    }
   }
 
   getMarkdownTemplateSelection(record: any, fileName: string, validFileNames: readonly string[]) {
@@ -2613,17 +2570,7 @@ export class ToolkitDashboard extends LitElement {
     delete clone.modelSource;
     clone.enabled = this.normalizeBoolean(clone.enabled, true);
     delete clone.endpointKey;
-    const legacyRoleKey = typeof clone.rolePolicyKey === 'string' ? clone.rolePolicyKey.trim() : '';
     clone.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(clone, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
-    if (legacyRoleKey && !clone.markdownTemplateKeys['AGENTS.md']) {
-      clone.markdownTemplateKeys['AGENTS.md'] = legacyRoleKey;
-    }
-    if ((!clone.toolProfile || typeof clone.toolProfile !== 'string' || !clone.toolProfile.trim()) && legacyRoleKey) {
-      const derivedToolProfile = this.getLegacyToolProfile(legacyRoleKey);
-      if (derivedToolProfile) {
-        clone.toolProfile = derivedToolProfile;
-      }
-    }
     delete clone.rolePolicyKey;
     if (!Array.isArray(clone.candidateModelRefs)) {
       clone.candidateModelRefs = [];
@@ -2643,8 +2590,6 @@ export class ToolkitDashboard extends LitElement {
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(clone.endpoints)) {
       clone.endpoints = normalizedEndpoints;
-    } else if (Array.isArray(clone?.ollama?.endpoints)) {
-      clone.ollama.endpoints = normalizedEndpoints;
     }
     this.normalizeEndpointAgentAssignments(clone);
     this.normalizeWorkspaceAssignments(clone);
@@ -2680,8 +2625,6 @@ export class ToolkitDashboard extends LitElement {
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(clone.endpoints)) {
       clone.endpoints = normalizedEndpoints;
-    } else if (Array.isArray(clone?.ollama?.endpoints)) {
-      clone.ollama.endpoints = normalizedEndpoints;
     }
     this.normalizeEndpointAgentAssignments(clone);
     clone.workspaces = clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace));
@@ -2782,9 +2725,6 @@ export class ToolkitDashboard extends LitElement {
 
     if (Array.isArray(clone.endpoints)) {
       clone.endpoints = clone.endpoints.map((endpoint: any) => normalizeEndpoint(endpoint));
-    } else if (Array.isArray(clone.ollama.endpoints)) {
-      clone.endpoints = clone.ollama.endpoints.map((endpoint: any) => normalizeEndpoint(endpoint));
-      delete clone.ollama.endpoints;
     } else {
       clone.endpoints = [];
     }

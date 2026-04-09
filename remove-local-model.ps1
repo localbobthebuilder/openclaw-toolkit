@@ -204,12 +204,7 @@ function Remove-ModelEntry {
         }
     }
 
-    $endpointCollection = if ($Config.PSObject.Properties.Name -contains "endpoints" -and $Config.endpoints) {
-        @($Config.endpoints)
-    }
-    else {
-        @($Config.ollama.endpoints)
-    }
+    $endpointCollection = @(Get-ToolkitMutableEndpointsCollection -Config $Config)
 
     foreach ($endpoint in $endpointCollection) {
         if ($null -eq $endpoint) {

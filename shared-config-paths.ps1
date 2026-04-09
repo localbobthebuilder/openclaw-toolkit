@@ -120,17 +120,6 @@ function Set-ToolkitMarkdownTemplateSelection {
     }
 }
 
-function Get-ToolkitDerivedToolProfile {
-    param([string]$LegacyRolePolicyKey)
-
-    switch (([string]$LegacyRolePolicyKey).Trim().ToLowerInvariant()) {
-        "research" { return "research" }
-        "review" { return "review" }
-        "codingdelegate" { return "codingDelegate" }
-        default { return $null }
-    }
-}
-
 function Get-ToolkitNormalizedFallbackModelIds {
     param($ModelEntry)
 
@@ -196,13 +185,6 @@ function Get-ToolkitMutableEndpointsCollection {
         return @($Config.endpoints)
     }
 
-    if ($Config.PSObject.Properties.Name -contains "ollama" -and
-        $null -ne $Config.ollama -and
-        $Config.ollama.PSObject.Properties.Name -contains "endpoints" -and
-        $null -ne $Config.ollama.endpoints) {
-        return @($Config.ollama.endpoints)
-    }
-
     return @()
 }
 
@@ -226,34 +208,6 @@ function Normalize-ToolkitAgentConfig {
         Set-ToolkitBooleanDefaultProperty -Object $AgentConfig.subagents -PropertyName "enabled" -DefaultValue $true
         Set-ToolkitBooleanDefaultProperty -Object $AgentConfig.subagents -PropertyName "requireAgentId" -DefaultValue $true
         Set-ToolkitArrayDefaultProperty -Object $AgentConfig.subagents -PropertyName "allowAgents"
-    }
-
-    $legacyRolePolicyKey = if ($AgentConfig.PSObject.Properties.Name -contains "rolePolicyKey" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.rolePolicyKey)) {
-        [string]$AgentConfig.rolePolicyKey
-    }
-    else {
-        $null
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($legacyRolePolicyKey)) {
-        $selectionRoot = Ensure-ToolkitMarkdownTemplateKeysProperty -Object $AgentConfig
-        if (-not ($selectionRoot.PSObject.Properties.Name -contains "AGENTS.md") -or
-            [string]::IsNullOrWhiteSpace([string]$selectionRoot.'AGENTS.md')) {
-            Set-ToolkitMarkdownTemplateSelection -Object $AgentConfig -FileName "AGENTS.md" -TemplateKey $legacyRolePolicyKey
-        }
-
-        if ((-not ($AgentConfig.PSObject.Properties.Name -contains "toolProfile")) -or
-            [string]::IsNullOrWhiteSpace([string]$AgentConfig.toolProfile)) {
-            $derivedToolProfile = Get-ToolkitDerivedToolProfile -LegacyRolePolicyKey $legacyRolePolicyKey
-            if (-not [string]::IsNullOrWhiteSpace([string]$derivedToolProfile)) {
-                Add-Member -InputObject $AgentConfig -NotePropertyName "toolProfile" -NotePropertyValue ([string]$derivedToolProfile) -Force
-            }
-        }
-    }
-
-    if ($AgentConfig.PSObject.Properties.Name -contains "rolePolicyKey") {
-        $AgentConfig.PSObject.Properties.Remove("rolePolicyKey")
     }
 
     return $AgentConfig
@@ -324,27 +278,6 @@ function Sync-ToolkitEndpointAssignments {
         }
 
         $endpoint.agents = @($cleanedAgentIds.ToArray())
-    }
-
-    foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
-        if ($null -eq $agent -or -not ($agent.PSObject.Properties.Name -contains "id")) {
-            continue
-        }
-
-        $agentId = [string]$agent.id
-        if ([string]::IsNullOrWhiteSpace($agentId) -or $assignedAgentIds.Contains($agentId)) {
-            continue
-        }
-
-        if ($agent.PSObject.Properties.Name -contains "endpointKey" -and
-            -not [string]::IsNullOrWhiteSpace([string]$agent.endpointKey)) {
-            $endpointKey = [string]$agent.endpointKey
-            if ($endpointByKey.ContainsKey($endpointKey)) {
-                $endpoint = $endpointByKey[$endpointKey]
-                $endpoint.agents = @(@($endpoint.agents) + $agentId)
-                [void]$assignedAgentIds.Add($agentId)
-            }
-        }
     }
 
     return $Config
@@ -487,23 +420,6 @@ function Normalize-ToolkitConfigDefaults {
             Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "enableAgentToAgent" -DefaultValue $false
             Set-ToolkitBooleanDefaultProperty -Object $workspace -PropertyName "manageWorkspaceAgentsMd" -DefaultValue $false
             Set-ToolkitArrayDefaultProperty -Object $workspace -PropertyName "agents"
-            $legacyWorkspaceRolePolicyKey = if ($workspace.PSObject.Properties.Name -contains "rolePolicyKey" -and
-                -not [string]::IsNullOrWhiteSpace([string]$workspace.rolePolicyKey)) {
-                [string]$workspace.rolePolicyKey
-            }
-            else {
-                $null
-            }
-            if (-not [string]::IsNullOrWhiteSpace($legacyWorkspaceRolePolicyKey)) {
-                $workspaceSelectionRoot = Ensure-ToolkitMarkdownTemplateKeysProperty -Object $workspace
-                if (-not ($workspaceSelectionRoot.PSObject.Properties.Name -contains "AGENTS.md") -or
-                    [string]::IsNullOrWhiteSpace([string]$workspaceSelectionRoot.'AGENTS.md')) {
-                    Set-ToolkitMarkdownTemplateSelection -Object $workspace -FileName "AGENTS.md" -TemplateKey $legacyWorkspaceRolePolicyKey
-                }
-            }
-            if ($workspace.PSObject.Properties.Name -contains "rolePolicyKey") {
-                $workspace.PSObject.Properties.Remove("rolePolicyKey")
-            }
             if ([string]$workspace.mode -eq "private") {
                 Set-ToolkitArrayDefaultProperty -Object $workspace -PropertyName "sharedWorkspaceIds"
             }
@@ -561,14 +477,6 @@ function Normalize-ToolkitConfigDefaults {
                     if ($workspaceId -notin @($cleanedSharedWorkspaceIds)) {
                         $cleanedSharedWorkspaceIds.Add($workspaceId)
                     }
-                }
-
-                $legacySharedAccess = $false
-                if ($workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess") {
-                    $legacySharedAccess = ConvertTo-ToolkitBooleanValue -Value $workspace.allowSharedWorkspaceAccess -DefaultValue $false
-                }
-                if ($legacySharedAccess -and $cleanedSharedWorkspaceIds.Count -eq 0 -and $sharedWorkspaceIds.Count -gt 0) {
-                    $cleanedSharedWorkspaceIds.Add([string]$sharedWorkspaceIds[0])
                 }
 
                 $workspace.sharedWorkspaceIds = @($cleanedSharedWorkspaceIds.ToArray())
@@ -819,14 +727,6 @@ function Get-ToolkitAccessibleSharedWorkspaceList {
     if ($workspace.PSObject.Properties.Name -contains "sharedWorkspaceIds" -and $null -ne $workspace.sharedWorkspaceIds) {
         $sharedWorkspaceIds = @($workspace.sharedWorkspaceIds | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
-    elseif ($workspace.PSObject.Properties.Name -contains "allowSharedWorkspaceAccess" -and
-        (ConvertTo-ToolkitBooleanValue -Value $workspace.allowSharedWorkspaceAccess -DefaultValue $false)) {
-        $primarySharedWorkspace = Get-ToolkitPrimarySharedWorkspace -Config $Config
-        if ($null -ne $primarySharedWorkspace -and $primarySharedWorkspace.id) {
-            $sharedWorkspaceIds = @([string]$primarySharedWorkspace.id)
-        }
-    }
-
     return @(
         foreach ($workspaceId in @($sharedWorkspaceIds)) {
             $sharedWorkspace = Get-ToolkitWorkspaceById -Config $Config -WorkspaceId ([string]$workspaceId)
@@ -888,11 +788,6 @@ function Get-ToolkitAgentEndpointKey {
                 }
             }
         }
-    }
-
-    if ($AgentConfig.PSObject.Properties.Name -contains "endpointKey" -and
-        -not [string]::IsNullOrWhiteSpace([string]$AgentConfig.endpointKey)) {
-        return [string]$AgentConfig.endpointKey
     }
 
     return $null
