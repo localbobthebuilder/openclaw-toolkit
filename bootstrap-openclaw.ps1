@@ -2472,6 +2472,20 @@ function Configure-VoiceNotes {
 function Configure-ToolPolicy {
     param([Parameter(Mandatory = $true)]$Config)
 
+    $hasToolsets = ($Config.PSObject.Properties.Name -contains "toolsets") -and
+        $null -ne $Config.toolsets -and
+        ($Config.toolsets.PSObject.Properties.Name -contains "list") -and
+        $null -ne $Config.toolsets.list -and
+        @($Config.toolsets.list).Count -gt 0
+    if ($hasToolsets) {
+        Set-OpenClawConfigValue -Path "tools.profile" -Value "full"
+        Unset-OpenClawConfigPath -Path "tools.allow"
+        Unset-OpenClawConfigPath -Path "tools.alsoAllow"
+        Unset-OpenClawConfigPath -Path "tools.deny"
+        Write-Host "Configured neutral global tool baseline for toolkit toolsets." -ForegroundColor Green
+        return
+    }
+
     if ($null -eq $Config.toolPolicy) {
         return
     }

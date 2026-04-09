@@ -1150,93 +1150,170 @@ function Get-EnabledExtraAgents {
     )
 }
 
-function Get-ResearchToolsOverride {
+function Get-ToolkitToolsetByKey {
     param(
-        [Parameter(Mandatory = $true)]$Config
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$Key
     )
 
-    if (-not $Config.toolPolicy -or -not (($Config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") -or ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") -or ($Config.toolPolicy.PSObject.Properties.Name -contains "researchDeny"))) {
+    if (-not ($Config.PSObject.Properties.Name -contains "toolsets") -or
+        $null -eq $Config.toolsets -or
+        -not ($Config.toolsets.PSObject.Properties.Name -contains "list") -or
+        $null -eq $Config.toolsets.list) {
         return $null
     }
 
-    $researchTools = [ordered]@{}
-    if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") {
-        $researchTools.alsoAllow = @($Config.toolPolicy.researchAlsoAllow)
-    }
-    if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") {
-        $researchTools.alsoAllow = @($Config.toolPolicy.researchAllow)
-    }
-    if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchDeny") {
-        $researchTools.deny = @($Config.toolPolicy.researchDeny)
+    foreach ($toolset in @($Config.toolsets.list)) {
+        if ($null -eq $toolset -or -not ($toolset.PSObject.Properties.Name -contains "key")) {
+            continue
+        }
+        if ([string]$toolset.key -eq $Key) {
+            return $toolset
+        }
     }
 
-    return $researchTools
+    return $null
 }
 
-function Get-ToolProfileOverride {
+function Get-AgentToolsetKeys {
     param(
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$AgentConfig
     )
 
-    if ($AgentConfig.PSObject.Properties.Name -contains "tools" -and $null -ne $AgentConfig.tools) {
-        return $AgentConfig.tools
-    }
+    $keys = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
-    $toolProfile = $null
-    if ($AgentConfig.PSObject.Properties.Name -contains "toolProfile" -and $AgentConfig.toolProfile) {
-        $toolProfile = ([string]$AgentConfig.toolProfile).ToLowerInvariant()
-    }
-
-    switch ($toolProfile) {
-        "research" {
-            return (Get-ResearchToolsOverride -Config $Config)
+    foreach ($candidateKey in @("minimal")) {
+        if ($seen.Add($candidateKey) -and $null -ne (Get-ToolkitToolsetByKey -Config $Config -Key $candidateKey)) {
+            $keys.Add($candidateKey)
         }
-        "review" {
-            return [ordered]@{
-                alsoAllow = @(
-                    "read",
-                    "sessions_list",
-                    "sessions_history",
-                    "sessions_send",
-                    "sessions_spawn",
-                    "session_status"
-                )
-                deny      = @(
-                    "exec",
-                    "write",
-                    "edit",
-                    "browser",
-                    "canvas",
-                    "nodes",
-                    "cron"
-                )
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "toolsetKeys" -and $null -ne $AgentConfig.toolsetKeys) {
+        foreach ($rawKey in @($AgentConfig.toolsetKeys)) {
+            $key = ([string]$rawKey).Trim()
+            if ([string]::IsNullOrWhiteSpace($key) -or -not $seen.Add($key)) {
+                continue
             }
-        }
-        "codingdelegate" {
-            return [ordered]@{
-                alsoAllow = @(
-                    "read",
-                    "write",
-                    "edit",
-                    "exec",
-                    "sessions_list",
-                    "sessions_history",
-                    "sessions_send",
-                    "sessions_spawn",
-                    "session_status"
-                )
-                deny      = @(
-                    "browser",
-                    "canvas",
-                    "nodes",
-                    "cron"
-                )
+            if ($null -eq (Get-ToolkitToolsetByKey -Config $Config -Key $key)) {
+                continue
             }
+            $keys.Add($key)
         }
     }
 
-    return $null
+    return @($keys.ToArray())
+}
+
+function Resolve-AgentToolsetToolsOverride {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    $appliedToolsetKeys = @(Get-AgentToolsetKeys -Config $Config -AgentConfig $AgentConfig)
+    $toolStates = [ordered]@{}
+    foreach ($toolsetKey in @($appliedToolsetKeys)) {
+        $toolset = Get-ToolkitToolsetByKey -Config $Config -Key $toolsetKey
+        if ($null -eq $toolset) {
+            continue
+        }
+
+        $allowSource = if ($toolset.PSObject.Properties.Name -contains "allow") { $toolset.allow } else { @() }
+        $denySource = if ($toolset.PSObject.Properties.Name -contains "deny") { $toolset.deny } else { @() }
+        foreach ($toolName in @(Normalize-ToolkitToolNameList -ToolNames $allowSource)) {
+            $toolStates[$toolName] = "allow"
+        }
+        foreach ($toolName in @(Normalize-ToolkitToolNameList -ToolNames $denySource)) {
+            $toolStates[$toolName] = "deny"
+        }
+    }
+
+    $directToolOverrides = $null
+    if ($AgentConfig.PSObject.Properties.Name -contains "toolOverrides" -and $null -ne $AgentConfig.toolOverrides) {
+        $directToolOverrides = $AgentConfig.toolOverrides
+        $overrideAllow = if ($directToolOverrides.PSObject.Properties.Name -contains "allow") { $directToolOverrides.allow } else { @() }
+        $overrideDeny = if ($directToolOverrides.PSObject.Properties.Name -contains "deny") { $directToolOverrides.deny } else { @() }
+        foreach ($toolName in @(Normalize-ToolkitToolNameList -ToolNames $overrideAllow)) {
+            $toolStates[$toolName] = "allow"
+        }
+        foreach ($toolName in @(Normalize-ToolkitToolNameList -ToolNames $overrideDeny)) {
+            $toolStates[$toolName] = "deny"
+        }
+    }
+
+    $hasDirectOverrides = $null -ne $directToolOverrides -and (
+        ($directToolOverrides.PSObject.Properties.Name -contains "allow" -and @($directToolOverrides.allow).Count -gt 0) -or
+        ($directToolOverrides.PSObject.Properties.Name -contains "deny" -and @($directToolOverrides.deny).Count -gt 0)
+    )
+    if (@($appliedToolsetKeys).Count -eq 0 -and -not $hasDirectOverrides -and $toolStates.Count -eq 0) {
+        return $null
+    }
+
+    $allow = New-Object System.Collections.Generic.List[string]
+    $deny = New-Object System.Collections.Generic.List[string]
+    foreach ($toolName in @($toolStates.Keys)) {
+        switch ($toolStates[$toolName]) {
+            "allow" { $allow.Add($toolName) }
+            "deny" { $deny.Add($toolName) }
+        }
+    }
+
+    $resolved = [ordered]@{}
+    if ($allow.Count -gt 0) {
+        $resolved.allow = @($allow.ToArray())
+    }
+    else {
+        $resolved.deny = @("*")
+    }
+
+    if ($deny.Count -gt 0 -and $allow.Count -gt 0) {
+        $resolved.deny = @($deny.ToArray())
+    }
+
+    return $resolved
+}
+
+function Merge-AgentToolsOverride {
+    param(
+        $BaseTools,
+        $ExplicitTools
+    )
+
+    if ($null -eq $BaseTools) {
+        return $ExplicitTools
+    }
+    if ($null -eq $ExplicitTools) {
+        return $BaseTools
+    }
+
+    $merged = [ordered]@{}
+    foreach ($propertyName in @($BaseTools.PSObject.Properties.Name)) {
+        $merged[$propertyName] = $BaseTools.$propertyName
+    }
+    foreach ($propertyName in @($ExplicitTools.PSObject.Properties.Name)) {
+        $merged[$propertyName] = $ExplicitTools.$propertyName
+    }
+
+    return $merged
+}
+
+function Get-AgentToolsOverride {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$AgentConfig
+    )
+
+    $toolsetOverride = Resolve-AgentToolsetToolsOverride -Config $Config -AgentConfig $AgentConfig
+    $explicitOverride = if ($AgentConfig.PSObject.Properties.Name -contains "tools" -and $null -ne $AgentConfig.tools) {
+        $AgentConfig.tools
+    }
+    else {
+        $null
+    }
+
+    return (Merge-AgentToolsOverride -BaseTools $toolsetOverride -ExplicitTools $explicitOverride)
 }
 
 function Get-AgentSandboxOverride {
@@ -1282,7 +1359,7 @@ function Add-DesiredAgentFromConfig {
     }
     $resolvedFallbackRefs = Resolve-AgentFallbackModelRefs -Config $Config -AgentConfig $AgentConfig -PrimaryModelRef $resolvedModelRef -Purpose $agentId -UseAvailableRefsOnly:$useAvailableRefsOnly
     $workspacePath = Get-AgentWorkspacePath -Config $Config -AgentConfig $AgentConfig
-    $toolsOverride = Get-ToolProfileOverride -Config $Config -AgentConfig $AgentConfig
+    $toolsOverride = Get-AgentToolsOverride -Config $Config -AgentConfig $AgentConfig
     $sandboxOverride = Get-AgentSandboxOverride -AgentConfig $AgentConfig
     $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
     $skillsOverride = Get-AgentSkillsOverride -Config $Config

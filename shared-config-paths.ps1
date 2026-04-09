@@ -178,6 +178,321 @@ function Normalize-ToolkitModelEntry {
     return $ModelEntry
 }
 
+function Normalize-ToolkitToolNameList {
+    param($ToolNames)
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($rawToolName in @($ToolNames)) {
+        $toolName = if ($null -eq $rawToolName) { "" } else { ([string]$rawToolName).Trim() }
+        if ([string]::IsNullOrWhiteSpace($toolName) -or $toolName -in @($normalized)) {
+            continue
+        }
+
+        $normalized.Add($toolName)
+    }
+
+    return @($normalized.ToArray())
+}
+
+function New-ToolkitToolsetRecord {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [string]$Name,
+        [string[]]$Allow = @(),
+        [string[]]$Deny = @()
+    )
+
+    return [pscustomobject][ordered]@{
+        key   = $Key
+        name  = if ([string]::IsNullOrWhiteSpace($Name)) { $Key } else { $Name }
+        allow = @(Normalize-ToolkitToolNameList -ToolNames $Allow)
+        deny  = @(Normalize-ToolkitToolNameList -ToolNames $Deny)
+    }
+}
+
+function Get-ToolkitBuiltinToolsetDefinitions {
+    return @(
+        (New-ToolkitToolsetRecord -Key "minimal" -Name "Minimal" -Allow @(
+                "read",
+                "write",
+                "edit",
+                "apply_patch",
+                "exec",
+                "process",
+                "sessions_list",
+                "sessions_history",
+                "sessions_send",
+                "sessions_spawn",
+                "sessions_yield",
+                "subagents",
+                "session_status",
+                "memory_search",
+                "memory_get"
+            ) -Deny @(
+                "browser",
+                "canvas",
+                "nodes",
+                "cron",
+                "gateway"
+            )),
+        (New-ToolkitToolsetRecord -Key "research" -Name "Research" -Allow @(
+                "read",
+                "sessions_list",
+                "sessions_history",
+                "sessions_send",
+                "sessions_spawn",
+                "sessions_yield",
+                "subagents",
+                "session_status",
+                "memory_search",
+                "memory_get",
+                "web_search",
+                "web_fetch"
+            ) -Deny @(
+                "exec",
+                "process",
+                "write",
+                "edit",
+                "browser",
+                "canvas",
+                "nodes",
+                "cron",
+                "gateway"
+            )),
+        (New-ToolkitToolsetRecord -Key "review" -Name "Review" -Allow @(
+                "read",
+                "sessions_list",
+                "sessions_history",
+                "sessions_send",
+                "sessions_spawn",
+                "session_status"
+            ) -Deny @(
+                "exec",
+                "write",
+                "edit",
+                "browser",
+                "canvas",
+                "nodes",
+                "cron"
+            )),
+        (New-ToolkitToolsetRecord -Key "codingDelegate" -Name "Coding Delegate" -Allow @(
+                "read",
+                "write",
+                "edit",
+                "exec",
+                "sessions_list",
+                "sessions_history",
+                "sessions_send",
+                "sessions_spawn",
+                "session_status"
+            ) -Deny @(
+                "browser",
+                "canvas",
+                "nodes",
+                "cron"
+            ))
+    )
+}
+
+function Get-ToolkitBuiltinToolsetDefinition {
+    param([Parameter(Mandatory = $true)][string]$Key)
+
+    foreach ($toolset in @(Get-ToolkitBuiltinToolsetDefinitions)) {
+        if ([string]$toolset.key -eq $Key) {
+            return $toolset
+        }
+    }
+
+    return $null
+}
+
+function Normalize-ToolkitToolsetRecord {
+    param($Toolset)
+
+    if ($null -eq $Toolset) {
+        return $null
+    }
+
+    $key = if ($Toolset.PSObject.Properties.Name -contains "key" -and $Toolset.key) {
+        ([string]$Toolset.key).Trim()
+    }
+    else {
+        ""
+    }
+    if ([string]::IsNullOrWhiteSpace($key)) {
+        return $null
+    }
+
+    $Toolset.key = $key
+    if (-not ($Toolset.PSObject.Properties.Name -contains "name") -or [string]::IsNullOrWhiteSpace([string]$Toolset.name)) {
+        Add-Member -InputObject $Toolset -NotePropertyName "name" -NotePropertyValue $key -Force
+    }
+    else {
+        $Toolset.name = ([string]$Toolset.name).Trim()
+    }
+
+    $allowSource = if ($Toolset.PSObject.Properties.Name -contains "allow") { $Toolset.allow } else { @() }
+    $denySource = if ($Toolset.PSObject.Properties.Name -contains "deny") { $Toolset.deny } else { @() }
+    $allow = @(Normalize-ToolkitToolNameList -ToolNames $allowSource)
+    $deny = @(Normalize-ToolkitToolNameList -ToolNames $denySource)
+
+    $Toolset.allow = @($allow)
+    $Toolset.deny = @($deny)
+    return $Toolset
+}
+
+function Get-ToolkitToolProfileMappedKey {
+    param([string]$ToolProfile)
+
+    switch (([string]$ToolProfile).Trim().ToLowerInvariant()) {
+        "research" { return "research" }
+        "review" { return "review" }
+        "codingdelegate" { return "codingDelegate" }
+        default { return $null }
+    }
+}
+
+function Ensure-ToolkitToolsetsConfig {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if (-not ($Config.PSObject.Properties.Name -contains "toolsets") -or $null -eq $Config.toolsets) {
+        Add-Member -InputObject $Config -NotePropertyName "toolsets" -NotePropertyValue ([pscustomobject][ordered]@{
+                list = @()
+            }) -Force
+    }
+
+    if (-not ($Config.toolsets.PSObject.Properties.Name -contains "list") -or $null -eq $Config.toolsets.list) {
+        Add-Member -InputObject $Config.toolsets -NotePropertyName "list" -NotePropertyValue @() -Force
+    }
+
+    $normalizedToolsets = New-Object System.Collections.Generic.List[object]
+    $knownToolsetKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($toolset in @($Config.toolsets.list)) {
+        $normalizedToolset = Normalize-ToolkitToolsetRecord -Toolset $toolset
+        if ($null -eq $normalizedToolset) {
+            continue
+        }
+        if (-not $knownToolsetKeys.Add([string]$normalizedToolset.key)) {
+            continue
+        }
+        $normalizedToolsets.Add($normalizedToolset)
+    }
+
+    $legacyGlobalAllow = @()
+    $legacyGlobalDeny = @()
+    $legacyResearchAllow = @()
+    $legacyResearchDeny = @()
+    if ($Config.PSObject.Properties.Name -contains "toolPolicy" -and $null -ne $Config.toolPolicy) {
+        if ($Config.toolPolicy.PSObject.Properties.Name -contains "globalAlsoAllow") {
+            $legacyGlobalAllow = @($Config.toolPolicy.globalAlsoAllow)
+        }
+        elseif ($Config.toolPolicy.PSObject.Properties.Name -contains "globalAllow") {
+            $legacyGlobalAllow = @($Config.toolPolicy.globalAllow)
+        }
+
+        if ($Config.toolPolicy.PSObject.Properties.Name -contains "globalDeny") {
+            $legacyGlobalDeny = @($Config.toolPolicy.globalDeny)
+        }
+
+        if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAlsoAllow") {
+            $legacyResearchAllow = @($Config.toolPolicy.researchAlsoAllow)
+        }
+        elseif ($Config.toolPolicy.PSObject.Properties.Name -contains "researchAllow") {
+            $legacyResearchAllow = @($Config.toolPolicy.researchAllow)
+        }
+
+        if ($Config.toolPolicy.PSObject.Properties.Name -contains "researchDeny") {
+            $legacyResearchDeny = @($Config.toolPolicy.researchDeny)
+        }
+    }
+
+    if (-not $knownToolsetKeys.Contains("minimal")) {
+        $minimalBuiltin = Get-ToolkitBuiltinToolsetDefinition -Key "minimal"
+        $minimalAllow = if (@($legacyGlobalAllow).Count -gt 0) { $legacyGlobalAllow } else { @($minimalBuiltin.allow) }
+        $minimalDeny = if (@($legacyGlobalDeny).Count -gt 0) { $legacyGlobalDeny } else { @($minimalBuiltin.deny) }
+        $normalizedToolsets.Insert(0, (New-ToolkitToolsetRecord -Key "minimal" -Name "Minimal" -Allow $minimalAllow -Deny $minimalDeny))
+        [void]$knownToolsetKeys.Add("minimal")
+    }
+
+    if ((@($legacyResearchAllow).Count -gt 0 -or @($legacyResearchDeny).Count -gt 0) -and -not $knownToolsetKeys.Contains("research")) {
+        $normalizedToolsets.Add((New-ToolkitToolsetRecord -Key "research" -Name "Research" -Allow $legacyResearchAllow -Deny $legacyResearchDeny))
+        [void]$knownToolsetKeys.Add("research")
+    }
+
+    $legacyToolProfileKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    if ($Config.PSObject.Properties.Name -contains "agents" -and
+        $null -ne $Config.agents -and
+        $Config.agents.PSObject.Properties.Name -contains "list" -and
+        $null -ne $Config.agents.list) {
+        foreach ($agent in @($Config.agents.list)) {
+            if ($null -eq $agent) {
+                continue
+            }
+            $legacyToolProfile = if ($agent.PSObject.Properties.Name -contains "toolProfile") { [string]$agent.toolProfile } else { "" }
+            $mappedKey = Get-ToolkitToolProfileMappedKey -ToolProfile $legacyToolProfile
+            if (-not [string]::IsNullOrWhiteSpace([string]$mappedKey)) {
+                [void]$legacyToolProfileKeys.Add($mappedKey)
+            }
+        }
+    }
+
+    foreach ($toolsetKey in @($legacyToolProfileKeys)) {
+        if ($knownToolsetKeys.Contains($toolsetKey)) {
+            continue
+        }
+        $builtinToolset = Get-ToolkitBuiltinToolsetDefinition -Key $toolsetKey
+        if ($null -eq $builtinToolset) {
+            continue
+        }
+        $normalizedToolsets.Add((New-ToolkitToolsetRecord -Key ([string]$builtinToolset.key) -Name ([string]$builtinToolset.name) -Allow @($builtinToolset.allow) -Deny @($builtinToolset.deny)))
+        [void]$knownToolsetKeys.Add($toolsetKey)
+    }
+
+    $Config.toolsets.list = @($normalizedToolsets.ToArray())
+
+    if ($Config.PSObject.Properties.Name -contains "agents" -and
+        $null -ne $Config.agents -and
+        $Config.agents.PSObject.Properties.Name -contains "list" -and
+        $null -ne $Config.agents.list) {
+        foreach ($agent in @($Config.agents.list)) {
+            if ($null -eq $agent) {
+                continue
+            }
+
+            $toolsetKeys = New-Object System.Collections.Generic.List[string]
+            if ($agent.PSObject.Properties.Name -contains "toolsetKeys" -and $null -ne $agent.toolsetKeys) {
+                foreach ($rawKey in @($agent.toolsetKeys)) {
+                    $key = ([string]$rawKey).Trim()
+                    if ([string]::IsNullOrWhiteSpace($key) -or $key -eq "minimal" -or $key -in @($toolsetKeys)) {
+                        continue
+                    }
+                    $toolsetKeys.Add($key)
+                }
+            }
+
+            if ($toolsetKeys.Count -eq 0 -and $agent.PSObject.Properties.Name -contains "toolProfile") {
+                $mappedKey = Get-ToolkitToolProfileMappedKey -ToolProfile ([string]$agent.toolProfile)
+                if (-not [string]::IsNullOrWhiteSpace([string]$mappedKey) -and $mappedKey -ne "minimal") {
+                    $toolsetKeys.Add($mappedKey)
+                }
+            }
+
+            if ($agent.PSObject.Properties.Name -contains "toolsetKeys") {
+                $agent.toolsetKeys = @($toolsetKeys.ToArray())
+            }
+            else {
+                Add-Member -InputObject $agent -NotePropertyName "toolsetKeys" -NotePropertyValue @($toolsetKeys.ToArray()) -Force
+            }
+
+            if ($agent.PSObject.Properties.Name -contains "toolProfile") {
+                $agent.PSObject.Properties.Remove("toolProfile")
+            }
+        }
+    }
+
+    return $Config
+}
+
 function Get-ToolkitMutableEndpointsCollection {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -208,6 +523,35 @@ function Normalize-ToolkitAgentConfig {
         Set-ToolkitBooleanDefaultProperty -Object $AgentConfig.subagents -PropertyName "enabled" -DefaultValue $true
         Set-ToolkitBooleanDefaultProperty -Object $AgentConfig.subagents -PropertyName "requireAgentId" -DefaultValue $true
         Set-ToolkitArrayDefaultProperty -Object $AgentConfig.subagents -PropertyName "allowAgents"
+    }
+
+    $toolsetKeys = if ($AgentConfig.PSObject.Properties.Name -contains "toolsetKeys" -and $null -ne $AgentConfig.toolsetKeys) {
+        @(Normalize-ToolkitToolNameList -ToolNames $AgentConfig.toolsetKeys | Where-Object { $_ -ne "minimal" })
+    }
+    else {
+        @()
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "toolsetKeys") {
+        $AgentConfig.toolsetKeys = @($toolsetKeys)
+    }
+    else {
+        Add-Member -InputObject $AgentConfig -NotePropertyName "toolsetKeys" -NotePropertyValue @($toolsetKeys) -Force
+    }
+
+    if ($AgentConfig.PSObject.Properties.Name -contains "toolOverrides" -and $null -ne $AgentConfig.toolOverrides) {
+        if ($AgentConfig.toolOverrides -is [hashtable]) {
+            $AgentConfig.toolOverrides = [pscustomobject]$AgentConfig.toolOverrides
+        }
+
+        Set-ToolkitArrayDefaultProperty -Object $AgentConfig.toolOverrides -PropertyName "allow"
+        Set-ToolkitArrayDefaultProperty -Object $AgentConfig.toolOverrides -PropertyName "deny"
+        $AgentConfig.toolOverrides.allow = @(Normalize-ToolkitToolNameList -ToolNames $AgentConfig.toolOverrides.allow)
+        $AgentConfig.toolOverrides.deny = @(Normalize-ToolkitToolNameList -ToolNames $AgentConfig.toolOverrides.deny)
+
+        if (@($AgentConfig.toolOverrides.allow).Count -eq 0 -and @($AgentConfig.toolOverrides.deny).Count -eq 0) {
+            $AgentConfig.PSObject.Properties.Remove("toolOverrides")
+        }
     }
 
     return $AgentConfig
@@ -297,6 +641,8 @@ function Normalize-ToolkitConfigDefaults {
     if ($Config.PSObject.Properties.Name -contains "voiceNotes" -and $null -ne $Config.voiceNotes) {
         Set-ToolkitBooleanDefaultProperty -Object $Config.voiceNotes -PropertyName "enabled" -DefaultValue $true
     }
+
+    Ensure-ToolkitToolsetsConfig -Config $Config | Out-Null
 
     if ($Config.PSObject.Properties.Name -contains "ollama" -and $null -ne $Config.ollama) {
         Set-ToolkitBooleanDefaultProperty -Object $Config.ollama -PropertyName "enabled" -DefaultValue $true

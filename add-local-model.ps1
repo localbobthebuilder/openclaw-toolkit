@@ -714,6 +714,10 @@ if ($AssignTo) {
     $assigned = Set-AgentLocalModel -Config $config -TargetAgentId $AssignTo -ModelId $plan.ModelId -EndpointKey $endpoint.key
 }
 
+if ($config.PSObject.Properties.Name -contains "toolsets" -and $null -ne $config.toolsets -and $config.PSObject.Properties.Name -contains "toolPolicy") {
+    $config.PSObject.Properties.Remove("toolPolicy")
+}
+
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 

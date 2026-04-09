@@ -587,11 +587,12 @@ The same config also owns managed context behavior for OpenClaw:
 
 - `contextManagement.compaction`
 - `contextManagement.contextPruning`
-- `toolPolicy`
+- `toolsets`
 
 Bootstrap writes those into `agents.defaults.compaction` and
-`agents.defaults.contextPruning`, and `verify` checks that they match live
-gateway state.
+`agents.defaults.contextPruning`, and it compiles `toolsets` into per-agent
+OpenClaw `tools` blocks. `verify` checks that the managed runtime state still
+matches the toolkit config.
 
 The current managed defaults are aimed at long-running chats with local models:
 
@@ -634,7 +635,7 @@ Agent config note:
   reusable AGENTS template is written into managed `AGENTS.md`
 - AGENTS template keys are reusable, so multiple agents can intentionally share
   one template
-- use `toolProfile` to reuse the built-in tool presets such as `research`,
+- use ordered `toolsetKeys` to stack reusable toolsets such as `research`,
   `review`, or `codingDelegate`
 
 It also enables `tools.agentToAgent` so your stronger agent can delegate to the
@@ -689,7 +690,7 @@ Example extra agent:
       "enabled": true,
       "id": "notes-helper",
       "name": "Notes Helper",
-      "toolProfile": "research",
+      "toolsetKeys": ["research"],
       "markdownTemplateKeys": {
         "AGENTS.md": "research"
       },
@@ -724,8 +725,8 @@ Notes for extra agents in `agents.list`:
 - private extra agents can still collaborate through `sharedWorkspaceIds`
 - `markdownTemplateKeys.AGENTS.md` controls which managed `AGENTS.md` template
   is written
-- `toolProfile` can be used to reuse the built-in tool presets such as
-  `research`, `review`, or `codingDelegate`
+- `toolsetKeys` can stack reusable toolsets such as `research`, `review`, or
+  `codingDelegate`
 - or you can provide an explicit `tools` object directly on the agent
 - removing an entry from `agents.list` now removes that managed extra agent from
   live config and cleans up its managed marker / managed workspace prompt file
@@ -740,7 +741,7 @@ Example mixed layout:
       "enabled": true,
       "id": "research",
       "name": "Gemini Research",
-      "toolProfile": "research",
+      "toolsetKeys": ["research"],
       "markdownTemplateKeys": {
         "AGENTS.md": "research"
       },
@@ -815,22 +816,16 @@ Bootstrap-managed keys for this starter layout live in:
 - `bindings`
 - `tools.agentToAgent`
 
-Bootstrap also now owns the global tool baseline through:
+Bootstrap now keeps the global OpenClaw tool baseline neutral and compiles the
+toolkit `toolsets` library into each managed agent's final `tools` block.
 
-- `tools.profile`
-- `tools.allow`
-- `tools.deny`
+Current managed defaults:
 
-Current managed tool-policy baseline:
-
-- global profile: `minimal`
-- explicit global allowlist for shared coding/session/memory tools
-- explicit global denylist for `browser`, `canvas`, `nodes`, `cron`, and `gateway`
-- `research` gets an extra per-agent allowlist for `web_search` and `web_fetch`
-
-This replaces the noisier upstream default `tools.profile: "coding"` path on
-your machine and avoids stale tool warnings for capabilities you are not using,
-such as `x_search` or `code_execution`.
+- built-in global `minimal` is always applied first
+- agent `toolsetKeys` are merged from top to bottom, so lower entries win
+- optional agent `toolOverrides.allow` / `toolOverrides.deny` are applied after the toolsets for one-off tweaks
+- `research` adds `web_search` and `web_fetch` while denying write/exec tools
+- direct agent `tools` blocks still work and override the compiled preview
 
 That means a fresh machine does not need a pre-configured
 `<repo-dir>.json` just to know which strong/local models

@@ -18,6 +18,81 @@ const VALID_WORKSPACE_MARKDOWN_FILES = [
   'BOOT.md'
 ] as const;
 
+type AvailableToolOption = {
+  id: string;
+  description: string;
+  note?: string;
+};
+
+type BuiltinToolsetDefinition = {
+  key: string;
+  name: string;
+  allow: string[];
+  deny: string[];
+};
+
+const AVAILABLE_TOOL_OPTIONS: AvailableToolOption[] = [
+  { id: 'read', description: 'Read files and directories' },
+  { id: 'write', description: 'Write files' },
+  { id: 'edit', description: 'Edit files inline' },
+  { id: 'apply_patch', description: 'Patch files in place', note: 'OpenAI exclusive' },
+  { id: 'exec', description: 'Run shell commands' },
+  { id: 'process', description: 'Inspect running processes' },
+  { id: 'code_execution', description: 'Run code snippets' },
+  { id: 'web_search', description: 'Search the web' },
+  { id: 'web_fetch', description: 'Fetch web pages' },
+  { id: 'x_search', description: 'Search X / Twitter' },
+  { id: 'memory_search', description: 'Search memory' },
+  { id: 'memory_get', description: 'Read memory entries' },
+  { id: 'sessions_list', description: 'List sub-agent sessions' },
+  { id: 'sessions_history', description: 'Read sub-agent history' },
+  { id: 'sessions_send', description: 'Send work to sub-agents' },
+  { id: 'sessions_spawn', description: 'Spawn sub-agents' },
+  { id: 'sessions_yield', description: 'Yield for sub-agent results' },
+  { id: 'subagents', description: 'Manage sub-agents' },
+  { id: 'session_status', description: 'Inspect session status' },
+  { id: 'browser', description: 'Control a browser' },
+  { id: 'canvas', description: 'Control canvases' },
+  { id: 'message', description: 'Send messages' },
+  { id: 'cron', description: 'Schedule automation' },
+  { id: 'gateway', description: 'Gateway control' },
+  { id: 'nodes', description: 'Nodes and devices' },
+  { id: 'agents_list', description: 'List agents' },
+  { id: 'update_plan', description: 'Update shared plan state' },
+  { id: 'image', description: 'Understand images' },
+  { id: 'image_generate', description: 'Generate images' },
+  { id: 'music_generate', description: 'Generate music' },
+  { id: 'video_generate', description: 'Generate video' },
+  { id: 'tts', description: 'Text to speech' }
+];
+
+const BUILTIN_TOOLSET_LIBRARY: BuiltinToolsetDefinition[] = [
+  {
+    key: 'minimal',
+    name: 'Minimal',
+    allow: ['read', 'write', 'edit', 'apply_patch', 'exec', 'process', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'sessions_yield', 'subagents', 'session_status', 'memory_search', 'memory_get'],
+    deny: ['browser', 'canvas', 'nodes', 'cron', 'gateway']
+  },
+  {
+    key: 'research',
+    name: 'Research',
+    allow: ['read', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'sessions_yield', 'subagents', 'session_status', 'memory_search', 'memory_get', 'web_search', 'web_fetch'],
+    deny: ['exec', 'process', 'write', 'edit', 'browser', 'canvas', 'nodes', 'cron', 'gateway']
+  },
+  {
+    key: 'review',
+    name: 'Review',
+    allow: ['read', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'session_status'],
+    deny: ['exec', 'write', 'edit', 'browser', 'canvas', 'nodes', 'cron']
+  },
+  {
+    key: 'codingDelegate',
+    name: 'Coding Delegate',
+    allow: ['read', 'write', 'edit', 'exec', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'session_status'],
+    deny: ['browser', 'canvas', 'nodes', 'cron']
+  }
+];
+
 @customElement('toolkit-dashboard')
 export class ToolkitDashboard extends LitElement {
   @state() private config: any = null;
@@ -113,6 +188,16 @@ export class ToolkitDashboard extends LitElement {
     .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .tag { background: #2a2a2a; border: 1px solid #444; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
     .tag-remove { cursor: pointer; color: #f44336; font-weight: bold; }
+    .tool-label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+    .tool-note-badge { display: inline-flex; align-items: center; border: 1px solid #245b68; border-radius: 999px; padding: 1px 6px; font-size: 0.64rem; line-height: 1.2; font-weight: 700; color: #7fe8ff; background: rgba(0, 188, 212, 0.08); white-space: nowrap; }
+    .applied-toolset-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+    .applied-toolset-card { background: #252525; border: 1px solid #444; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+    .applied-toolset-header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .toolset-preview-rows { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+    .toolset-preview-row { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+    .toolset-preview-label { font-size: 0.72rem; font-weight: 700; color: #9aa7ad; text-transform: uppercase; letter-spacing: 0.04em; }
+    .toolset-preview-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .toolset-preview-empty { font-size: 0.75rem; color: #777; }
     .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(450px, 1fr)); gap: 25px; }
     .status-card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s, border-color 0.2s; }
     .status-card:hover { transform: translateY(-2px); border-color: #00bcd4; }
@@ -705,6 +790,408 @@ export class ToolkitDashboard extends LitElement {
       agent.subagents.allowAgents = [];
     }
     return agent.subagents;
+  }
+
+  normalizeToolNameList(toolNames: any) {
+    const values = Array.isArray(toolNames) ? toolNames : [];
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const rawToolName of values) {
+      const toolName = String(rawToolName || '').trim();
+      if (!toolName || seen.has(toolName)) {
+        continue;
+      }
+      seen.add(toolName);
+      normalized.push(toolName);
+    }
+    return normalized;
+  }
+
+  normalizeToolsetKey(value: any) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  mapLegacyToolProfileKey(profile: any) {
+    const normalized = typeof profile === 'string' ? profile.trim().toLowerCase() : '';
+    switch (normalized) {
+      case 'research':
+        return 'research';
+      case 'review':
+        return 'review';
+      case 'codingdelegate':
+        return 'codingDelegate';
+      default:
+        return '';
+    }
+  }
+
+  getBuiltinToolsetDefinition(key: string) {
+    return BUILTIN_TOOLSET_LIBRARY.find((toolset) => toolset.key === key) || null;
+  }
+
+  createToolsetRecord(toolset: any) {
+    const key = this.normalizeToolsetKey(toolset?.key);
+    return {
+      key,
+      name: typeof toolset?.name === 'string' && toolset.name.trim().length > 0 ? toolset.name.trim() : key,
+      allow: this.normalizeToolNameList(toolset?.allow),
+      deny: this.normalizeToolNameList(toolset?.deny)
+    };
+  }
+
+  ensureAgentToolsetKeys(agent: any) {
+    if (!agent || typeof agent !== 'object') {
+      return [];
+    }
+
+    const toolsetKeys = this.normalizeToolNameList(agent.toolsetKeys).filter((key) => key !== 'minimal');
+    if (toolsetKeys.length === 0) {
+      const mappedKey = this.mapLegacyToolProfileKey(agent.toolProfile);
+      if (mappedKey) {
+        toolsetKeys.push(mappedKey);
+      }
+    }
+
+    agent.toolsetKeys = toolsetKeys;
+    delete agent.toolProfile;
+    return agent.toolsetKeys;
+  }
+
+  normalizeAgentToolOverrides(agent: any) {
+    const source = agent?.toolOverrides && typeof agent.toolOverrides === 'object' ? agent.toolOverrides : null;
+    if (!source) {
+      return null;
+    }
+
+    const normalized = {
+      allow: this.normalizeToolNameList(source.allow),
+      deny: this.normalizeToolNameList(source.deny)
+    };
+    if (normalized.allow.length === 0 && normalized.deny.length === 0) {
+      return null;
+    }
+    return normalized;
+  }
+
+  ensureAgentToolOverrides(agent: any) {
+    const normalized = this.normalizeAgentToolOverrides(agent);
+    if (normalized) {
+      agent.toolOverrides = normalized;
+      return agent.toolOverrides;
+    }
+
+    agent.toolOverrides = {
+      allow: [],
+      deny: []
+    };
+    return agent.toolOverrides;
+  }
+
+  pruneAgentToolOverrides(agent: any) {
+    const normalized = this.normalizeAgentToolOverrides(agent);
+    if (normalized) {
+      agent.toolOverrides = normalized;
+      return normalized;
+    }
+
+    delete agent.toolOverrides;
+    return null;
+  }
+
+  ensureToolsetsConfig(config: any = this.config) {
+    if (!config || typeof config !== 'object') {
+      return { list: [] };
+    }
+
+    if (!config.toolsets || typeof config.toolsets !== 'object') {
+      config.toolsets = { list: [] };
+    }
+    if (!Array.isArray(config.toolsets.list)) {
+      config.toolsets.list = [];
+    }
+
+    const normalizedToolsets: any[] = [];
+    const seenKeys = new Set<string>();
+    for (const toolset of config.toolsets.list) {
+      const normalized = this.createToolsetRecord(toolset);
+      if (!normalized.key || seenKeys.has(normalized.key)) {
+        continue;
+      }
+      seenKeys.add(normalized.key);
+      normalizedToolsets.push(normalized);
+    }
+
+    const legacyGlobalAllow = this.normalizeToolNameList(config?.toolPolicy?.globalAlsoAllow ?? config?.toolPolicy?.globalAllow);
+    const legacyGlobalDeny = this.normalizeToolNameList(config?.toolPolicy?.globalDeny);
+    if (!seenKeys.has('minimal')) {
+      const builtin = this.getBuiltinToolsetDefinition('minimal');
+      normalizedToolsets.unshift(this.createToolsetRecord({
+        key: 'minimal',
+        name: 'Minimal',
+        allow: legacyGlobalAllow.length > 0 ? legacyGlobalAllow : builtin?.allow,
+        deny: legacyGlobalDeny.length > 0 ? legacyGlobalDeny : builtin?.deny
+      }));
+      seenKeys.add('minimal');
+    }
+
+    const legacyResearchAllow = this.normalizeToolNameList(config?.toolPolicy?.researchAlsoAllow ?? config?.toolPolicy?.researchAllow);
+    const legacyResearchDeny = this.normalizeToolNameList(config?.toolPolicy?.researchDeny);
+    if ((legacyResearchAllow.length > 0 || legacyResearchDeny.length > 0) && !seenKeys.has('research')) {
+      normalizedToolsets.push(this.createToolsetRecord({
+        key: 'research',
+        name: 'Research',
+        allow: legacyResearchAllow,
+        deny: legacyResearchDeny
+      }));
+      seenKeys.add('research');
+    }
+
+    if (Array.isArray(config?.agents?.list)) {
+      for (const agent of config.agents.list) {
+        const mappedKey = this.mapLegacyToolProfileKey(agent?.toolProfile);
+        if (!mappedKey || seenKeys.has(mappedKey)) {
+          continue;
+        }
+        const builtin = this.getBuiltinToolsetDefinition(mappedKey);
+        if (!builtin) {
+          continue;
+        }
+        normalizedToolsets.push(this.createToolsetRecord(builtin));
+        seenKeys.add(mappedKey);
+      }
+    }
+
+    config.toolsets.list = normalizedToolsets;
+    if (Array.isArray(config?.agents?.list)) {
+      config.agents.list.forEach((agent: any) => this.ensureAgentToolsetKeys(agent));
+    }
+    return config.toolsets;
+  }
+
+  getToolsetsList(config: any = this.config) {
+    this.ensureToolsetsConfig(config);
+    return Array.isArray(config?.toolsets?.list) ? config.toolsets.list : [];
+  }
+
+  getToolsetByKey(key: string, config: any = this.config) {
+    const normalizedKey = this.normalizeToolsetKey(key);
+    if (!normalizedKey) {
+      return null;
+    }
+    return this.getToolsetsList(config).find((toolset: any) => toolset.key === normalizedKey) || null;
+  }
+
+  getToolOption(toolId: string) {
+    return AVAILABLE_TOOL_OPTIONS.find((tool) => tool.id === toolId) || null;
+  }
+
+  getToolDisplayLabel(toolId: string) {
+    const tool = this.getToolOption(toolId);
+    if (!tool) {
+      return toolId;
+    }
+    return tool.note ? `${tool.id} (${tool.note})` : tool.id;
+  }
+
+  renderToolLabel(toolId: string) {
+    const tool = this.getToolOption(toolId);
+    if (!tool) {
+      return html`${toolId}`;
+    }
+
+    return html`
+      <span class="tool-label">
+        <span>${tool.id}</span>
+        ${tool.note ? html`<span class="tool-note-badge">${tool.note}</span>` : ''}
+      </span>
+    `;
+  }
+
+  formatToolIdList(toolIds: string[], emptyLabel = 'none') {
+    if (!toolIds.length) {
+      return emptyLabel;
+    }
+    return toolIds.map((toolId) => this.getToolDisplayLabel(toolId)).join(', ');
+  }
+
+  getToolsetPreviewText(toolset: any) {
+    const allow = this.normalizeToolNameList(toolset?.allow);
+    const deny = this.normalizeToolNameList(toolset?.deny);
+    if (allow.length === 0 && deny.length === 0) {
+      return 'Allow: none | Deny: none';
+    }
+    return `Allow: ${this.formatToolIdList(allow)} | Deny: ${this.formatToolIdList(deny)}`;
+  }
+
+  getAgentAppliedToolsets(agent: any, config: any = this.config) {
+    const applied: any[] = [];
+    const seenKeys = new Set<string>();
+    const minimal = this.getToolsetByKey('minimal', config);
+    if (minimal) {
+      applied.push(minimal);
+      seenKeys.add('minimal');
+    }
+
+    for (const toolsetKey of this.ensureAgentToolsetKeys(agent)) {
+      const toolset = this.getToolsetByKey(toolsetKey, config);
+      if (!toolset || seenKeys.has(toolset.key)) {
+        continue;
+      }
+      applied.push(toolset);
+      seenKeys.add(toolset.key);
+    }
+
+    return applied;
+  }
+
+  getEffectiveAgentToolState(agent: any, config: any = this.config) {
+    const appliedToolsets = this.getAgentAppliedToolsets(agent, config);
+    const toolStates = new Map<string, 'allow' | 'deny'>();
+    for (const toolset of appliedToolsets) {
+      for (const toolId of this.normalizeToolNameList(toolset?.allow)) {
+        toolStates.set(toolId, 'allow');
+      }
+      for (const toolId of this.normalizeToolNameList(toolset?.deny)) {
+        toolStates.set(toolId, 'deny');
+      }
+    }
+
+    const toolOverrides = this.normalizeAgentToolOverrides(agent);
+    if (toolOverrides) {
+      for (const toolId of this.normalizeToolNameList(toolOverrides.allow)) {
+        toolStates.set(toolId, 'allow');
+      }
+      for (const toolId of this.normalizeToolNameList(toolOverrides.deny)) {
+        toolStates.set(toolId, 'deny');
+      }
+    }
+
+    const explicitTools = agent?.tools && typeof agent.tools === 'object' ? agent.tools : null;
+
+    const knownToolIds = new Set<string>(AVAILABLE_TOOL_OPTIONS.map((tool) => tool.id));
+    const allowedTools: string[] = [];
+    const deniedTools: string[] = [];
+    for (const tool of AVAILABLE_TOOL_OPTIONS) {
+      const state = toolStates.get(tool.id);
+      if (state === 'allow') {
+        allowedTools.push(tool.id);
+      } else if (state === 'deny') {
+        deniedTools.push(tool.id);
+      }
+    }
+    for (const [toolId, state] of toolStates.entries()) {
+      if (knownToolIds.has(toolId)) {
+        continue;
+      }
+      if (state === 'allow') {
+        allowedTools.push(toolId);
+      } else if (state === 'deny') {
+        deniedTools.push(toolId);
+      }
+    }
+
+    return { appliedToolsets, toolOverrides, allowedTools, deniedTools, explicitTools };
+  }
+
+  addToolToToolset(toolset: any, listName: 'allow' | 'deny', toolId: string) {
+    const normalizedToolId = this.normalizeToolsetKey(toolId);
+    if (!normalizedToolId) {
+      return;
+    }
+    toolset.allow = this.normalizeToolNameList(toolset.allow);
+    toolset.deny = this.normalizeToolNameList(toolset.deny);
+    toolset.allow = toolset.allow.filter((candidate: string) => candidate !== normalizedToolId);
+    toolset.deny = toolset.deny.filter((candidate: string) => candidate !== normalizedToolId);
+    toolset[listName].push(normalizedToolId);
+    this.requestUpdate();
+  }
+
+  removeToolFromToolset(toolset: any, listName: 'allow' | 'deny', toolId: string) {
+    toolset[listName] = this.normalizeToolNameList(toolset[listName]).filter((candidate: string) => candidate !== toolId);
+    this.requestUpdate();
+  }
+
+  addAgentToolset(agent: any, toolsetKey: string) {
+    const normalizedKey = this.normalizeToolsetKey(toolsetKey);
+    if (!normalizedKey || normalizedKey === 'minimal') {
+      return;
+    }
+    const toolsetKeys = this.ensureAgentToolsetKeys(agent);
+    if (!toolsetKeys.includes(normalizedKey)) {
+      toolsetKeys.push(normalizedKey);
+      this.requestUpdate();
+    }
+  }
+
+  moveAgentToolset(agent: any, index: number, delta: number) {
+    const toolsetKeys = this.ensureAgentToolsetKeys(agent);
+    const nextIndex = index + delta;
+    if (index < 0 || index >= toolsetKeys.length || nextIndex < 0 || nextIndex >= toolsetKeys.length) {
+      return;
+    }
+    const [movedKey] = toolsetKeys.splice(index, 1);
+    toolsetKeys.splice(nextIndex, 0, movedKey);
+    this.requestUpdate();
+  }
+
+  addAgentToolOverride(agent: any, listName: 'allow' | 'deny', toolId: string) {
+    const normalizedToolId = this.normalizeToolsetKey(toolId);
+    if (!normalizedToolId) {
+      return;
+    }
+    const toolOverrides = this.ensureAgentToolOverrides(agent);
+    toolOverrides.allow = this.normalizeToolNameList(toolOverrides.allow).filter((candidate: string) => candidate !== normalizedToolId);
+    toolOverrides.deny = this.normalizeToolNameList(toolOverrides.deny).filter((candidate: string) => candidate !== normalizedToolId);
+    toolOverrides[listName].push(normalizedToolId);
+    this.requestUpdate();
+  }
+
+  removeAgentToolOverride(agent: any, listName: 'allow' | 'deny', toolId: string) {
+    const toolOverrides = this.ensureAgentToolOverrides(agent);
+    toolOverrides[listName] = this.normalizeToolNameList(toolOverrides[listName]).filter((candidate: string) => candidate !== toolId);
+    this.pruneAgentToolOverrides(agent);
+    this.requestUpdate();
+  }
+
+  renameToolsetKey(toolset: any, rawNextKey: any) {
+    const currentKey = this.normalizeToolsetKey(toolset?.key);
+    const nextKey = this.normalizeToolsetKey(rawNextKey);
+    if (!currentKey || !nextKey || currentKey === 'minimal') {
+      return;
+    }
+    if (currentKey === nextKey) {
+      toolset.key = nextKey;
+      return;
+    }
+    const existing = this.getToolsetByKey(nextKey);
+    if (existing && existing !== toolset) {
+      alert(`Toolset key "${nextKey}" is already in use.`);
+      return;
+    }
+
+    toolset.key = nextKey;
+    for (const agent of Array.isArray(this.config?.agents?.list) ? this.config.agents.list : []) {
+      const toolsetKeys = this.ensureAgentToolsetKeys(agent);
+      const index = toolsetKeys.indexOf(currentKey);
+      if (index >= 0) {
+        toolsetKeys[index] = nextKey;
+      }
+      agent.toolsetKeys = this.normalizeToolNameList(toolsetKeys);
+    }
+    this.requestUpdate();
+  }
+
+  removeToolset(toolsetKey: string) {
+    const normalizedKey = this.normalizeToolsetKey(toolsetKey);
+    if (!normalizedKey || normalizedKey === 'minimal') {
+      return;
+    }
+    const toolsets = this.getToolsetsList();
+    this.config.toolsets.list = toolsets.filter((toolset: any) => toolset.key !== normalizedKey);
+    for (const agent of Array.isArray(this.config?.agents?.list) ? this.config.agents.list : []) {
+      agent.toolsetKeys = this.ensureAgentToolsetKeys(agent).filter((candidate: string) => candidate !== normalizedKey);
+    }
+    this.requestUpdate();
   }
 
   normalizeTelegramGroupRecord(group: any) {
@@ -1314,7 +1801,7 @@ export class ToolkitDashboard extends LitElement {
       enabled: true,
       id: 'new-agent-' + Date.now(),
       name: 'New Agent',
-      toolProfile: 'codingDelegate',
+      toolsetKeys: ['codingDelegate'],
       markdownTemplateKeys: this.getMarkdownTemplateContent('agents', 'AGENTS.md', 'codingDelegate') ? { 'AGENTS.md': 'codingDelegate' } : {},
       sandboxMode: 'off',
       modelRef: 'ollama/qwen2.5-coder:3b',
@@ -2146,6 +2633,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
           <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
           <div class="tab ${this.configSection === 'markdownTemplates' ? 'active' : ''}" @click=${() => this.configSection = 'markdownTemplates'}>Template Markdowns</div>
+          <div class="tab ${this.configSection === 'toolsets' ? 'active' : ''}" @click=${() => this.configSection = 'toolsets'}>Toolsets</div>
           <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
           <div class="tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</div>
           <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
@@ -2173,6 +2661,7 @@ export class ToolkitDashboard extends LitElement {
       case 'endpoints': return this.renderEndpointsConfig();
       case 'models': return this.renderModelsConfig();
       case 'markdownTemplates': return this.renderTemplateMarkdownsConfig();
+      case 'toolsets': return this.renderToolsetsConfig();
       case 'agents': return this.renderAgentsConfig();
       case 'workspaces': return this.renderWorkspacesConfig();
       case 'features': return this.renderFeaturesConfig();
@@ -2578,6 +3067,13 @@ export class ToolkitDashboard extends LitElement {
     delete clone.endpointKey;
     clone.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(clone, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
     delete clone.rolePolicyKey;
+    clone.toolsetKeys = this.ensureAgentToolsetKeys(clone);
+    const normalizedToolOverrides = this.normalizeAgentToolOverrides(clone);
+    if (normalizedToolOverrides) {
+      clone.toolOverrides = normalizedToolOverrides;
+    } else {
+      delete clone.toolOverrides;
+    }
     if (!Array.isArray(clone.candidateModelRefs)) {
       clone.candidateModelRefs = [];
     }
@@ -2593,6 +3089,7 @@ export class ToolkitDashboard extends LitElement {
     const clone = JSON.parse(JSON.stringify(config));
     clone.agents = clone.agents || { telegramRouting: {}, list: [] };
     clone.workspaces = Array.isArray(clone.workspaces) ? clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
+    this.ensureToolsetsConfig(clone);
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(clone.endpoints)) {
       clone.endpoints = normalizedEndpoints;
@@ -2610,6 +3107,8 @@ export class ToolkitDashboard extends LitElement {
         return normalized;
       });
     }
+    clone.toolsets.list = this.getToolsetsList(clone).map((toolset: any) => this.createToolsetRecord(toolset));
+    delete clone.toolPolicy;
     for (const workspace of Array.isArray(clone.workspaces) ? clone.workspaces : []) {
       delete workspace.allowSharedWorkspaceAccess;
     }
@@ -2628,6 +3127,7 @@ export class ToolkitDashboard extends LitElement {
     if (!Array.isArray(clone.workspaces)) {
       clone.workspaces = [];
     }
+    this.ensureToolsetsConfig(clone);
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(clone.endpoints)) {
       clone.endpoints = normalizedEndpoints;
@@ -2642,6 +3142,8 @@ export class ToolkitDashboard extends LitElement {
       delete normalized.sharedWorkspaceAccess;
       return normalized;
     });
+    clone.toolsets.list = this.getToolsetsList(clone).map((toolset: any) => this.createToolsetRecord(toolset));
+    delete clone.toolPolicy;
     if (!clone.ollama) clone.ollama = {};
     if (!clone.skills || typeof clone.skills !== 'object') clone.skills = {};
     if (!clone.voiceNotes || typeof clone.voiceNotes !== 'object') clone.voiceNotes = {};
@@ -3580,6 +4082,115 @@ export class ToolkitDashboard extends LitElement {
       `;
   }
 
+  renderToolsetsConfig() {
+    const toolsets = this.getToolsetsList();
+
+    return html`
+      <div class="card">
+        <div class="card-header">
+          <h3>Toolsets</h3>
+          <button class="btn btn-ghost" @click=${() => {
+            const toolsetsList = this.getToolsetsList();
+            let counter = toolsetsList.length + 1;
+            let key = `toolset-${counter}`;
+            while (this.getToolsetByKey(key)) {
+              counter += 1;
+              key = `toolset-${counter}`;
+            }
+            toolsetsList.push(this.createToolsetRecord({ key, name: `Toolset ${counter}`, allow: [], deny: [] }));
+            this.requestUpdate();
+          }}>+ Add Toolset</button>
+        </div>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Toolsets are reusable allow/deny layers. The built-in <code>minimal</code> toolset is always applied first, then each agent's own toolsets are merged from top to bottom so lower entries win conflicts.</p>
+
+        ${toolsets.map((toolset: any) => {
+          const isMinimal = toolset.key === 'minimal';
+          const availableAllowOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !this.normalizeToolNameList(toolset.allow).includes(option.id));
+          const availableDenyOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !this.normalizeToolNameList(toolset.deny).includes(option.id));
+          return html`
+            <div class="card" style="margin-bottom: 16px; border-color: ${isMinimal ? '#00bcd4' : '#333'};">
+              <div class="card-header">
+                <h3>${toolset.name || toolset.key} ${isMinimal ? html`<span class="badge">Global Minimal</span>` : ''}</h3>
+                ${isMinimal ? html`<span class="help-text" style="margin: 0;">Built in and always applied first.</span>` : html`
+                  <button class="btn btn-danger" @click=${() => this.removeToolset(toolset.key)}>Remove Toolset</button>
+                `}
+              </div>
+
+              <div class="grid-2">
+                <div class="form-group">
+                  <label>Name</label>
+                  <input type="text" .value=${toolset.name || ''} @input=${(e: any) => { toolset.name = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                  <label>Key</label>
+                  <input
+                    type="text"
+                    .value=${toolset.key || ''}
+                    ?disabled=${isMinimal}
+                    @change=${(e: any) => this.renameToolsetKey(toolset, e.target.value)}
+                  >
+                  ${isMinimal ? html`<div class="help-text">The global minimal toolset key is locked.</div>` : html`<div class="help-text">Agents reference this key. Renaming updates existing agent assignments.</div>`}
+                </div>
+              </div>
+
+              <div class="help-text" style="margin-top: 0; margin-bottom: 14px;">${this.getToolsetPreviewText(toolset)}</div>
+
+              <div class="grid-2">
+                <div class="form-group">
+                  <label>Allowed Tools</label>
+                  <div class="tag-list">
+                    ${this.normalizeToolNameList(toolset.allow).map((toolId: string) => html`
+                      <div class="tag">
+                        ${this.renderToolLabel(toolId)}
+                        <span class="tag-remove" @click=${() => this.removeToolFromToolset(toolset, 'allow', toolId)}>×</span>
+                      </div>
+                    `)}
+                  </div>
+                  <div style="margin-top: 10px;">
+                    <select @change=${(e: any) => {
+                      const value = e.target.value;
+                      if (value) {
+                        this.addToolToToolset(toolset, 'allow', value);
+                        e.target.value = '';
+                      }
+                    }}>
+                      <option value="">+ Add allowed tool</option>
+                      ${availableAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Denied Tools</label>
+                  <div class="tag-list">
+                    ${this.normalizeToolNameList(toolset.deny).map((toolId: string) => html`
+                      <div class="tag">
+                        ${this.renderToolLabel(toolId)}
+                        <span class="tag-remove" @click=${() => this.removeToolFromToolset(toolset, 'deny', toolId)}>×</span>
+                      </div>
+                    `)}
+                  </div>
+                  <div style="margin-top: 10px;">
+                    <select @change=${(e: any) => {
+                      const value = e.target.value;
+                      if (value) {
+                        this.addToolToToolset(toolset, 'deny', value);
+                        e.target.value = '';
+                      }
+                    }}>
+                      <option value="">+ Add denied tool</option>
+                      ${availableDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
   renderAgentsConfig() {
     if (this.editingAgentKey) {
         return this.renderAgentEditor(this.editingAgentKey);
@@ -3588,7 +4199,8 @@ export class ToolkitDashboard extends LitElement {
     const agents = this.getManagedAgentEntries().map(({ key, agent }: any) => ({
       key,
       ...agent,
-      enabled: this.getAgentEnabledState(key, agent)
+      enabled: this.getAgentEnabledState(key, agent),
+      appliedToolsets: this.getAgentAppliedToolsets(agent).map((toolset: any) => toolset.name || toolset.key)
     }));
 
     return html`
@@ -3608,7 +4220,7 @@ export class ToolkitDashboard extends LitElement {
                 ${this.isMainAgentEntry(agent.key, agent) ? html`<span class="badge" style="background: #ffc107;">Main</span>` : ''}
                 ${!agent.enabled ? html`<span style="color: #f44336; font-size: 0.7rem;">(Disabled)</span>` : ''}
               </span>
-              <span class="item-sub">ID: ${agent.id} | Home Base: ${this.getWorkspaceDisplayLabel(this.getWorkspaceForAgentId(agent.id))} | Sandbox: ${this.getAgentEffectiveSandboxMode(agent)} | Model: ${agent.modelRef || '(unset)'}</span>
+              <span class="item-sub">ID: ${agent.id} | Home Base: ${this.getWorkspaceDisplayLabel(this.getWorkspaceForAgentId(agent.id))} | Sandbox: ${this.getAgentEffectiveSandboxMode(agent)} | Model: ${agent.modelRef || '(unset)'} | Toolsets: ${agent.appliedToolsets.join(' -> ') || 'Minimal'}</span>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary" @click=${() => this.startEditingAgent(agent.key)}>Configure</button>
@@ -3645,6 +4257,15 @@ export class ToolkitDashboard extends LitElement {
     const allowedAgentChoices = this.getAllowedAgentChoices(agent.id);
     const selectedAllowedAgents = Array.isArray(subagents.allowAgents) ? subagents.allowAgents : (subagents.allowAgents = []);
     const candidateModelRefs = Array.isArray(agent.candidateModelRefs) ? agent.candidateModelRefs : (agent.candidateModelRefs = []);
+    const toolsetKeys = this.ensureAgentToolsetKeys(agent);
+    const appliedToolsets = this.getAgentAppliedToolsets(agent);
+    const effectiveToolState = this.getEffectiveAgentToolState(agent);
+    const directToolOverrides = this.normalizeAgentToolOverrides(agent) || { allow: [], deny: [] };
+    const directAllowedTools = this.normalizeToolNameList(directToolOverrides.allow);
+    const directDeniedTools = this.normalizeToolNameList(directToolOverrides.deny);
+    const availableAgentToolsets = this.getToolsetsList().filter((toolset: any) => toolset.key !== 'minimal' && !toolsetKeys.includes(toolset.key));
+    const availableDirectAllowOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directAllowedTools.includes(option.id));
+    const availableDirectDenyOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directDeniedTools.includes(option.id));
     const sandboxModeOverride = typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '';
     const forceSandboxOff = sandboxModeOverride === 'off';
 
@@ -3828,6 +4449,175 @@ export class ToolkitDashboard extends LitElement {
                             .map((option: any) => html`<option value=${option.ref}>${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}</option>`)}
                     </select>
                 </div>
+            </div>
+
+            <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
+                <div class="card-header"><h3>Toolsets</h3></div>
+                <div class="help-text" style="margin-top: 0; margin-bottom: 14px;">The global <code>minimal</code> toolset is always applied first. Toolsets lower in the list win when the same tool is both allowed and denied.</div>
+
+                <div class="form-group">
+                    <label>Applied Toolsets</label>
+                    <div class="applied-toolset-list">
+                        ${appliedToolsets.map((toolset: any) => {
+                          const isMinimal = toolset.key === 'minimal';
+                          const agentToolsetIndex = isMinimal ? -1 : toolsetKeys.indexOf(toolset.key);
+                          const allowedTools = this.normalizeToolNameList(toolset.allow);
+                          const deniedTools = this.normalizeToolNameList(toolset.deny);
+                          return html`
+                            <div class="applied-toolset-card">
+                              <div class="applied-toolset-header">
+                                <strong>${toolset.name || toolset.key}</strong>
+                                ${isMinimal ? html`<span class="badge">Global</span>` : ''}
+                                ${!isMinimal ? html`
+                                  <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex <= 0} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, -1)}>Up</button>
+                                  <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex < 0 || agentToolsetIndex >= toolsetKeys.length - 1} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, 1)}>Down</button>
+                                  <button class="btn btn-danger" style="padding: 2px 6px;" @click=${() => { agent.toolsetKeys.splice(agentToolsetIndex, 1); this.requestUpdate(); }}>Remove</button>
+                                ` : ''}
+                              </div>
+                              <div class="toolset-preview-rows">
+                                <div class="toolset-preview-row">
+                                  <div class="toolset-preview-label">Allow</div>
+                                  ${allowedTools.length === 0
+                                    ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
+                                    : html`
+                                      <div class="toolset-preview-tags">
+                                        ${allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
+                                      </div>
+                                    `}
+                                </div>
+                                <div class="toolset-preview-row">
+                                  <div class="toolset-preview-label">Deny</div>
+                                  ${deniedTools.length === 0
+                                    ? html`<div class="toolset-preview-empty">No denied tools.</div>`
+                                    : html`
+                                      <div class="toolset-preview-tags">
+                                        ${deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
+                                      </div>
+                                    `}
+                                </div>
+                              </div>
+                            </div>
+                          `;
+                        })}
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <select @change=${(e: any) => {
+                          const value = e.target.value;
+                          if (value) {
+                            this.addAgentToolset(agent, value);
+                            e.target.value = '';
+                          }
+                        }}>
+                            <option value="">${availableAgentToolsets.length === 0 ? 'No other toolsets available' : '+ Add toolset'}</option>
+                            ${availableAgentToolsets.map((toolset: any) => html`
+                              <option value=${toolset.key}>${toolset.name || toolset.key} - ${this.getToolsetPreviewText(toolset)}</option>
+                            `)}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Direct Tool Overrides</label>
+                    <div class="applied-toolset-card">
+                      <div class="applied-toolset-header">
+                        <strong>Direct Tool Overrides</strong>
+                        <span class="badge">Final Layer</span>
+                      </div>
+                      <div class="toolset-preview-rows">
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Allow</div>
+                          ${directAllowedTools.length === 0
+                            ? html`<div class="toolset-preview-empty">No direct allow overrides.</div>`
+                            : html`
+                              <div class="toolset-preview-tags">
+                                ${directAllowedTools.map((toolId: string) => html`
+                                  <div class="tag">
+                                    ${this.renderToolLabel(toolId)}
+                                    <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'allow', toolId)}>×</span>
+                                  </div>
+                                `)}
+                              </div>
+                            `}
+                          <div style="margin-top: 6px;">
+                            <select @change=${(e: any) => {
+                              const value = e.target.value;
+                              if (value) {
+                                this.addAgentToolOverride(agent, 'allow', value);
+                                e.target.value = '';
+                              }
+                            }}>
+                              <option value="">+ Add allowed tool override</option>
+                              ${availableDirectAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
+                            </select>
+                          </div>
+                        </div>
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Deny</div>
+                          ${directDeniedTools.length === 0
+                            ? html`<div class="toolset-preview-empty">No direct deny overrides.</div>`
+                            : html`
+                              <div class="toolset-preview-tags">
+                                ${directDeniedTools.map((toolId: string) => html`
+                                  <div class="tag">
+                                    ${this.renderToolLabel(toolId)}
+                                    <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'deny', toolId)}>×</span>
+                                  </div>
+                                `)}
+                              </div>
+                            `}
+                          <div style="margin-top: 6px;">
+                            <select @change=${(e: any) => {
+                              const value = e.target.value;
+                              if (value) {
+                                this.addAgentToolOverride(agent, 'deny', value);
+                                e.target.value = '';
+                              }
+                            }}>
+                              <option value="">+ Add denied tool override</option>
+                              ${availableDirectDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="help-text" style="margin-top: 8px;">These direct per-agent tool picks merge after all applied toolsets, so they are the easiest way to make one-off tweaks.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Combined Toolset</label>
+                    <div class="applied-toolset-card">
+                      <div class="applied-toolset-header">
+                        <strong>Combined Toolset</strong>
+                        <span class="badge">Final</span>
+                      </div>
+                      <div class="toolset-preview-rows">
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Allow</div>
+                          ${effectiveToolState.allowedTools.length === 0
+                            ? html`<div class="toolset-preview-empty">No tools allowed yet.</div>`
+                            : html`
+                              <div class="toolset-preview-tags">
+                                ${effectiveToolState.allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
+                              </div>
+                            `}
+                        </div>
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Deny</div>
+                          ${effectiveToolState.deniedTools.length === 0
+                            ? html`<div class="toolset-preview-empty">No explicit denies.</div>`
+                            : html`
+                              <div class="toolset-preview-tags">
+                                ${effectiveToolState.deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
+                              </div>
+                            `}
+                        </div>
+                      </div>
+                    </div>
+                </div>
+
+                ${effectiveToolState.explicitTools ? html`
+                  <div class="help-text" style="margin-top: 0;">This agent also has a raw <code>tools</code> block in config. Those direct OpenClaw overrides still apply after the combined toolkit toolset shown above.</div>
+                ` : ''}
             </div>
 
             <div class="card" style="margin-top: 20px; margin-bottom: 20px;">

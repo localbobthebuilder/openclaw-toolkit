@@ -333,6 +333,10 @@ if ($isManagedModel) {
         $replacementModelRef = if ($replacementId) { "ollama/$replacementId" } else { $null }
         $changedRefs = @(Replace-ManagedModelRefs -Config $config -RemovedModelRef $removedModelRef -ReplacementModelRef $replacementModelRef)
 
+        if ($config.PSObject.Properties.Name -contains "toolsets" -and $null -ne $config.toolsets -and $config.PSObject.Properties.Name -contains "toolPolicy") {
+            $config.PSObject.Properties.Remove("toolPolicy")
+        }
+
         $json = $config | ConvertTo-Json -Depth 50
         Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 
