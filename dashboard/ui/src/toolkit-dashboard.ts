@@ -3753,8 +3753,8 @@ export class ToolkitDashboard extends LitElement {
                   <div
                     class="topology-edge-hit ${segment.orientation}"
                     style=${segment.orientation === 'h'
-                      ? `left:${segment.left}px; top:${segment.top - 5}px; width:${segment.width}px; height:${segment.height + 10}px;`
-                      : `left:${segment.left - 5}px; top:${segment.top}px; width:${segment.width + 10}px; height:${segment.height}px;`}
+                      ? `left:${segment.left}px; top:${segment.top - 2}px; width:${segment.width}px; height:${segment.height + 4}px;`
+                      : `left:${segment.left - 2}px; top:${segment.top}px; width:${segment.width + 4}px; height:${segment.height}px;`}
                     @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
                     @mouseleave=${() => {
                       if (this.topologyHoverEdgeKey === edge.key) {
