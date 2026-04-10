@@ -1,10 +1,10 @@
 {
   "repoUrl": "https://github.com/openclaw/openclaw.git",
   "repoCloneDepth": 1,
-  "repoPath": "../openclaw",
-  "composeFilePath": "../openclaw/docker-compose.yml",
-  "envFilePath": "../openclaw/.env",
-  "envTemplatePath": "openclaw.env.template",
+  "repoPath": "D:\\openclaw\\openclaw",
+  "composeFilePath": "D:\\openclaw\\openclaw\\docker-compose.yml",
+  "envFilePath": "D:\\openclaw\\openclaw\\.env",
+  "envTemplatePath": "D:\\openclaw\\openclaw-toolkit\\openclaw.env.template",
   "dockerSetupScriptRelativePath": "scripts/docker/setup.sh",
   "gatewayPort": 18789,
   "bridgePort": 18790,
@@ -55,79 +55,6 @@
           "cron",
           "gateway"
         ]
-      },
-      {
-        "key": "research",
-        "name": "Research",
-        "allow": [
-          "read",
-          "sessions_list",
-          "sessions_history",
-          "sessions_send",
-          "sessions_spawn",
-          "sessions_yield",
-          "subagents",
-          "session_status",
-          "memory_search",
-          "memory_get",
-          "web_search",
-          "web_fetch"
-        ],
-        "deny": [
-          "exec",
-          "process",
-          "write",
-          "edit",
-          "browser",
-          "canvas",
-          "nodes",
-          "cron",
-          "gateway"
-        ]
-      },
-      {
-        "key": "review",
-        "name": "Review",
-        "allow": [
-          "read",
-          "sessions_list",
-          "sessions_history",
-          "sessions_send",
-          "sessions_spawn",
-          "session_status"
-        ],
-        "deny": [
-          "exec",
-          "write",
-          "edit",
-          "browser",
-          "canvas",
-          "nodes",
-          "cron"
-        ]
-      },
-      {
-        "key": "codingDelegate",
-        "name": "Coding Delegate",
-        "allow": [
-          "read",
-          "write",
-          "edit",
-          "exec",
-          "sessions_list",
-          "sessions_history",
-          "sessions_send",
-          "sessions_spawn",
-          "sessions_yield",
-          "subagents",
-          "session_status"
-        ],
-        "deny": [
-          "browser",
-          "canvas",
-          "nodes",
-          "cron"
-        ]
       }
     ]
   },
@@ -170,26 +97,19 @@
     "enabled": true,
     "defaultAccount": "default",
     "dmPolicy": "allowlist",
-    "allowFrom": [
-      "8674459047"
-    ],
+    "allowFrom": [],
     "groupAllowFrom": [],
     "execApprovals": {
       "enabled": true,
-      "approvers": [
-        "8674459047"
-      ],
+      "approvers": [],
       "target": "dm"
     },
     "groupPolicy": "allowlist",
     "groups": [
       {
-        "id": "-1003770800252",
         "enabled": true,
         "requireMention": false,
-        "allowFrom": [
-          "8674459047"
-        ]
+        "allowFrom": []
       }
     ],
     "accounts": []
@@ -239,188 +159,7 @@
     "pullVramBudgetFraction": 0.7,
     "vramHeadroomMiB": 1536
   },
-  "modelCatalog": [
-    {
-      "id": "qwen3.5:35b-a3b",
-      "reasoning": true,
-      "input": [
-        "text",
-        "image"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "contextWindow": 128000,
-      "maxTokens": 8192,
-      "vramEstimateMiB": 22528
-    },
-    {
-      "id": "qwen3-coder:30b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "contextWindow": 106496,
-      "maxTokens": 8192,
-      "vramEstimateMiB": 18432
-    },
-    {
-      "id": "glm-4.7-flash:latest",
-      "reasoning": true,
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "contextWindow": 90000,
-      "maxTokens": 8192,
-      "vramEstimateMiB": 19456
-    },
-    {
-      "id": "qwen2.5:7b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 16384,
-      "contextWindow": 32768,
-      "maxTokens": 4096,
-      "vramEstimateMiB": 4864
-    },
-    {
-      "id": "qwen3:4b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 16384,
-      "vramEstimateMiB": 2816
-    },
-    {
-      "id": "qwen3:8b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 16384,
-      "vramEstimateMiB": 5376
-    },
-    {
-      "id": "qwen2.5-coder:3b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "vramEstimateMiB": 2048
-    },
-    {
-      "id": "qwen2.5-coder:1.5b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 16384,
-      "vramEstimateMiB": 1024
-    },
-    {
-      "id": "gemma4:latest",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "contextWindow": 131072,
-      "maxTokens": 8192,
-      "vramEstimateMiB": 5376
-    },
-    {
-      "id": "gemma4:26b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "contextWindow": 126976,
-      "maxTokens": 8192,
-      "vramEstimateMiB": 16896
-    },
-    {
-      "id": "gemma4:31b",
-      "input": [
-        "text"
-      ],
-      "cost": {
-        "input": 0,
-        "output": 0,
-        "cacheRead": 0,
-        "cacheWrite": 0
-      },
-      "minimumContextWindow": 24576,
-      "contextWindow": 24576,
-      "maxTokens": 8192,
-      "vramEstimateMiB": 19968
-    },
-    {
-      "modelRef": "openai-codex/gpt-5.4"
-    },
-    {
-      "modelRef": "anthropic/claude-sonnet-4-6"
-    },
-    {
-      "modelRef": "google/gemini-3.1-flash-lite-preview"
-    }
-  ],
+  "modelCatalog": [],
   "endpoints": [
     {
       "key": "local",
@@ -428,33 +167,8 @@
       "telemetry": {
         "kind": "local-nvidia-smi"
       },
-      "agents": [
-        "main",
-        "chat-local",
-        "review-local",
-        "coder-local",
-        "research"
-      ],
-      "hostedModels": [
-        {
-          "modelRef": "openai-codex/gpt-5.4",
-          "fallbackModelIds": [
-            "qwen3-coder:30b"
-          ]
-        },
-        {
-          "modelRef": "anthropic/claude-sonnet-4-6",
-          "fallbackModelIds": [
-            "qwen3-coder:30b"
-          ]
-        },
-        {
-          "modelRef": "google/gemini-3.1-flash-lite-preview",
-          "fallbackModelIds": [
-            "qwen3:4b"
-          ]
-        }
-      ],
+      "agents": [],
+      "hostedModels": [],
       "ollama": {
         "enabled": true,
         "providerId": "ollama",
@@ -462,304 +176,7 @@
         "hostBaseUrl": "http://127.0.0.1:11434",
         "apiKey": "ollama-local",
         "autoPullMissingModels": true,
-        "models": [
-          {
-            "id": "qwen3.5:35b-a3b",
-            "reasoning": true,
-            "input": [
-              "text",
-              "image"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "fallbackModelIds": [
-              "qwen3-coder:30b"
-            ],
-            "contextWindow": 128000,
-            "maxTokens": 8192,
-            "vramEstimateMiB": 22528
-          },
-          {
-            "id": "qwen3-coder:30b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "contextWindow": 106496,
-            "maxTokens": 8192,
-            "vramEstimateMiB": 18432
-          },
-          {
-            "id": "glm-4.7-flash:latest",
-            "reasoning": true,
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "contextWindow": 90000,
-            "maxTokens": 8192,
-            "vramEstimateMiB": 19456
-          },
-          {
-            "id": "qwen2.5:7b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "fallbackModelIds": [
-              "qwen3:4b"
-            ],
-            "contextWindow": 32768,
-            "maxTokens": 4096,
-            "vramEstimateMiB": 4864
-          },
-          {
-            "id": "qwen3:4b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "vramEstimateMiB": 2816
-          },
-          {
-            "id": "qwen3:8b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "fallbackModelIds": [
-              "qwen3:4b"
-            ],
-            "vramEstimateMiB": 5376
-          },
-          {
-            "id": "qwen2.5-coder:3b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "fallbackModelIds": [
-              "qwen2.5-coder:1.5b"
-            ],
-            "vramEstimateMiB": 2048
-          },
-          {
-            "id": "qwen2.5-coder:1.5b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "vramEstimateMiB": 1024
-          },
-          {
-            "id": "gemma4:latest",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "contextWindow": 131072,
-            "maxTokens": 8192,
-            "vramEstimateMiB": 5376
-          },
-          {
-            "id": "gemma4:26b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "contextWindow": 126976,
-            "maxTokens": 8192,
-            "vramEstimateMiB": 16896
-          },
-          {
-            "id": "gemma4:31b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "contextWindow": 24576,
-            "maxTokens": 8192,
-            "vramEstimateMiB": 19968
-          }
-        ]
-      }
-    },
-    {
-      "key": "review-pc",
-      "default": false,
-      "telemetry": {
-        "kind": "static-gpu-total",
-        "gpuTotalMiB": 8192
-      },
-      "agents": [
-        "coder-remote",
-        "review-remote"
-      ],
-      "hostedModels": [
-        {
-          "modelRef": "google/gemini-3.1-flash-lite-preview",
-          "fallbackModelIds": [
-            "qwen3:4b"
-          ]
-        }
-      ],
-      "ollama": {
-        "enabled": true,
-        "providerId": "ollama-review-pc",
-        "baseUrl": "http://100.96.119.26:11434",
-        "hostBaseUrl": "http://100.96.119.26:11434",
-        "apiKey": "ollama-review-pc",
-        "autoPullMissingModels": true,
-        "models": [
-          {
-            "id": "qwen2.5-coder:3b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 24576,
-            "contextWindow": 32768,
-            "maxTokens": 8192,
-            "fallbackModelIds": [
-              "qwen2.5-coder:1.5b"
-            ],
-            "vramEstimateMiB": 2048
-          },
-          {
-            "id": "qwen2.5-coder:1.5b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "vramEstimateMiB": 1024
-          },
-          {
-            "id": "qwen3:4b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "vramEstimateMiB": 2816
-          },
-          {
-            "id": "qwen3:8b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "fallbackModelIds": [
-              "qwen3:4b"
-            ],
-            "vramEstimateMiB": 5376
-          },
-          {
-            "id": "qwen2.5:7b",
-            "input": [
-              "text"
-            ],
-            "cost": {
-              "input": 0,
-              "output": 0,
-              "cacheRead": 0,
-              "cacheWrite": 0
-            },
-            "minimumContextWindow": 16384,
-            "fallbackModelIds": [
-              "qwen3:4b"
-            ],
-            "contextWindow": 32768,
-            "maxTokens": 4096,
-            "vramEstimateMiB": 4864
-          }
-        ]
+        "models": []
       }
     }
   ],
@@ -780,280 +197,31 @@
   },
   "agents": {
     "telegramRouting": {
-      "routes": [
-        {
-          "accountId": "default",
-          "targetAgentId": "chat-local",
-          "matchType": "trusted-groups",
-          "peerId": ""
-        },
-        {
-          "accountId": "default",
-          "targetAgentId": "chat-local",
-          "matchType": "trusted-dms",
-          "peerId": ""
-        }
-      ]
+      "routes": []
     },
     "list": [
       {
-        "key": "strongAgent",
         "id": "main",
-        "name": "Strong Coder",
+        "name": "Main Agent",
         "enabled": true,
-        "markdownTemplateKeys": {
-          "AGENTS.md": "orchestrator"
-        },
+        "markdownTemplateKeys": {},
         "isMain": true,
         "default": true,
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": [
-            "research",
-            "review-local",
-            "chat-local",
-            "coder-local"
-          ]
-        },
-        "modelRef": "ollama/gemma4:latest",
-        "candidateModelRefs": [
-          "ollama/gemma4:latest",
-          "ollama/gemma4:26b",
-          "ollama/qwen3-coder:30b",
-          "ollama/qwen3.5:35b-a3b",
-          "openai-codex/gpt-5.4",
-          "anthropic/claude-sonnet-4-6",
-          "google/gemini-3.1-flash-lite-preview"
-        ],
-        "allowLocalFallback": true,
-        "toolsetKeys": [
-          "codingDelegate"
-        ]
-      },
-      {
-        "key": "researchAgent",
-        "id": "research",
-        "name": "Gemini Research",
-        "enabled": true,
-        "toolsetKeys": [
-          "research"
-        ],
-        "markdownTemplateKeys": {
-          "AGENTS.md": "research"
-        },
+        "sandboxMode": "on",
         "subagents": {
           "enabled": true,
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "google/gemini-3.1-flash-lite-preview",
-        "candidateModelRefs": [
-          "google/gemini-3.1-flash-lite-preview"
-        ]
-      },
-      {
-        "key": "localChatAgent",
-        "id": "chat-local",
-        "name": "Local Chat",
-        "enabled": true,
-        "markdownTemplateKeys": {
-          "AGENTS.md": "trustedChat"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/glm-4.7-flash:latest",
         "candidateModelRefs": [],
+        "allowLocalFallback": true,
         "toolsetKeys": []
-      },
-      {
-        "key": "hostedTelegramAgent",
-        "id": "chat-openai",
-        "name": "Telegram OpenAI",
-        "enabled": false,
-        "markdownTemplateKeys": {
-          "AGENTS.md": "trustedChat"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "openai-codex/gpt-5.4",
-        "candidateModelRefs": [
-          "openai-codex/gpt-5.4"
-        ],
-        "toolsetKeys": []
-      },
-      {
-        "key": "localReviewAgent",
-        "id": "review-local",
-        "name": "Local Reviewer",
-        "enabled": true,
-        "toolsetKeys": [
-          "review"
-        ],
-        "markdownTemplateKeys": {
-          "AGENTS.md": "review"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/qwen3-coder:30b",
-        "candidateModelRefs": []
-      },
-      {
-        "key": "localCoderAgent",
-        "id": "coder-local",
-        "name": "Coder Delegate",
-        "enabled": true,
-        "toolsetKeys": [
-          "codingDelegate"
-        ],
-        "markdownTemplateKeys": {
-          "AGENTS.md": "codingDelegate"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "openai-codex/gpt-5.4",
-        "candidateModelRefs": [
-          "openai-codex/gpt-5.4",
-          "anthropic/claude-sonnet-4-6",
-          "google/gemini-3.1-flash-lite-preview",
-          "ollama/qwen3-coder:30b",
-          "ollama/qwen3.5:35b-a3b"
-        ],
-        "allowLocalFallback": true
-      },
-      {
-        "key": "remoteReviewAgent",
-        "id": "review-remote",
-        "name": "Remote Reviewer",
-        "enabled": true,
-        "toolsetKeys": [
-          "review"
-        ],
-        "markdownTemplateKeys": {
-          "AGENTS.md": "review"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/qwen2.5-coder:3b",
-        "candidateModelRefs": [
-          "ollama/qwen2.5-coder:3b",
-          "ollama/qwen2.5-coder:1.5b",
-          "ollama/qwen3:4b",
-          "ollama/qwen3:8b",
-          "ollama/qwen2.5:7b"
-        ]
-      },
-      {
-        "key": "remoteCoderAgent",
-        "id": "coder-remote",
-        "name": "Remote Coder",
-        "enabled": true,
-        "toolsetKeys": [
-          "codingDelegate"
-        ],
-        "markdownTemplateKeys": {
-          "AGENTS.md": "codingDelegate"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "ollama/qwen2.5-coder:3b",
-        "candidateModelRefs": [
-          "ollama/qwen2.5-coder:3b",
-          "ollama/qwen2.5-coder:1.5b",
-          "ollama/qwen3:4b",
-          "ollama/qwen3:8b",
-          "ollama/qwen2.5:7b"
-        ]
-      },
-      {
-        "id": "notes-helper",
-        "name": "Notes Helper",
-        "enabled": true,
-        "toolsetKeys": [
-          "research"
-        ],
-        "markdownTemplateKeys": {
-          "AGENTS.md": "research"
-        },
-        "sandboxMode": "off",
-        "subagents": {
-          "enabled": true,
-          "requireAgentId": true,
-          "allowAgents": []
-        },
-        "modelRef": "google/gemini-3.1-flash-lite-preview",
-        "candidateModelRefs": [
-          "google/gemini-3.1-flash-lite-preview"
-        ]
       }
     ]
   },
-  "workspaces": [
-    {
-      "id": "shared-main",
-      "name": "Shared Workspace",
-      "mode": "shared",
-      "path": "/home/node/.openclaw/workspace",
-      "markdownTemplateKeys": {
-        "AGENTS.md": "sharedWorkspace"
-      },
-      "enableAgentToAgent": true,
-      "manageWorkspaceAgentsMd": true,
-      "agents": [
-        "main",
-        "research",
-        "chat-local",
-        "chat-openai",
-        "review-local",
-        "coder-local",
-        "review-remote",
-        "coder-remote"
-      ],
-      "sharedWorkspaceIds": []
-    },
-    {
-      "id": "workspace-notes-helper",
-      "name": "Notes Helper Workspace",
-      "mode": "private",
-      "path": "/home/node/.openclaw/workspace-notes-helper",
-      "sharedWorkspaceIds": [
-        "shared-main"
-      ],
-      "enableAgentToAgent": true,
-      "manageWorkspaceAgentsMd": true,
-      "agents": [
-        "notes-helper"
-      ],
-      "markdownTemplateKeys": {}
-    }
-  ],
+  "workspaces": [],
   "verification": {
     "healthUrl": "http://127.0.0.1:18789/healthz",
-    "reportPath": "bootstrap-report.txt"
+    "reportPath": "D:\\openclaw\\openclaw-toolkit\\bootstrap-report.txt"
   }
 }
