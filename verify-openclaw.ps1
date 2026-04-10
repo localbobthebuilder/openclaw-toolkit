@@ -1558,18 +1558,7 @@ function Get-ExpectedManagedModelRefs {
         }
     }
 
-    $agentConfigs = @(
-        foreach ($agent in @(Get-ToolkitAgentList -Config $Config)) {
-            if ($null -eq $agent) {
-                continue
-            }
-            if ($agent.PSObject.Properties.Name -contains "enabled" -and -not [bool]$agent.enabled) {
-                continue
-            }
-
-            $agent
-        }
-    )
+    $agentConfigs = @(Get-ToolkitAssignedAgentList -Config $Config)
 
     foreach ($agentConfig in @($agentConfigs)) {
         if ($null -eq $agentConfig) {
@@ -1625,6 +1614,14 @@ $localReviewAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localRevie
 $localCoderAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "localCoderAgent"
 $remoteReviewAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "remoteReviewAgent"
 $remoteCoderAgentConfig = Get-ToolkitAgentByKey -Config $config -Key "remoteCoderAgent"
+$strongAgentAssigned = $strongAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $strongAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $strongAgentConfig)
+$researchAgentAssigned = $researchAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $researchAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $researchAgentConfig)
+$localChatAgentAssigned = $localChatAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $localChatAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localChatAgentConfig)
+$hostedTelegramAgentAssigned = $hostedTelegramAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $hostedTelegramAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $hostedTelegramAgentConfig)
+$localReviewAgentAssigned = $localReviewAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $localReviewAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localReviewAgentConfig)
+$localCoderAgentAssigned = $localCoderAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $localCoderAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localCoderAgentConfig)
+$remoteReviewAgentAssigned = $remoteReviewAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $remoteReviewAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $remoteReviewAgentConfig)
+$remoteCoderAgentAssigned = $remoteCoderAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $remoteCoderAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $remoteCoderAgentConfig)
 $telegramRoutingConfig = Get-ToolkitTelegramRouting -Config $config
 $agentToAgentEnabled = @(
     foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
@@ -1837,7 +1834,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($researchAgentConfig -and $researchAgentConfig.enabled) {
+        if ($researchAgentAssigned) {
             $researchCandidates = @()
             foreach ($candidateRef in @($researchAgentConfig.candidateModelRefs)) {
                 $researchCandidates = Add-UniqueString -List $researchCandidates -Value ([string]$candidateRef)
@@ -1874,7 +1871,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($localChatAgentConfig -and $localChatAgentConfig.enabled) {
+        if ($localChatAgentAssigned) {
             $chatAgent = $actualAgents | Where-Object { $_.id -eq [string]$localChatAgentConfig.id } | Select-Object -First 1
             $actualChatModel = if ($chatAgent -and $chatAgent.model) { [string]$chatAgent.model.primary } else { "" }
             $desiredChatModel = [string]$localChatAgentConfig.modelRef
@@ -1914,7 +1911,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($hostedTelegramAgentConfig -and $hostedTelegramAgentConfig.enabled) {
+        if ($hostedTelegramAgentAssigned) {
             $hostedChatCandidates = @()
             foreach ($candidateRef in @($hostedTelegramAgentConfig.candidateModelRefs)) {
                 $hostedChatCandidates = Add-UniqueString -List $hostedChatCandidates -Value ([string]$candidateRef)
@@ -1962,7 +1959,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($localReviewAgentConfig -and $localReviewAgentConfig.enabled) {
+        if ($localReviewAgentAssigned) {
             $reviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$localReviewAgentConfig.id } | Select-Object -First 1
             $actualReviewModel = if ($reviewAgent -and $reviewAgent.model) { [string]$reviewAgent.model.primary } else { "" }
             $desiredReviewModel = Resolve-ExpectedConfiguredModelRef -Config $config -AgentConfig $localReviewAgentConfig -ModelRef ([string]$localReviewAgentConfig.modelRef)
@@ -2002,7 +1999,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($localCoderAgentConfig -and $localCoderAgentConfig.enabled) {
+        if ($localCoderAgentAssigned) {
             $coderAgent = $actualAgents | Where-Object { $_.id -eq [string]$localCoderAgentConfig.id } | Select-Object -First 1
             $actualCoderModel = if ($coderAgent -and $coderAgent.model) { [string]$coderAgent.model.primary } else { "" }
             $expectedCoderModels = @()
@@ -2049,7 +2046,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($remoteReviewAgentConfig -and $remoteReviewAgentConfig.enabled) {
+        if ($remoteReviewAgentAssigned) {
             $remoteReviewAgent = $actualAgents | Where-Object { $_.id -eq [string]$remoteReviewAgentConfig.id } | Select-Object -First 1
             if ($null -eq $remoteReviewAgent) {
                 $multiAgentVerification += "FAIL: remoteReviewAgent '$($remoteReviewAgentConfig.id)' is missing from agents.list"
@@ -2094,7 +2091,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($remoteCoderAgentConfig -and $remoteCoderAgentConfig.enabled) {
+        if ($remoteCoderAgentAssigned) {
             $remoteCoderAgent = $actualAgents | Where-Object { $_.id -eq [string]$remoteCoderAgentConfig.id } | Select-Object -First 1
             if ($null -eq $remoteCoderAgent) {
                 $multiAgentVerification += "FAIL: remoteCoderAgent '$($remoteCoderAgentConfig.id)' is missing from agents.list"
@@ -2159,7 +2156,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
             }
         }
 
-        if ($strongAgentConfig -and $strongAgentConfig.subagents) {
+        if ($strongAgentAssigned -and $strongAgentConfig.subagents) {
             $mainAgent = $actualAgents | Where-Object { $_.id -eq [string]$strongAgentConfig.id } | Select-Object -First 1
             $delegationEnabled = $true
             if ($strongAgentConfig.subagents.PSObject.Properties.Name -contains "enabled") {
@@ -2224,10 +2221,19 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 $routeTrustedTelegramDms = [bool]$telegramRoutingConfig.routeTrustedTelegramDms
             }
         }
-        elseif ($localChatAgentConfig -and $localChatAgentConfig.enabled) {
+        elseif ($localChatAgentAssigned) {
             $telegramRouteTargetAgentId = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
             $routeTrustedTelegramGroups = [bool]$localChatAgentConfig.routeTrustedTelegramGroups
             $routeTrustedTelegramDms = [bool]$localChatAgentConfig.routeTrustedTelegramDms
+        }
+
+        if ($telegramRouteTargetAgentId) {
+            $telegramTargetAgent = Get-ToolkitAgentById -Config $config -AgentId $telegramRouteTargetAgentId
+            if ($null -eq $telegramTargetAgent -or -not (Test-ToolkitAgentEnabled -AgentConfig $telegramTargetAgent) -or -not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $telegramTargetAgent)) {
+                $telegramRouteTargetAgentId = $null
+                $routeTrustedTelegramGroups = $false
+                $routeTrustedTelegramDms = $false
+            }
         }
 
         $liveTelegramConfig = Resolve-OpenClawConfigDocumentPathValue -Document $liveConfig -Path "channels.telegram"

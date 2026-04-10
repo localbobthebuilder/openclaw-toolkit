@@ -223,6 +223,22 @@ The core mental model is:
 - dashboard access: `.\run-openclaw.cmd dashboard`
 - clean shutdown: `.\run-openclaw.cmd stop`
 
+Common paste-ready examples:
+
+```powershell
+.\run-openclaw.cmd prereqs
+.\run-openclaw.cmd bootstrap
+.\run-openclaw.cmd start
+.\run-openclaw.cmd status
+.\run-openclaw.cmd dashboard
+.\run-openclaw.cmd phone-dashboard
+.\run-openclaw.cmd verify -Checks "voice multi-agent"
+.\run-openclaw.cmd agents
+.\run-openclaw.cmd agent-smoke
+.\run-openclaw.cmd remote-review-smoke
+.\run-openclaw.cmd temp-agent-probe -KeepAgent
+```
+
 Run the bootstrap script first:
 
 ```powershell
@@ -281,6 +297,13 @@ Temporary agent storage probe:
   the end so the in-memory agent list matches the cleaned config file.
 - Use `-KeepAgent` only when you intentionally want to leave the probe agent in
   place for manual inspection.
+
+Examples:
+
+```powershell
+.\run-openclaw.cmd temp-agent-probe
+.\run-openclaw.cmd temp-agent-probe -KeepAgent
+```
 
 Multi-agent note:
 
@@ -637,6 +660,26 @@ Agent config note:
   one template
 - use ordered `toolsetKeys` to stack reusable toolsets such as `research`,
   `review`, or `codingDelegate`
+- use `toolOverrides.allow` / `toolOverrides.deny` when you only need a small
+  per-agent tweak after the toolsets merge
+
+Example agent-level tool override:
+
+```json
+{
+  "id": "notes-helper",
+  "name": "Notes Helper",
+  "toolsetKeys": ["research"],
+  "toolOverrides": {
+    "deny": ["web_fetch"],
+    "allow": ["message"]
+  }
+}
+```
+
+That keeps the `research` toolset as the base, then applies the direct deny and
+allow overrides at the end without forcing you to create a brand-new reusable
+toolset.
 
 It also enables `tools.agentToAgent` so your stronger agent can delegate to the
 other configured agents.
@@ -1018,6 +1061,16 @@ You can run it by itself with:
 ```powershell
 .\run-openclaw.cmd agent-smoke
 ```
+
+To run the narrower remote handoff smoke path by itself, use:
+
+```powershell
+.\run-openclaw.cmd remote-review-smoke
+```
+
+That focuses on the `main -> coder-remote -> review-local` path and is useful
+when you want to debug delegated review choreography without running the broader
+agent capability smoke suite.
 
 The multi-agent verification section checks:
 
