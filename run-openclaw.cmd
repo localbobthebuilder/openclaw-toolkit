@@ -49,6 +49,7 @@ if /I "%ACTION%"=="claude-auth" goto :claude_auth
 if /I "%ACTION%"=="copilot-auth" goto :copilot_auth
 if /I "%ACTION%"=="verify" goto :verify
 if /I "%ACTION%"=="agents" goto :agents
+if /I "%ACTION%"=="reset-config" goto :reset_config
 if /I "%ACTION%"=="watchdog" goto :watchdog
 if /I "%ACTION%"=="install-watchdog" goto :install_watchdog
 if /I "%ACTION%"=="compact-storage" goto :compact_storage
@@ -154,6 +155,10 @@ exit /b %ERRORLEVEL%
 
 :agents
 call "%SCRIPT_DIR%run-configure-agents.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
+
+:reset_config
+call "%SCRIPT_DIR%run-reset-config.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :watchdog
@@ -298,6 +303,9 @@ echo     Refresh the verification report. Use -Checks to target specific verific
 echo.
 echo   run-openclaw.cmd agents
 echo     Apply the starter multi-agent layout from the bootstrap config.
+echo.
+echo   run-openclaw.cmd reset-config
+echo     Reset the managed bootstrap config to the checked-in starter defaults and save the previous file as openclaw-bootstrap.config.json.bak.
 echo.
 echo   run-openclaw.cmd watchdog
 echo     Run one watchdog health check and optional self-heal.

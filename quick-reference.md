@@ -67,6 +67,8 @@ Most important commands:
   `run-openclaw.cmd remote-review-smoke`
 - Apply the configured starter multi-agent layout:
   `run-openclaw.cmd agents`
+- Reset the managed bootstrap config to the starter defaults:
+  `run-openclaw.cmd reset-config`
 - Inspect where a newly created API agent stores its state:
   `run-openclaw.cmd temp-agent-probe`
 - Compact Docker Desktop storage:

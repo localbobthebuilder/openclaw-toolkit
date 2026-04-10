@@ -71,6 +71,8 @@ Main operator wrapper:
   Run only specific verification areas such as `voice`, `local-model`, `agent`, or `sandbox`.
 - `.\run-openclaw.cmd agents`
   Apply the starter multi-agent layout from the bootstrap config.
+- `.\run-openclaw.cmd reset-config`
+  Restore `openclaw-bootstrap.config.json` from the checked-in starter defaults and save the previous file as `openclaw-bootstrap.config.json.bak`.
 - `.\run-openclaw.cmd watchdog`
   Run one health-check pass with optional restart/alert behavior.
 - `.\run-openclaw.cmd install-watchdog`

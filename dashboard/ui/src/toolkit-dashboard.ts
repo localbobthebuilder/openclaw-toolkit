@@ -983,6 +983,13 @@ export class ToolkitDashboard extends LitElement {
     }
   }
 
+  runOperation(operation: any) {
+    if (operation?.confirmText && !confirm(operation.confirmText)) {
+      return;
+    }
+    this.runCommand(operation.id, operation.args ?? []);
+  }
+
   cancelCommand() {
     if (!this.isRunning) return;
     if (this.pendingSocketAction) {
@@ -3968,6 +3975,7 @@ export class ToolkitDashboard extends LitElement {
       { id: 'onboard', name: 'Interactive Onboarding', desc: 'Launch openclaw onboard in a separate PowerShell window so you can answer prompts and make onboarding choices' },
       { id: 'telegram-setup', name: 'Telegram Setup', desc: 'Launch the interactive Telegram channel setup wizard in a separate PowerShell window without storing any token in toolkit config' },
       { id: 'telegram-ids', name: 'Telegram Seen IDs', desc: 'Scan recent Telegram gateway logs for user and group IDs when you need values for allowlists or group routing' },
+      { id: 'reset-config', name: 'Reset Configuration', desc: 'Restore the managed bootstrap config to the toolkit starter defaults. The current config is backed up first as openclaw-bootstrap.config.json.bak.', confirmText: 'Reset the managed bootstrap config to the toolkit starter defaults?\n\nThis overwrites openclaw-bootstrap.config.json and saves the previous file as openclaw-bootstrap.config.json.bak.' },
       { id: 'stop', name: 'Stop', desc: 'Stop all services and OpenClaw' },
       { id: 'cli', args: ['--version'], name: 'OpenClaw CLI Version', desc: 'Run openclaw --version inside the gateway container and stream the result' },
       { id: 'cli', args: ['doctor'], name: 'OpenClaw Doctor', desc: 'Run openclaw doctor inside the gateway container and stream config diagnostics' },
@@ -3982,7 +3990,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="card">
             <h3>${op.name}</h3>
             <p style="color: #888; font-size: 0.85rem; margin: 10px 0 20px;">${op.desc}</p>
-            <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand(op.id, op.args ?? [])}>Run Action</button>
+            <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runOperation(op)}>Run Action</button>
           </div>
         `)}
       </div>
