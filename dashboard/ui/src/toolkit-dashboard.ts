@@ -3740,8 +3740,7 @@ export class ToolkitDashboard extends LitElement {
               </div>
               <div class="topology-edge-overlay" aria-hidden="true">
                 ${visibleEdges.flatMap((edge: any) => {
-                  const isPreviewEdge = !this.topologyShowAllArrows && previewSourceAgentId === edge.sourceId && !edge.active;
-                  const edgeColor = edge.active || isPreviewEdge ? '#00bcd4' : edge.main ? '#ffd54f' : '#6ec6ff';
+                  const edgeColor = this.getTopologyEdgeColor(edge);
                   return (Array.isArray(edge.renderSegments) ? edge.renderSegments : []).map((segment: any) => html`
                   <div
                     class="topology-edge-segment ${segment.orientation}"
@@ -3753,8 +3752,7 @@ export class ToolkitDashboard extends LitElement {
                   if (!edge.arrowHead) {
                     return '';
                   }
-                  const isPreviewEdge = !this.topologyShowAllArrows && previewSourceAgentId === edge.sourceId && !edge.active;
-                  const edgeColor = edge.active || isPreviewEdge ? '#00bcd4' : edge.main ? '#ffd54f' : '#6ec6ff';
+                  const edgeColor = this.getTopologyEdgeColor(edge);
                   return html`
                   <div
                     class="topology-edge-arrowhead"
@@ -4766,6 +4764,20 @@ export class ToolkitDashboard extends LitElement {
       return [];
     }
     return this.topologyEdges.filter((edge: any) => edge.sourceId === previewSourceAgentId);
+  }
+
+  getTopologyEdgeColor(edge: any) {
+    const isHoveredSource = this.topologyHoverAgentId === edge.sourceId;
+    if (edge.active) {
+      return '#00bcd4';
+    }
+    if (isHoveredSource) {
+      return '#ff8a65';
+    }
+    if (edge.main) {
+      return '#ffd54f';
+    }
+    return '#6ec6ff';
   }
 
   getTopologyProtectedLaneMetrics() {
