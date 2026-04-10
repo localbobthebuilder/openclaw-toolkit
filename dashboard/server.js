@@ -110,6 +110,103 @@ function readToolkitConfig() {
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
 
+function readJsonFileIfExists(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function getToolkitHostConfigDir(config) {
+  const configuredPath = typeof config?.hostConfigDir === 'string' ? config.hostConfigDir.trim() : '';
+  return configuredPath || path.join(os.homedir(), '.openclaw');
+}
+
+function hasDirectTelegramCredentials(value) {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  return ['botToken', 'tokenFile'].some((key) => typeof value[key] === 'string' && value[key].trim().length > 0);
+}
+
+function getDefaultTelegramAccountId(config) {
+  const value = typeof config?.telegram?.defaultAccount === 'string' ? config.telegram.defaultAccount.trim() : '';
+  return value || 'default';
+}
+
+function getTelegramSetupStatus() {
+  const toolkitConfig = readToolkitConfig();
+  const defaultAccountId = getDefaultTelegramAccountId(toolkitConfig);
+  const liveConfigPath = path.join(getToolkitHostConfigDir(toolkitConfig), 'openclaw.json');
+  const liveConfig = readJsonFileIfExists(liveConfigPath);
+  const liveTelegram = liveConfig?.channels?.telegram && typeof liveConfig.channels.telegram === 'object'
+    ? liveConfig.channels.telegram
+    : null;
+  const liveAccounts = liveTelegram?.accounts && typeof liveTelegram.accounts === 'object'
+    ? liveTelegram.accounts
+    : {};
+  const envHasDefaultToken = typeof process.env.TELEGRAM_BOT_TOKEN === 'string' && process.env.TELEGRAM_BOT_TOKEN.trim().length > 0;
+  const toolkitAccounts = Array.isArray(toolkitConfig?.telegram?.accounts) ? toolkitConfig.telegram.accounts : [];
+
+  function buildAccountStatus(accountId, liveAccountConfig, options = {}) {
+    const isDefault = options.isDefault === true;
+    const hasTopLevelCredentials = isDefault && hasDirectTelegramCredentials(liveTelegram);
+    const hasAccountCredentials = hasDirectTelegramCredentials(liveAccountConfig);
+    const hasEnvCredentials = isDefault && envHasDefaultToken;
+
+    let credentialSource = null;
+    if (hasTopLevelCredentials) {
+      credentialSource = 'live-top-level';
+    } else if (hasAccountCredentials) {
+      credentialSource = 'live-account';
+    } else if (hasEnvCredentials) {
+      credentialSource = 'env';
+    }
+
+    return {
+      accountId,
+      configured: hasTopLevelCredentials || hasAccountCredentials || hasEnvCredentials,
+      credentialSource,
+      liveEnabled: isDefault
+        ? !!liveTelegram?.enabled
+        : !!liveAccountConfig?.enabled,
+      accountExists: isDefault
+        ? !!liveTelegram
+        : !!liveAccountConfig
+    };
+  }
+
+  const accounts = {};
+  for (const account of toolkitAccounts) {
+    const accountId = typeof account?.id === 'string' ? account.id.trim() : '';
+    if (!accountId) {
+      continue;
+    }
+    const liveAccountConfig = liveAccounts[accountId] && typeof liveAccounts[accountId] === 'object'
+      ? liveAccounts[accountId]
+      : null;
+    accounts[accountId] = buildAccountStatus(accountId, liveAccountConfig);
+  }
+
+  const defaultLiveAccountConfig = liveAccounts[defaultAccountId] && typeof liveAccounts[defaultAccountId] === 'object'
+    ? liveAccounts[defaultAccountId]
+    : null;
+
+  return {
+    liveConfigPath,
+    channelEnabled: !!liveTelegram?.enabled,
+    defaultAccountId,
+    defaultAccount: buildAccountStatus(defaultAccountId, defaultLiveAccountConfig, { isDefault: true }),
+    accounts
+  };
+}
+
 function isSafeIdSegment(value) {
   return typeof value === 'string' && value.trim().length > 0 && !value.includes('..') && !path.isAbsolute(value) && !/[\\/]/.test(value);
 }
@@ -363,6 +460,14 @@ app.get('/api/status', (req, res) => {
   child.on('close', (code) => {
     res.json({ output, code });
   });
+});
+
+app.get('/api/telegram-setup-status', (req, res) => {
+  try {
+    res.json(getTelegramSetupStatus());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read Telegram setup status', details: err.message });
+  }
 });
 
 app.get('/api/voice-models', (req, res) => {

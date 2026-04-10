@@ -101,6 +101,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private savedTemplateFiles: any = { agents: {}, workspaces: {} };
   @state() private statusOutput: string = '';
   @state() private statusLoaded: boolean = false;
+  @state() private telegramSetupStatus: any = { defaultAccount: null, accounts: {} };
   @state() private voiceWhisperModels: string[] = [];
   @state() private voiceWhisperModelSource: string = 'fallback';
   @state() private voiceWhisperModelError: string = '';
@@ -293,6 +294,7 @@ export class ToolkitDashboard extends LitElement {
         await this.fetchConfig();
         await this.fetchVoiceModels();
         await this.fetchStatus();
+        await this.fetchTelegramSetupStatus();
         this.connectWS();
     } else {
         console.error('Server failed to initialize after multiple attempts');
@@ -332,6 +334,20 @@ export class ToolkitDashboard extends LitElement {
       if (err.name !== 'AbortError') {
         console.error('Failed to fetch status', err);
       }
+    }
+  }
+
+  async fetchTelegramSetupStatus() {
+    try {
+      const res = await fetch(this.getBaseUrl() + '/api/telegram-setup-status');
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      this.telegramSetupStatus = data && typeof data === 'object'
+        ? data
+        : { defaultAccount: null, accounts: {} };
+    } catch (err) {
+      console.error('Failed to fetch Telegram setup status', err);
+      this.telegramSetupStatus = { defaultAccount: null, accounts: {} };
     }
   }
 
@@ -456,6 +472,7 @@ export class ToolkitDashboard extends LitElement {
         this.logs = [...this.logs, '\n[RECONNECTED] Dashboard server restarted. ✅'];
         this.fetchConfig();
         this.fetchStatus();
+        this.fetchTelegramSetupStatus();
       }
     };
     this.ws.onmessage = (event) => {
@@ -487,6 +504,7 @@ export class ToolkitDashboard extends LitElement {
         this.logs = [...this.logs, `\n[FINISH] ${label}`];
         this.fetchConfig(); 
         this.fetchStatus();
+        this.fetchTelegramSetupStatus();
       }
     };
     this.ws.onclose = () => {
@@ -555,6 +573,7 @@ export class ToolkitDashboard extends LitElement {
           }
         }
         this.savedTemplateFiles = this.cloneTemplateState(this.templateFiles);
+        this.fetchTelegramSetupStatus();
         alert('Configuration saved successfully.');
         return true;
       } else throw new Error('Failed to save');
@@ -954,6 +973,44 @@ export class ToolkitDashboard extends LitElement {
       this.requestUpdate();
   }
 
+  getTelegramDmPolicyDescription(policy: string) {
+      switch ((policy || '').trim()) {
+        case 'allowlist':
+          return 'Only numeric Telegram user IDs listed in Allowed User IDs can start DMs with this bot. An empty allowlist effectively blocks all DMs.';
+        case 'open':
+          return 'Any Telegram user can DM this bot. Use this only when you intentionally want a public-facing bot.';
+        case 'disabled':
+          return 'Block all Telegram direct messages for this account.';
+        case 'pairing':
+        default:
+          return 'First-time DM senders must pair or be approved before this bot accepts their direct messages. This is the safest default for owner-operated bots.';
+      }
+  }
+
+  getTelegramGroupPolicyDescription(policy: string) {
+      switch ((policy || '').trim()) {
+        case 'open':
+          return 'Anyone inside an allowed Telegram group can talk to this bot. Group IDs still need to be listed under Allowed Groups unless you intentionally open that surface.';
+        case 'disabled':
+          return 'Disable Telegram group interaction for this account even if groups are configured below.';
+        case 'allowlist':
+        default:
+          return 'Only approved senders inside allowed Telegram groups can trigger this bot. If Allowed Group Sender IDs is empty, OpenClaw falls back to the DM allowlist.';
+      }
+  }
+
+  getTelegramExecApprovalTargetDescription(target: string) {
+      switch ((target || '').trim()) {
+        case 'channel':
+          return 'Post exec approval prompts back into the originating Telegram chat or topic instead of approver DMs.';
+        case 'both':
+          return 'Send exec approval prompts to both approver DMs and the originating Telegram chat or topic.';
+        case 'dm':
+        default:
+          return 'Send exec approval prompts only to the approver DMs. This is the quietest and safest default.';
+      }
+  }
+
   renderVoiceFeaturesConfig() {
       const voiceNotes = this.ensureVoiceNotesConfig();
       const whisperModelOptions = this.getVoiceWhisperModelOptions();
@@ -1017,6 +1074,21 @@ export class ToolkitDashboard extends LitElement {
       const accountExecApprovals = this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget);
       const accountExecApprovers = Array.isArray(accountExecApprovals.approvers) ? accountExecApprovals.approvers : [];
       const accountGroups = Array.isArray(accountTarget.groups) ? accountTarget.groups : [];
+      const defaultRoutingAgentLabel = this.getAgentDisplayLabel(this.getDefaultRoutingAgentEntry()?.agent);
+      const selectedTargetAgentLabel = accountRoute?.targetAgentId
+        ? (options.telegramRouteAgentChoices.find((choice: any) => choice.id === accountRoute.targetAgentId)?.label || accountRoute.targetAgentId)
+        : '';
+      const setupStatus = this.getTelegramSetupStatusRecord(accountId, isDefault);
+      const setupComplete = !!setupStatus?.configured;
+      const setupBadgeStyle = setupComplete
+        ? 'background: #4caf50; color: #000;'
+        : 'background: #ff9800; color: #000;';
+      const setupButtonLabel = setupComplete ? 'Re-run Setup' : 'Setup Account';
+      const setupStatusText = setupComplete
+        ? (setupStatus?.credentialSource === 'env'
+          ? 'Live Telegram credentials were detected from TELEGRAM_BOT_TOKEN for this default account.'
+          : 'Live Telegram credentials were detected for this account. You do not need to run setup again unless you want to reconnect or replace the bot.')
+        : 'Live Telegram credentials were not detected for this account yet. Save & Apply first, then run Setup Account to connect the real bot.';
 
       return html`
         <div class="card" style="padding: 14px; margin-bottom: 12px; border-color: ${isDefault ? '#5c6bc0' : '#333'};">
@@ -1024,15 +1096,17 @@ export class ToolkitDashboard extends LitElement {
             <h3>
               ${options.title}
               ${isDefault ? html`<span class="badge" style="background: #ffc107;">Default</span>` : ''}
+              <span class="badge" style=${setupBadgeStyle}>${setupComplete ? 'Setup Complete' : 'Setup Needed'}</span>
             </h3>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-ghost" ?disabled=${this.isRunning || !accountId} @click=${() => this.runCommand('telegram-setup', ['-AccountId', accountId])}>Setup Account</button>
+              <button class="btn btn-ghost" ?disabled=${this.isRunning || !accountId} @click=${() => this.runCommand('telegram-setup', ['-AccountId', accountId])}>${setupButtonLabel}</button>
               ${typeof options.removableIndex === 'number'
                 ? html`<button class="btn btn-danger" @click=${() => this.removeTelegramAccount(options.removableIndex!)}>Remove Account</button>`
                 : ''}
             </div>
           </div>
           ${options.subtitle ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 12px;">${options.subtitle}</div>` : ''}
+          <div class="help-text" style="margin-top: 0; margin-bottom: 12px; color: ${setupComplete ? '#81c784' : '#ff9800'};">${setupStatusText}</div>
           <div class="form-group">
             <label>Account ID</label>
             <input
@@ -1052,20 +1126,24 @@ export class ToolkitDashboard extends LitElement {
                 }
                 this.requestUpdate();
               }}>
-            ${isDefault ? html`
-              <span class="help-text">This is the primary Telegram account used whenever a binding does not specify an explicit account ID.</span>
-            ` : ''}
+            <span class="help-text">${isDefault
+              ? 'This is the primary Telegram account used whenever a binding does not specify an explicit account ID.'
+              : 'Stable account key used for routing and for the live OpenClaw account entry under channels.telegram.accounts.<id>. Rename it only when you really want to change the account identity.'}</span>
           </div>
           <div class="form-group">
             <label class="toggle-switch">
               <input type="checkbox" ?checked=${!!accountTarget.enabled} @change=${(e: any) => { accountTarget.enabled = e.target.checked; this.requestUpdate(); }}>
               Enable this account
             </label>
+            <span class="help-text">${isDefault
+              ? 'Master switch for Telegram in this toolkit config. Turning it off prevents the managed Telegram channel settings from being applied.'
+              : 'Disable just this Telegram bot account while keeping the rest of the Telegram integration active.'}</span>
           </div>
           ${!isDefault ? html`
             <div class="form-group">
               <label>Display Name (optional)</label>
               <input type="text" .value=${accountTarget.name || ''} @input=${(e: any) => { accountTarget.name = e.target.value; this.requestUpdate(); }}>
+              <span class="help-text">Optional human-friendly label stored in live OpenClaw config. It does not control routing; it just makes the account easier to identify.</span>
             </div>
           ` : ''}
           <div class="form-group">
@@ -1076,10 +1154,12 @@ export class ToolkitDashboard extends LitElement {
               <option value="open">open</option>
               <option value="disabled">disabled</option>
             </select>
+            <span class="help-text">${this.getTelegramDmPolicyDescription(accountTarget.dmPolicy || 'pairing')}</span>
           </div>
           <div class="form-group">
             <label>Allowed User IDs (comma separated)</label>
             <input type="text" .value=${Array.isArray(accountTarget.allowFrom) ? accountTarget.allowFrom.join(',') : ''} @input=${(e: any) => { accountTarget.allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+            <span class="help-text">Numeric Telegram user IDs that are trusted for DMs on this account. For one-owner bots, put your own Telegram user ID here.</span>
           </div>
           <div class="form-group">
             <label>Group Policy</label>
@@ -1088,11 +1168,12 @@ export class ToolkitDashboard extends LitElement {
               <option value="open">open</option>
               <option value="disabled">disabled</option>
             </select>
+            <span class="help-text">${this.getTelegramGroupPolicyDescription(accountTarget.groupPolicy || 'allowlist')}</span>
           </div>
           <div class="form-group">
             <label>Allowed Group Sender IDs (comma separated)</label>
             <input type="text" .value=${Array.isArray(accountTarget.groupAllowFrom) ? accountTarget.groupAllowFrom.join(',') : ''} @input=${(e: any) => { accountTarget.groupAllowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
-            <span class="help-text">Leave empty to fall back to the DM allowlist. Put group chat IDs under the groups list below, not here.</span>
+            <span class="help-text">Numeric Telegram user IDs allowed to speak inside allowed groups. Leave empty to fall back to the DM allowlist. Put negative Telegram group chat IDs under Allowed Groups below, not here.</span>
           </div>
           <div class="card" style="padding: 14px; margin-bottom: 16px;">
             <div class="card-header" style="margin-bottom: 12px;">
@@ -1104,7 +1185,7 @@ export class ToolkitDashboard extends LitElement {
                 <option value="">No managed route</option>
                 ${options.telegramRouteAgentChoices.map((choice: any) => html`<option value=${choice.id} ?selected=${accountRoute?.targetAgentId === choice.id}>${choice.label}</option>`)}
               </select>
-              <span class="help-text">The toolkit-managed Telegram bindings for this account point trusted DMs and groups at the selected agent.</span>
+              <span class="help-text">Selecting a Target Agent here does not change Telegram routing by itself. One or both route toggles below must also be enabled. If both toggles are off, allowed Telegram traffic for this account falls back to the current default agent <code>${defaultRoutingAgentLabel}</code>, unless some other explicit Telegram binding matches first.</span>
               ${accountRoute?.targetAgentId ? html`
                 <span class="help-text">Current managed route: <code>${accountId}</code> -> <code>${accountRoute.targetAgentId}</code></span>
               ` : ''}
@@ -1115,12 +1196,22 @@ export class ToolkitDashboard extends LitElement {
                   <input type="checkbox" ?disabled=${!accountId} ?checked=${!!accountRoute?.routeTrustedTelegramDms} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).routeTrustedTelegramDms = e.target.checked; this.requestUpdate(); }}>
                   Route trusted DMs
                 </label>
+                ${accountRoute?.routeTrustedTelegramDms ? html`
+                  <span class="help-text">Trusted Telegram direct messages for this account are currently sent to <strong>Target Agent above (${selectedTargetAgentLabel || 'no target selected'})</strong>.</span>
+                ` : html`
+                  <span class="help-text" style="color: #ff9800; font-weight: 600;">Disabled: trusted Telegram direct messages for this account will currently fall back to <strong>${defaultRoutingAgentLabel}</strong>, unless another explicit Telegram binding matches first.</span>
+                `}
               </div>
               <div class="form-group">
                 <label class="toggle-switch">
                   <input type="checkbox" ?disabled=${!accountId} ?checked=${!!accountRoute?.routeTrustedTelegramGroups} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).routeTrustedTelegramGroups = e.target.checked; this.requestUpdate(); }}>
                   Route trusted groups
                 </label>
+                ${accountRoute?.routeTrustedTelegramGroups ? html`
+                  <span class="help-text">Allowed Telegram group messages for this account are currently sent to <strong>Target Agent above (${selectedTargetAgentLabel || 'no target selected'})</strong>.</span>
+                ` : html`
+                  <span class="help-text" style="color: #ff9800; font-weight: 600;">Disabled: allowed Telegram group messages for this account will currently fall back to <strong>${defaultRoutingAgentLabel}</strong>, unless another explicit Telegram binding matches first.</span>
+                `}
               </div>
             </div>
           </div>
@@ -1134,16 +1225,19 @@ export class ToolkitDashboard extends LitElement {
                 <div class="form-group">
                   <label>Group ID</label>
                   <input type="text" .value=${group.id || ''} @input=${(e: any) => { group.id = e.target.value; this.requestUpdate(); }}>
+                  <span class="help-text">Negative Telegram group or supergroup chat ID that this bot should trust. This is the chat identifier, not a user ID.</span>
                 </div>
                 <div class="form-group">
                   <label class="toggle-switch">
                     <input type="checkbox" ?checked=${!!group.requireMention} @change=${(e: any) => { group.requireMention = e.target.checked; this.requestUpdate(); }}>
                     Require mention
                   </label>
+                  <span class="help-text">When enabled, the bot only responds in this group when explicitly mentioned. Turn it off for always-on group behavior.</span>
                 </div>
                 <div class="form-group">
                   <label>Allowed Sender IDs (comma separated)</label>
                   <input type="text" .value=${Array.isArray(group.allowFrom) ? group.allowFrom.join(',') : ''} @input=${(e: any) => { group.allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+                  <span class="help-text">Optional per-group Telegram user ID allowlist. Use this when one group should be stricter than the account-wide group sender policy.</span>
                 </div>
                 <div class="form-group">
                   <label>Group Policy Override</label>
@@ -1153,6 +1247,7 @@ export class ToolkitDashboard extends LitElement {
                     <option value="open" ?selected=${group.groupPolicy === 'open'}>open</option>
                     <option value="disabled" ?selected=${group.groupPolicy === 'disabled'}>disabled</option>
                   </select>
+                  <span class="help-text">Optional override for this specific group. Leave it blank to inherit the account-wide Group Policy.</span>
                 </div>
                 <button class="btn btn-danger" @click=${() => this.removeTelegramGroup(groupIndex, accountTarget)}>Remove Group</button>
               </div>
@@ -1167,10 +1262,12 @@ export class ToolkitDashboard extends LitElement {
                 <input type="checkbox" ?checked=${!!accountExecApprovals.enabled} @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget).enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Telegram exec approvals
               </label>
+              <span class="help-text">Allow exec approval prompts to be delivered through Telegram for this account instead of relying only on other approval surfaces.</span>
             </div>
             <div class="form-group">
               <label>Exec Approver IDs (comma separated)</label>
               <input type="text" .value=${accountExecApprovers.join(',')} @input=${(e: any) => { this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget).approvers = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+              <span class="help-text">Numeric Telegram user IDs that are allowed to approve or deny exec requests coming from this account.</span>
             </div>
             <div class="form-group">
               <label>Exec Approval Target</label>
@@ -1179,6 +1276,7 @@ export class ToolkitDashboard extends LitElement {
                 <option value="channel">channel</option>
                 <option value="both">both</option>
               </select>
+              <span class="help-text">${this.getTelegramExecApprovalTargetDescription(accountExecApprovals.target || 'dm')}</span>
             </div>
           </div>
         </div>
@@ -3941,6 +4039,35 @@ export class ToolkitDashboard extends LitElement {
       return String(left.agent?.name || left.agent?.id || left.key).localeCompare(String(right.agent?.name || right.agent?.id || right.key));
     });
     return entries;
+  }
+
+  getAgentDisplayLabel(agent: any) {
+    const agentId = typeof agent?.id === 'string' ? agent.id.trim() : '';
+    const agentName = typeof agent?.name === 'string' ? agent.name.trim() : '';
+    return agentName && agentName !== agentId ? `${agentName} (${agentId})` : (agentId || 'main');
+  }
+
+  getDefaultRoutingAgentEntry() {
+    const agents = Array.isArray(this.config?.agents?.list) ? this.config.agents.list : [];
+    const entries = agents
+      .map((agent: any, idx: number) => ({ key: typeof agent?.key === 'string' && agent.key.trim().length > 0 ? agent.key : `agent:${idx}`, agent }))
+      .filter((entry: any) => entry.agent?.id);
+
+    return entries.find((entry: any) => entry.agent?.default === true)
+      || entries[0]
+      || { key: 'main', agent: { id: 'main', name: 'main' } };
+  }
+
+  getTelegramSetupStatusRecord(accountId: string, isDefault: boolean) {
+    const status = this.telegramSetupStatus && typeof this.telegramSetupStatus === 'object'
+      ? this.telegramSetupStatus
+      : { defaultAccount: null, accounts: {} };
+    if (isDefault) {
+      return status.defaultAccount || null;
+    }
+
+    const accounts = status.accounts && typeof status.accounts === 'object' ? status.accounts : {};
+    return accountId ? (accounts[accountId] || null) : null;
   }
 
   isMainAgentEntry(key: string, agent: any) {

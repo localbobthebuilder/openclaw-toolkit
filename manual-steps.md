@@ -905,6 +905,55 @@ Example multi-bot Telegram snippet:
 }
 ```
 
+Telegram field reference:
+
+Default account and global Telegram keys:
+
+| Path | Meaning |
+| --- | --- |
+| `telegram.enabled` | Master switch for the toolkit-managed Telegram integration. When off, bootstrap stops managing the Telegram channel config. |
+| `telegram.defaultAccount` | Primary Telegram account ID. Bindings without an explicit `accountId` use this account. Keep it stable once you start routing with it. |
+| `telegram.dmPolicy` | DM access mode for the default account: `pairing` requires first-contact approval, `allowlist` only permits IDs from `allowFrom`, `open` allows anyone, and `disabled` blocks DMs. |
+| `telegram.allowFrom` | Numeric Telegram user IDs trusted for DMs on the default account. For one-owner bots, put your own Telegram user ID here. |
+| `telegram.groupPolicy` | Sender policy for Telegram groups on the default account: `allowlist` only allows approved senders, `open` allows any member in an allowed group, `disabled` blocks groups. |
+| `telegram.groupAllowFrom` | Numeric Telegram user IDs allowed to speak inside allowed groups on the default account. If omitted, OpenClaw falls back to `telegram.allowFrom`. |
+| `telegram.groups[]` | List of allowed Telegram groups for the default account. These are trusted chat entries, not user entries. |
+| `telegram.accounts[]` | Extra Telegram bot accounts. Each extra account has the same per-account fields as the default account, but scoped to that specific bot. |
+
+Per-account keys (`telegram.*` for the default account, `telegram.accounts[]` for extra accounts):
+
+| Path | Meaning |
+| --- | --- |
+| `id` | Stable account key used for routing and for the live OpenClaw account entry under `channels.telegram.accounts.<id>`. |
+| `enabled` | Enables or disables that account. On the default account this acts as the main Telegram switch; on extra accounts it disables only that bot. |
+| `name` | Optional human-friendly label for the account. Useful for operators; it does not decide routing. |
+| `dmPolicy` | DM access mode for that account. Same meanings as the top-level default-account `telegram.dmPolicy`. |
+| `allowFrom` | Numeric Telegram user IDs trusted for direct messages on that account. |
+| `groupPolicy` | Group sender policy for that account. Same meanings as the top-level default-account `telegram.groupPolicy`. |
+| `groupAllowFrom` | Numeric Telegram user IDs allowed to speak inside allowed groups for that account. |
+| `groups[]` | Allowed Telegram groups for that specific account. |
+| `execApprovals.enabled` | Enables Telegram-native exec approval delivery for that account. |
+| `execApprovals.approvers` | Numeric Telegram user IDs allowed to approve or deny exec requests for that account. |
+| `execApprovals.target` | Where approval prompts are sent: `dm` sends only to approver DMs, `channel` posts back to the originating chat/topic, `both` does both. |
+
+Per-group keys (`telegram.groups[]` or `telegram.accounts[].groups[]`):
+
+| Path | Meaning |
+| --- | --- |
+| `id` | Negative Telegram group or supergroup chat ID to trust. This is the chat ID, not a user ID. |
+| `requireMention` | When `true`, the bot replies in that group only when explicitly mentioned. Turn it off for always-on group behavior. |
+| `allowFrom` | Optional per-group sender allowlist. Use this when one group should be stricter than the account-wide group sender policy. |
+| `groupPolicy` | Optional override for this specific group: `allowlist`, `open`, or `disabled`. Leave it unset to inherit the account-wide group policy. |
+
+Toolkit-managed routing keys (`agents.telegramRouting.routes[]`):
+
+| Path | Meaning |
+| --- | --- |
+| `accountId` | Which Telegram account this managed route applies to. Usually `default` for the first bot, or the `id` of an entry in `telegram.accounts[]`. |
+| `targetAgentId` | Toolkit-managed target agent for trusted Telegram traffic on that account. This matters only for the route toggles enabled below. Selecting a target agent alone does not change routing. |
+| `routeTrustedTelegramDms` | When `true`, trusted Telegram DMs for that account are always sent to `targetAgentId`. When `false`, the toolkit does not create a DM-specific override for that account and OpenClaw falls back to its normal agent routing order: explicit binding first, then account/channel binding, then the configured default agent, otherwise the first agent, and finally `main`. |
+| `routeTrustedTelegramGroups` | When `true`, messages from allowed Telegram groups for that account are always sent to `targetAgentId`. When `false`, the toolkit does not create a group-specific override for that account and OpenClaw falls back to the same normal routing order described above. |
+
 To authenticate an extra Telegram account after you add it to toolkit config,
 run:
 
