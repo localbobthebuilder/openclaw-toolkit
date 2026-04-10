@@ -483,6 +483,28 @@ function Test-TelegramChannelEnabled {
     return $false
 }
 
+function Get-TelegramAccountCount {
+    param($TelegramConfig)
+
+    if ($null -eq $TelegramConfig) {
+        return 0
+    }
+
+    if (-not ($TelegramConfig.PSObject.Properties.Name -contains "accounts") -or $null -eq $TelegramConfig.accounts) {
+        return 0
+    }
+
+    if ($TelegramConfig.accounts -is [System.Collections.IDictionary]) {
+        return @($TelegramConfig.accounts.Keys).Count
+    }
+
+    if ($TelegramConfig.accounts.PSObject -and @($TelegramConfig.accounts.PSObject.Properties).Count -gt 0) {
+        return @($TelegramConfig.accounts.PSObject.Properties).Count
+    }
+
+    return @($TelegramConfig.accounts).Count
+}
+
 function Get-TelegramGroupCount {
     param($TelegramConfig)
 
@@ -925,6 +947,8 @@ $telegramWanted = $null -ne $bootstrapTelegramConfig -and [bool]$bootstrapTelegr
 $telegramLiveEnabled = Test-TelegramChannelEnabled -TelegramConfig $liveTelegramConfig
 $bootstrapTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $bootstrapTelegramConfig
 $liveTelegramHasCredentials = Test-TelegramCredentialConfigured -TelegramConfig $liveTelegramConfig
+$defaultTelegramAccountId = if ($null -ne $bootstrapConfig) { Get-ToolkitTelegramDefaultAccountId -Config $bootstrapConfig } else { "default" }
+$managedTelegramRoutes = if ($null -ne $bootstrapConfig) { @(Get-ToolkitTelegramRouteList -Config $bootstrapConfig) } else { @() }
 if (-not $telegramWanted -and -not $telegramLiveEnabled) {
     Write-Host "Telegram: not enabled yet" -ForegroundColor Yellow
     Write-Host "Enable Telegram in the toolkit config, add a bot token or token file, then rerun bootstrap."
@@ -957,6 +981,9 @@ else {
     if ($liveTelegramConfig.PSObject.Properties.Name -contains "dmPolicy" -and $liveTelegramConfig.dmPolicy) {
         Write-Host "DM policy: $([string]$liveTelegramConfig.dmPolicy)"
     }
+    if ($liveTelegramConfig.PSObject.Properties.Name -contains "defaultAccount" -and $liveTelegramConfig.defaultAccount) {
+        Write-Host "Default account: $([string]$liveTelegramConfig.defaultAccount)"
+    }
     if ($liveTelegramConfig.PSObject.Properties.Name -contains "allowFrom") {
         Write-Host "Allowed DM senders: $(@($liveTelegramConfig.allowFrom).Count)"
     }
@@ -967,6 +994,10 @@ else {
         Write-Host "Allowed group senders: $(@($liveTelegramConfig.groupAllowFrom).Count)"
     }
     Write-Host "Configured groups: $(Get-TelegramGroupCount -TelegramConfig $liveTelegramConfig)"
+    $liveTelegramAccountCount = Get-TelegramAccountCount -TelegramConfig $liveTelegramConfig
+    if ($liveTelegramAccountCount -gt 0) {
+        Write-Host "Additional Telegram accounts: $liveTelegramAccountCount"
+    }
 
     $liveExecApprovals = if ($liveTelegramConfig.PSObject.Properties.Name -contains "execApprovals") { $liveTelegramConfig.execApprovals } else { $null }
     if ($null -ne $liveExecApprovals) {
@@ -977,6 +1008,21 @@ else {
         }
         if ($liveExecApprovals.PSObject.Properties.Name -contains "target" -and $liveExecApprovals.target) {
             Write-Host "Exec target: $([string]$liveExecApprovals.target)"
+        }
+    }
+
+    if (@($managedTelegramRoutes).Count -gt 0) {
+        Write-Host "Managed Telegram routes:"
+        foreach ($route in @($managedTelegramRoutes)) {
+            if ($null -eq $route) {
+                continue
+            }
+
+            $accountId = if ($route.PSObject.Properties.Name -contains "accountId" -and $route.accountId) { [string]$route.accountId } else { $defaultTelegramAccountId }
+            $targetAgentId = if ($route.PSObject.Properties.Name -contains "targetAgentId" -and $route.targetAgentId) { [string]$route.targetAgentId } else { "(unset)" }
+            $dmState = if ($route.PSObject.Properties.Name -contains "routeTrustedTelegramDms" -and [bool]$route.routeTrustedTelegramDms) { "DM on" } else { "DM off" }
+            $groupState = if ($route.PSObject.Properties.Name -contains "routeTrustedTelegramGroups" -and [bool]$route.routeTrustedTelegramGroups) { "groups on" } else { "groups off" }
+            Write-Host ("- {0} -> {1} ({2}, {3})" -f $accountId, $targetAgentId, $dmState, $groupState)
         }
     }
 

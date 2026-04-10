@@ -102,9 +102,11 @@ Multi-agent note:
 - OpenClaw runtime failover first rotates auth profiles, then falls back to the
   next configured model; that is why `main` can keep working when OpenAI is in
   quota cooldown.
-- Telegram target agent is configurable with
-  `agents.telegramRouting.targetAgentId` in
+- Telegram routing is configurable with
+  `agents.telegramRouting.routes[]` in
   `<toolkit-dir>\openclaw-bootstrap.config.json`
+- Additional Telegram bots live under `telegram.accounts[]`; route each one by
+  matching `accountId` in `agents.telegramRouting.routes[]`
 - Gemini in this setup uses the official Google API-key provider, and OpenClaw stores its own auth profiles in the gateway state
 
 Useful extras:

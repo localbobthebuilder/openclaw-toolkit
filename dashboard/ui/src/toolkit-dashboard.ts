@@ -108,6 +108,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private isRunning: boolean = false;
   @state() private activeTab: string = 'status';
   @state() private configSection: string = 'general';
+  @state() private featureSubsection: string = 'telegram';
   @state() private markdownTemplateScope: 'agents' | 'workspaces' = 'agents';
   @state() private markdownTemplateAgentFile: string = 'AGENTS.md';
   @state() private markdownTemplateWorkspaceFile: string = 'AGENTS.md';
@@ -690,6 +691,11 @@ export class ToolkitDashboard extends LitElement {
       if (typeof this.config.telegram.enabled !== 'boolean') {
           this.config.telegram.enabled = true;
       }
+      if (typeof this.config.telegram.defaultAccount !== 'string' || !this.config.telegram.defaultAccount.trim()) {
+          this.config.telegram.defaultAccount = 'default';
+      } else {
+          this.config.telegram.defaultAccount = this.config.telegram.defaultAccount.trim();
+      }
       if (!Array.isArray(this.config.telegram.allowFrom)) {
           this.config.telegram.allowFrom = [];
       }
@@ -699,7 +705,11 @@ export class ToolkitDashboard extends LitElement {
       if (!Array.isArray(this.config.telegram.groups)) {
           this.config.telegram.groups = [];
       }
+      if (!Array.isArray(this.config.telegram.accounts)) {
+          this.config.telegram.accounts = [];
+      }
       this.config.telegram.groups = this.config.telegram.groups.map((group: any) => this.normalizeTelegramGroupRecord(group));
+      this.config.telegram.accounts = this.config.telegram.accounts.map((account: any) => this.normalizeTelegramAccountRecord(account));
       return this.config.telegram;
   }
 
@@ -726,30 +736,208 @@ export class ToolkitDashboard extends LitElement {
       return Array.from(new Set(this.voiceWhisperModels)).sort((a, b) => a.localeCompare(b));
   }
 
-  ensureTelegramExecApprovalsConfig() {
-      const telegram = this.ensureTelegramConfig();
-      if (!telegram.execApprovals || typeof telegram.execApprovals !== 'object') {
-          telegram.execApprovals = {};
+  ensureTelegramExecApprovalsConfig(target?: any) {
+      const telegramTarget = target && typeof target === 'object' ? target : this.ensureTelegramConfig();
+      if (!telegramTarget.execApprovals || typeof telegramTarget.execApprovals !== 'object') {
+          telegramTarget.execApprovals = {};
       }
-      if (typeof telegram.execApprovals.enabled !== 'boolean') {
-          telegram.execApprovals.enabled = false;
-      }
-      if (!Array.isArray(telegram.execApprovals.approvers)) {
-          telegram.execApprovals.approvers = [];
-      }
-      if (!telegram.execApprovals.target) {
-          telegram.execApprovals.target = 'dm';
-      }
-      return telegram.execApprovals;
+      telegramTarget.execApprovals = this.normalizeTelegramExecApprovalsRecord(telegramTarget.execApprovals);
+      return telegramTarget.execApprovals;
   }
 
   parseCommaSeparatedList(value: string) {
       return value.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
   }
 
-  addTelegramGroup() {
+  getDefaultTelegramAccountId() {
       const telegram = this.ensureTelegramConfig();
-      telegram.groups.push({
+      const value = typeof telegram.defaultAccount === 'string' ? telegram.defaultAccount.trim() : '';
+      return value || 'default';
+  }
+
+  setDefaultTelegramAccountId(nextValue: string) {
+      const telegram = this.ensureTelegramConfig();
+      const previousValue = this.getDefaultTelegramAccountId();
+      const normalizedValue = typeof nextValue === 'string' && nextValue.trim() ? nextValue.trim() : 'default';
+      telegram.defaultAccount = normalizedValue;
+      this.renameTelegramRouteAccountId(previousValue, normalizedValue);
+      this.ensureTelegramRoutingConfig();
+      this.requestUpdate();
+  }
+
+  normalizeTelegramExecApprovalsRecord(execApprovals: any) {
+      const normalized = JSON.parse(JSON.stringify(execApprovals || {}));
+      normalized.enabled = this.normalizeBoolean(normalized.enabled, false);
+      if (!Array.isArray(normalized.approvers)) {
+          normalized.approvers = [];
+      }
+      if (!normalized.target) {
+          normalized.target = 'dm';
+      }
+      return normalized;
+  }
+
+  normalizeTelegramRouteRecord(route: any, defaultAccountId: string) {
+      const normalized = JSON.parse(JSON.stringify(route || {}));
+      normalized.accountId = typeof normalized.accountId === 'string' && normalized.accountId.trim()
+        ? normalized.accountId.trim()
+        : defaultAccountId;
+      normalized.targetAgentId = typeof normalized.targetAgentId === 'string' ? normalized.targetAgentId.trim() : '';
+      normalized.routeTrustedTelegramGroups = this.normalizeBoolean(normalized.routeTrustedTelegramGroups, false);
+      normalized.routeTrustedTelegramDms = this.normalizeBoolean(normalized.routeTrustedTelegramDms, false);
+      return normalized;
+  }
+
+  normalizeTelegramRouteList(routes: any[], defaultAccountId: string) {
+      const normalizedRoutes = new Map<string, any>();
+      for (const route of Array.isArray(routes) ? routes : []) {
+          const normalizedRoute = this.normalizeTelegramRouteRecord(route, defaultAccountId);
+          if (!normalizedRoute.accountId) continue;
+          if (!normalizedRoute.targetAgentId && !normalizedRoute.routeTrustedTelegramGroups && !normalizedRoute.routeTrustedTelegramDms) continue;
+          normalizedRoutes.set(normalizedRoute.accountId, normalizedRoute);
+      }
+      return Array.from(normalizedRoutes.values());
+  }
+
+  ensureTelegramRoutingConfig() {
+      const telegramRouting = this.getTelegramRoutingRoot();
+      const defaultAccountId = this.getDefaultTelegramAccountId();
+      const legacyRoute = (!Array.isArray(telegramRouting.routes)
+        && (telegramRouting.targetAgentId || telegramRouting.routeTrustedTelegramGroups || telegramRouting.routeTrustedTelegramDms))
+        ? [{
+            accountId: defaultAccountId,
+            targetAgentId: telegramRouting.targetAgentId || '',
+            routeTrustedTelegramGroups: this.normalizeBoolean(telegramRouting.routeTrustedTelegramGroups, false),
+            routeTrustedTelegramDms: this.normalizeBoolean(telegramRouting.routeTrustedTelegramDms, false)
+          }]
+        : [];
+      telegramRouting.routes = this.normalizeTelegramRouteList(Array.isArray(telegramRouting.routes) ? telegramRouting.routes : legacyRoute, defaultAccountId);
+      delete telegramRouting.targetAgentId;
+      delete telegramRouting.routeTrustedTelegramGroups;
+      delete telegramRouting.routeTrustedTelegramDms;
+      return telegramRouting;
+  }
+
+  getTelegramRouteList() {
+      return this.ensureTelegramRoutingConfig().routes;
+  }
+
+  getTelegramRouteRecord(accountId: string) {
+      const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : this.getDefaultTelegramAccountId();
+      return this.getTelegramRouteList().find((route: any) => String(route?.accountId || '') === normalizedAccountId) || null;
+  }
+
+  getTelegramRoutesForAgent(agentId: string) {
+      const normalizedAgentId = typeof agentId === 'string' ? agentId.trim() : '';
+      if (!normalizedAgentId) return [];
+      return this.getTelegramRouteList().filter((route: any) => String(route?.targetAgentId || '') === normalizedAgentId);
+  }
+
+  ensureTelegramRouteRecord(accountId: string) {
+      const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : this.getDefaultTelegramAccountId();
+      const routes = this.getTelegramRouteList();
+      let route = routes.find((candidate: any) => String(candidate?.accountId || '') === normalizedAccountId);
+      if (!route) {
+          route = this.normalizeTelegramRouteRecord({ accountId: normalizedAccountId }, this.getDefaultTelegramAccountId());
+          routes.push(route);
+      }
+      return route;
+  }
+
+  removeTelegramRouteRecord(accountId: string) {
+      const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : '';
+      if (!normalizedAccountId) return;
+      const telegramRouting = this.ensureTelegramRoutingConfig();
+      telegramRouting.routes = this.getTelegramRouteList().filter((route: any) => String(route?.accountId || '') !== normalizedAccountId);
+  }
+
+  renameTelegramRouteAccountId(oldId: string, newId: string) {
+      const normalizedOldId = typeof oldId === 'string' ? oldId.trim() : '';
+      const normalizedNewId = typeof newId === 'string' ? newId.trim() : '';
+      if (!normalizedOldId || !normalizedNewId || normalizedOldId === normalizedNewId) return;
+
+      const telegramRouting = this.ensureTelegramRoutingConfig();
+      const existingNewRoute = this.getTelegramRouteRecord(normalizedNewId);
+      telegramRouting.routes = this.getTelegramRouteList()
+        .filter((route: any) => {
+          if (String(route?.accountId || '') !== normalizedOldId) return true;
+          if (existingNewRoute) return false;
+          route.accountId = normalizedNewId;
+          return true;
+        })
+        .map((route: any) => this.normalizeTelegramRouteRecord(route, this.getDefaultTelegramAccountId()));
+  }
+
+  normalizeTelegramAccountRecord(account: any) {
+      const normalized = JSON.parse(JSON.stringify(account || {}));
+      normalized.id = typeof normalized.id === 'string' ? normalized.id.trim() : '';
+      normalized.enabled = this.normalizeBoolean(normalized.enabled, true);
+      if (!normalized.dmPolicy) {
+          normalized.dmPolicy = 'pairing';
+      }
+      if (!normalized.groupPolicy) {
+          normalized.groupPolicy = 'allowlist';
+      }
+      if (!Array.isArray(normalized.allowFrom)) {
+          normalized.allowFrom = [];
+      }
+      if (!Array.isArray(normalized.groupAllowFrom)) {
+          normalized.groupAllowFrom = [];
+      }
+      if (Array.isArray(normalized.groups)) {
+          normalized.groups = normalized.groups.map((group: any) => this.normalizeTelegramGroupRecord(group));
+      } else {
+          normalized.groups = [];
+      }
+      normalized.execApprovals = this.normalizeTelegramExecApprovalsRecord(normalized.execApprovals);
+      return normalized;
+  }
+
+  addTelegramAccount() {
+      const telegram = this.ensureTelegramConfig();
+      const existingIds = new Set((Array.isArray(telegram.accounts) ? telegram.accounts : []).map((account: any) => String(account?.id || '')));
+      let suffix = (Array.isArray(telegram.accounts) ? telegram.accounts.length : 0) + 1;
+      let suggestedId = `telegram-bot-${suffix}`;
+      while (existingIds.has(suggestedId) || suggestedId === this.getDefaultTelegramAccountId()) {
+          suffix += 1;
+          suggestedId = `telegram-bot-${suffix}`;
+      }
+      telegram.accounts.push(this.normalizeTelegramAccountRecord({
+          id: suggestedId,
+          enabled: true,
+          dmPolicy: 'pairing',
+          allowFrom: [],
+          groupPolicy: 'allowlist',
+          groupAllowFrom: [],
+          groups: [],
+          execApprovals: {
+              enabled: false,
+              approvers: [],
+              target: 'dm'
+          }
+      }));
+      this.requestUpdate();
+  }
+
+  removeTelegramAccount(index: number) {
+      const telegram = this.ensureTelegramConfig();
+      const account = Array.isArray(telegram.accounts) ? telegram.accounts[index] : null;
+      const accountId = typeof account?.id === 'string' ? account.id.trim() : '';
+      if (Array.isArray(telegram.accounts)) {
+          telegram.accounts.splice(index, 1);
+      }
+      if (accountId) {
+          this.removeTelegramRouteRecord(accountId);
+      }
+      this.requestUpdate();
+  }
+
+  addTelegramGroup(target?: any) {
+      const telegramTarget = target && typeof target === 'object' ? target : this.ensureTelegramConfig();
+      if (!Array.isArray(telegramTarget.groups)) {
+          telegramTarget.groups = [];
+      }
+      telegramTarget.groups.push({
           id: '',
           enabled: true,
           requireMention: true,
@@ -758,10 +946,288 @@ export class ToolkitDashboard extends LitElement {
       this.requestUpdate();
   }
 
-  removeTelegramGroup(index: number) {
-      const telegram = this.ensureTelegramConfig();
-      telegram.groups.splice(index, 1);
+  removeTelegramGroup(index: number, target?: any) {
+      const telegramTarget = target && typeof target === 'object' ? target : this.ensureTelegramConfig();
+      if (Array.isArray(telegramTarget.groups)) {
+          telegramTarget.groups.splice(index, 1);
+      }
       this.requestUpdate();
+  }
+
+  renderVoiceFeaturesConfig() {
+      const voiceNotes = this.ensureVoiceNotesConfig();
+      const whisperModelOptions = this.getVoiceWhisperModelOptions();
+      const selectedWhisperModel = whisperModelOptions.includes(voiceNotes.whisperModel) ? voiceNotes.whisperModel : '__custom__';
+
+      return html`
+        <div class="card">
+          <div class="card-header">
+            <h3>Voice</h3>
+            <button class="btn btn-ghost" @click=${() => this.fetchVoiceModels()}>Refresh Models</button>
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+                <input type="checkbox" ?checked=${voiceNotes.enabled} @change=${(e: any) => { this.ensureVoiceNotesConfig().enabled = e.target.checked; this.requestUpdate(); }}>
+                Enable Voice Transcription
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Whisper Model</label>
+            <select .value=${selectedWhisperModel} @change=${(e: any) => {
+              const value = e.target.value;
+              if (value !== '__custom__') {
+                this.ensureVoiceNotesConfig().whisperModel = value;
+              }
+              this.requestUpdate();
+            }}>
+              ${whisperModelOptions.map((model) => html`<option value=${model}>${model}</option>`)}
+              <option value="__custom__">Custom model...</option>
+            </select>
+            ${selectedWhisperModel === '__custom__' ? html`
+              <input
+                type="text"
+                .value=${voiceNotes.whisperModel}
+                placeholder="Enter a custom whisper model"
+                @input=${(e: any) => { this.ensureVoiceNotesConfig().whisperModel = e.target.value; this.requestUpdate(); }}>
+            ` : ''}
+            <span class="help-text">
+              ${this.voiceWhisperModelSource === 'gateway'
+                ? 'Fetched from the whisper package inside the gateway image.'
+                : 'Using the built-in whisper model list because the gateway model query is unavailable right now.'}
+            </span>
+            ${this.voiceWhisperModelError ? html`
+              <span class="help-text">Model query detail: ${this.voiceWhisperModelError}</span>
+            ` : ''}
+          </div>
+        </div>
+      `;
+  }
+
+  renderTelegramAccountCard(accountTarget: any, options: {
+      accountId: string;
+      title: string;
+      telegramRouteAgentChoices: Array<{ id: string; label: string; }>;
+      isDefault?: boolean;
+      removableIndex?: number;
+      subtitle?: string;
+  }) {
+      const isDefault = options.isDefault === true;
+      const accountId = typeof options.accountId === 'string' ? options.accountId.trim() : '';
+      const accountRoute = accountId ? this.getTelegramRouteRecord(accountId) : null;
+      const accountExecApprovals = this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget);
+      const accountExecApprovers = Array.isArray(accountExecApprovals.approvers) ? accountExecApprovals.approvers : [];
+      const accountGroups = Array.isArray(accountTarget.groups) ? accountTarget.groups : [];
+
+      return html`
+        <div class="card" style="padding: 14px; margin-bottom: 12px; border-color: ${isDefault ? '#5c6bc0' : '#333'};">
+          <div class="card-header" style="margin-bottom: 12px;">
+            <h3>
+              ${options.title}
+              ${isDefault ? html`<span class="badge" style="background: #ffc107;">Default</span>` : ''}
+            </h3>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-ghost" ?disabled=${this.isRunning || !accountId} @click=${() => this.runCommand('telegram-setup', ['-AccountId', accountId])}>Setup Account</button>
+              ${typeof options.removableIndex === 'number'
+                ? html`<button class="btn btn-danger" @click=${() => this.removeTelegramAccount(options.removableIndex!)}>Remove Account</button>`
+                : ''}
+            </div>
+          </div>
+          ${options.subtitle ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 12px;">${options.subtitle}</div>` : ''}
+          <div class="form-group">
+            <label>Account ID</label>
+            <input
+              type="text"
+              .value=${accountId}
+              @input=${(e: any) => {
+                if (isDefault) {
+                  this.setDefaultTelegramAccountId(e.target.value);
+                  return;
+                }
+
+                const previousAccountId = typeof accountTarget?.id === 'string' ? accountTarget.id.trim() : '';
+                accountTarget.id = e.target.value;
+                const nextAccountId = typeof accountTarget?.id === 'string' ? accountTarget.id.trim() : '';
+                if (previousAccountId && nextAccountId && previousAccountId !== nextAccountId) {
+                  this.renameTelegramRouteAccountId(previousAccountId, nextAccountId);
+                }
+                this.requestUpdate();
+              }}>
+            ${isDefault ? html`
+              <span class="help-text">This is the primary Telegram account used whenever a binding does not specify an explicit account ID.</span>
+            ` : ''}
+          </div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${!!accountTarget.enabled} @change=${(e: any) => { accountTarget.enabled = e.target.checked; this.requestUpdate(); }}>
+              Enable this account
+            </label>
+          </div>
+          ${!isDefault ? html`
+            <div class="form-group">
+              <label>Display Name (optional)</label>
+              <input type="text" .value=${accountTarget.name || ''} @input=${(e: any) => { accountTarget.name = e.target.value; this.requestUpdate(); }}>
+            </div>
+          ` : ''}
+          <div class="form-group">
+            <label>DM Policy</label>
+            <select .value=${accountTarget.dmPolicy || 'pairing'} @change=${(e: any) => { accountTarget.dmPolicy = e.target.value; this.requestUpdate(); }}>
+              <option value="pairing">pairing</option>
+              <option value="allowlist">allowlist</option>
+              <option value="open">open</option>
+              <option value="disabled">disabled</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Allowed User IDs (comma separated)</label>
+            <input type="text" .value=${Array.isArray(accountTarget.allowFrom) ? accountTarget.allowFrom.join(',') : ''} @input=${(e: any) => { accountTarget.allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+          </div>
+          <div class="form-group">
+            <label>Group Policy</label>
+            <select .value=${accountTarget.groupPolicy || 'allowlist'} @change=${(e: any) => { accountTarget.groupPolicy = e.target.value; this.requestUpdate(); }}>
+              <option value="allowlist">allowlist</option>
+              <option value="open">open</option>
+              <option value="disabled">disabled</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Allowed Group Sender IDs (comma separated)</label>
+            <input type="text" .value=${Array.isArray(accountTarget.groupAllowFrom) ? accountTarget.groupAllowFrom.join(',') : ''} @input=${(e: any) => { accountTarget.groupAllowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+            <span class="help-text">Leave empty to fall back to the DM allowlist. Put group chat IDs under the groups list below, not here.</span>
+          </div>
+          <div class="card" style="padding: 14px; margin-bottom: 16px;">
+            <div class="card-header" style="margin-bottom: 12px;">
+              <h3>Managed Routing</h3>
+            </div>
+            <div class="form-group">
+              <label>Target Agent</label>
+              <select ?disabled=${!accountId} .value=${accountRoute?.targetAgentId || ''} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).targetAgentId = e.target.value; this.requestUpdate(); }}>
+                <option value="">No managed route</option>
+                ${options.telegramRouteAgentChoices.map((choice: any) => html`<option value=${choice.id} ?selected=${accountRoute?.targetAgentId === choice.id}>${choice.label}</option>`)}
+              </select>
+              <span class="help-text">The toolkit-managed Telegram bindings for this account point trusted DMs and groups at the selected agent.</span>
+              ${accountRoute?.targetAgentId ? html`
+                <span class="help-text">Current managed route: <code>${accountId}</code> -> <code>${accountRoute.targetAgentId}</code></span>
+              ` : ''}
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="toggle-switch">
+                  <input type="checkbox" ?disabled=${!accountId} ?checked=${!!accountRoute?.routeTrustedTelegramDms} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).routeTrustedTelegramDms = e.target.checked; this.requestUpdate(); }}>
+                  Route trusted DMs
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="toggle-switch">
+                  <input type="checkbox" ?disabled=${!accountId} ?checked=${!!accountRoute?.routeTrustedTelegramGroups} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).routeTrustedTelegramGroups = e.target.checked; this.requestUpdate(); }}>
+                  Route trusted groups
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <div class="card-header" style="margin-bottom: 12px;">
+              <h3>Allowed Groups</h3>
+              <button class="btn btn-ghost" @click=${() => this.addTelegramGroup(accountTarget)}>+ Add Group</button>
+            </div>
+            ${accountGroups.length > 0 ? accountGroups.map((group: any, groupIndex: number) => html`
+              <div class="card" style="padding: 14px; margin-bottom: 12px;">
+                <div class="form-group">
+                  <label>Group ID</label>
+                  <input type="text" .value=${group.id || ''} @input=${(e: any) => { group.id = e.target.value; this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                  <label class="toggle-switch">
+                    <input type="checkbox" ?checked=${!!group.requireMention} @change=${(e: any) => { group.requireMention = e.target.checked; this.requestUpdate(); }}>
+                    Require mention
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label>Allowed Sender IDs (comma separated)</label>
+                  <input type="text" .value=${Array.isArray(group.allowFrom) ? group.allowFrom.join(',') : ''} @input=${(e: any) => { group.allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+                </div>
+                <div class="form-group">
+                  <label>Group Policy Override</label>
+                  <select @change=${(e: any) => { group.groupPolicy = e.target.value; this.requestUpdate(); }}>
+                    <option value="" ?selected=${!group.groupPolicy}>${isDefault ? 'Use top-level policy' : 'Use account policy'}</option>
+                    <option value="allowlist" ?selected=${group.groupPolicy === 'allowlist'}>allowlist</option>
+                    <option value="open" ?selected=${group.groupPolicy === 'open'}>open</option>
+                    <option value="disabled" ?selected=${group.groupPolicy === 'disabled'}>disabled</option>
+                  </select>
+                </div>
+                <button class="btn btn-danger" @click=${() => this.removeTelegramGroup(groupIndex, accountTarget)}>Remove Group</button>
+              </div>
+            `) : html`<span class="help-text">${isDefault ? 'No groups configured yet for the default account. Add a negative Telegram group ID here to enable trusted group routing.' : 'No groups configured yet for this account.'}</span>`}
+          </div>
+          <div class="card" style="padding: 14px; margin-top: 16px;">
+            <div class="card-header" style="margin-bottom: 12px;">
+              <h3>Exec Approvals</h3>
+            </div>
+            <div class="form-group">
+              <label class="toggle-switch">
+                <input type="checkbox" ?checked=${!!accountExecApprovals.enabled} @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget).enabled = e.target.checked; this.requestUpdate(); }}>
+                Enable Telegram exec approvals
+              </label>
+            </div>
+            <div class="form-group">
+              <label>Exec Approver IDs (comma separated)</label>
+              <input type="text" .value=${accountExecApprovers.join(',')} @input=${(e: any) => { this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget).approvers = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
+            </div>
+            <div class="form-group">
+              <label>Exec Approval Target</label>
+              <select .value=${accountExecApprovals.target || 'dm'} @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget).target = e.target.value; this.requestUpdate(); }}>
+                <option value="dm">dm</option>
+                <option value="channel">channel</option>
+                <option value="both">both</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      `;
+  }
+
+  renderTelegramFeaturesConfig() {
+      const telegram = this.ensureTelegramConfig();
+      const defaultTelegramAccountId = this.getDefaultTelegramAccountId();
+      const telegramAccounts = Array.isArray(telegram.accounts) ? telegram.accounts : [];
+      const telegramRouteAgentChoices = this.getManagedAgentEntries().map(({ agent }: any) => ({
+        id: String(agent?.id || ''),
+        label: agent?.name ? `${agent.name} (${agent.id})` : String(agent?.id || '')
+      }));
+
+      return html`
+        <div class="card">
+          <div class="card-header">
+            <h3>Telegram Accounts</h3>
+            <button class="btn btn-ghost" @click=${() => this.addTelegramAccount()}>+ Add Account</button>
+          </div>
+          <span class="help-text">Manage the default Telegram bot and any extra Telegram bots in one place. Every account can keep its own trusted chats and target a different agent.</span>
+          <span class="help-text">Use the Telegram Setup action here, on Status, or on Ops to authenticate the live channel. The dashboard does not store Telegram bot token fields in toolkit config.</span>
+        </div>
+        ${this.renderTelegramAccountCard(telegram, {
+          accountId: defaultTelegramAccountId,
+          title: defaultTelegramAccountId || 'default',
+          subtitle: 'Primary account used when bindings do not specify an explicit Telegram account.',
+          isDefault: true,
+          telegramRouteAgentChoices
+        })}
+        ${telegramAccounts.length === 0 ? html`
+          <div class="card">
+            <span class="help-text">No additional Telegram accounts configured yet.</span>
+          </div>
+        ` : telegramAccounts.map((account: any, index: number) => {
+          const accountId = typeof account?.id === 'string' ? account.id.trim() : '';
+          const title = account?.name
+            ? `${account.name} (${accountId || `telegram-bot-${index + 1}`})`
+            : (accountId || `Telegram Account ${index + 1}`);
+
+          return this.renderTelegramAccountCard(account, {
+            accountId,
+            title,
+            removableIndex: index,
+            telegramRouteAgentChoices
+          });
+        })}
+      `;
   }
 
   normalizeBoolean(value: any, defaultValue: boolean) {
@@ -1901,9 +2367,14 @@ export class ToolkitDashboard extends LitElement {
       endpoint.agents = this.getEndpointAgentIds(endpoint).map((agentId: string) => agentId === normalizedOldId ? normalizedNewId : agentId);
     }
 
-    const telegramRouting = this.getTelegramRoutingRoot();
-    if (telegramRouting?.targetAgentId === normalizedOldId) {
-      telegramRouting.targetAgentId = normalizedNewId;
+    const telegramRouting = this.ensureTelegramRoutingConfig();
+    if (telegramRouting) {
+      telegramRouting.routes = this.getTelegramRouteList().map((route: any) => {
+        if (String(route?.targetAgentId || '') === normalizedOldId) {
+          route.targetAgentId = normalizedNewId;
+        }
+        return route;
+      });
     }
 
     if (this.topologyLinkSourceAgentId === normalizedOldId) {
@@ -3088,6 +3559,23 @@ export class ToolkitDashboard extends LitElement {
   buildPersistedConfig(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
     clone.agents = clone.agents || { telegramRouting: {}, list: [] };
+    clone.agents.telegramRouting = clone.agents.telegramRouting || {};
+    clone.agents.telegramRouting.routes = this.normalizeTelegramRouteList(
+      Array.isArray(clone.agents.telegramRouting.routes)
+        ? clone.agents.telegramRouting.routes
+        : ((clone.agents.telegramRouting.targetAgentId || clone.agents.telegramRouting.routeTrustedTelegramGroups || clone.agents.telegramRouting.routeTrustedTelegramDms)
+          ? [{
+              accountId: (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default',
+              targetAgentId: clone.agents.telegramRouting.targetAgentId || '',
+              routeTrustedTelegramGroups: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramGroups, false),
+              routeTrustedTelegramDms: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramDms, false)
+            }]
+          : []),
+      (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default'
+    );
+    delete clone.agents.telegramRouting.targetAgentId;
+    delete clone.agents.telegramRouting.routeTrustedTelegramGroups;
+    delete clone.agents.telegramRouting.routeTrustedTelegramDms;
     clone.workspaces = Array.isArray(clone.workspaces) ? clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
     this.ensureToolsetsConfig(clone);
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
@@ -3109,6 +3597,21 @@ export class ToolkitDashboard extends LitElement {
     }
     clone.toolsets.list = this.getToolsetsList(clone).map((toolset: any) => this.createToolsetRecord(toolset));
     delete clone.toolPolicy;
+    if (clone.telegram && typeof clone.telegram === 'object') {
+      delete clone.telegram.botToken;
+      delete clone.telegram.tokenFile;
+      clone.telegram.defaultAccount = (typeof clone.telegram.defaultAccount === 'string' && clone.telegram.defaultAccount.trim())
+        ? clone.telegram.defaultAccount.trim()
+        : 'default';
+      clone.telegram.accounts = Array.isArray(clone.telegram.accounts)
+        ? clone.telegram.accounts.map((account: any) => {
+            const normalized = this.normalizeTelegramAccountRecord(account);
+            delete normalized.botToken;
+            delete normalized.tokenFile;
+            return normalized;
+          }).filter((account: any) => typeof account.id === 'string' && account.id.trim().length > 0)
+        : [];
+    }
     for (const workspace of Array.isArray(clone.workspaces) ? clone.workspaces : []) {
       delete workspace.allowSharedWorkspaceAccess;
     }
@@ -3121,6 +3624,23 @@ export class ToolkitDashboard extends LitElement {
     if (!clone.agents || typeof clone.agents !== 'object') {
       clone.agents = { telegramRouting: {}, list: [] };
     }
+    clone.agents.telegramRouting = clone.agents.telegramRouting || {};
+    clone.agents.telegramRouting.routes = this.normalizeTelegramRouteList(
+      Array.isArray(clone.agents.telegramRouting.routes)
+        ? clone.agents.telegramRouting.routes
+        : ((clone.agents.telegramRouting.targetAgentId || clone.agents.telegramRouting.routeTrustedTelegramGroups || clone.agents.telegramRouting.routeTrustedTelegramDms)
+          ? [{
+              accountId: (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default',
+              targetAgentId: clone.agents.telegramRouting.targetAgentId || '',
+              routeTrustedTelegramGroups: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramGroups, false),
+              routeTrustedTelegramDms: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramDms, false)
+            }]
+          : []),
+      (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default'
+    );
+    delete clone.agents.telegramRouting.targetAgentId;
+    delete clone.agents.telegramRouting.routeTrustedTelegramGroups;
+    delete clone.agents.telegramRouting.routeTrustedTelegramDms;
     if (!Array.isArray(clone.agents.list)) {
       clone.agents.list = [];
     }
@@ -3166,16 +3686,26 @@ export class ToolkitDashboard extends LitElement {
       delete clone.telegram.botToken;
       delete clone.telegram.tokenFile;
       clone.telegram.enabled = this.normalizeBoolean(clone.telegram.enabled, true);
+      clone.telegram.defaultAccount = (typeof clone.telegram.defaultAccount === 'string' && clone.telegram.defaultAccount.trim())
+        ? clone.telegram.defaultAccount.trim()
+        : 'default';
       if (Array.isArray(clone.telegram.groups)) {
         clone.telegram.groups = clone.telegram.groups.map((group: any) => this.normalizeTelegramGroupRecord(group));
       } else {
         clone.telegram.groups = [];
       }
+      if (Array.isArray(clone.telegram.accounts)) {
+        clone.telegram.accounts = clone.telegram.accounts.map((account: any) => {
+          const normalized = this.normalizeTelegramAccountRecord(account);
+          delete normalized.botToken;
+          delete normalized.tokenFile;
+          return normalized;
+        }).filter((account: any) => typeof account.id === 'string' && account.id.trim().length > 0);
+      } else {
+        clone.telegram.accounts = [];
+      }
       if (clone.telegram.execApprovals && typeof clone.telegram.execApprovals === 'object') {
-        clone.telegram.execApprovals.enabled = this.normalizeBoolean(clone.telegram.execApprovals.enabled, false);
-        if (!Array.isArray(clone.telegram.execApprovals.approvers)) {
-          clone.telegram.execApprovals.approvers = [];
-        }
+        clone.telegram.execApprovals = this.normalizeTelegramExecApprovalsRecord(clone.telegram.execApprovals);
       }
     }
     if (typeof clone.ollama.pullVramBudgetFraction !== 'number' || !Number.isFinite(clone.ollama.pullVramBudgetFraction) || clone.ollama.pullVramBudgetFraction <= 0 || clone.ollama.pullVramBudgetFraction > 1) {
@@ -3435,9 +3965,9 @@ export class ToolkitDashboard extends LitElement {
       endpoint.agents = this.getEndpointAgentIds(endpoint).filter((candidateId: string) => candidateId !== agentId);
     }
 
-    const telegramRouting = this.getTelegramRoutingRoot();
-    if (telegramRouting && telegramRouting.targetAgentId === agentId) {
-      delete telegramRouting.targetAgentId;
+    const telegramRouting = this.ensureTelegramRoutingConfig();
+    if (telegramRouting) {
+      telegramRouting.routes = this.getTelegramRouteList().filter((route: any) => String(route?.targetAgentId || '') !== agentId);
     }
 
     if (this.topologyLinkSourceAgentId === agentId) {
@@ -4268,6 +4798,7 @@ export class ToolkitDashboard extends LitElement {
     const availableDirectDenyOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directDeniedTools.includes(option.id));
     const sandboxModeOverride = typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '';
     const forceSandboxOff = sandboxModeOverride === 'off';
+    const telegramRoutesForAgent = this.getTelegramRoutesForAgent(String(agent.id || ''));
 
     return html`
         <div class="card">
@@ -4286,6 +4817,35 @@ export class ToolkitDashboard extends LitElement {
                     <div class="help-text">${agent.enabled ? 'This agent is available for toolkit-managed OpenClaw configuration.' : 'Disabled agents stay in toolkit config only and are not propagated into live OpenClaw config.'}</div>
                 </div>
             </div>
+
+            ${telegramRoutesForAgent.length > 0 ? html`
+              <div class="card" style="margin-bottom: 20px; border-color: #5c6bc0;">
+                <div class="card-header">
+                  <h3>Telegram Routing</h3>
+                  <span class="badge">Inbound</span>
+                </div>
+                <div class="help-text" style="margin-top: 0; margin-bottom: 10px;">This agent is currently the managed Telegram target for:</div>
+                ${telegramRoutesForAgent.map((route: any) => html`
+                  <div class="applied-toolset-card" style="margin-bottom: 10px;">
+                    <div class="applied-toolset-header">
+                      <strong>${String(route?.accountId || this.getDefaultTelegramAccountId())}</strong>
+                      <span class="badge">Telegram</span>
+                    </div>
+                    <div class="toolset-preview-rows">
+                      <div class="toolset-preview-row">
+                        <div class="toolset-preview-label">Route</div>
+                        <div class="toolset-preview-tags">
+                          ${route?.routeTrustedTelegramDms ? html`<div class="tag">Trusted DMs</div>` : ''}
+                          ${route?.routeTrustedTelegramGroups ? html`<div class="tag">Trusted Groups</div>` : ''}
+                          ${!route?.routeTrustedTelegramDms && !route?.routeTrustedTelegramGroups ? html`<div class="toolset-preview-empty">No trusted inbound Telegram routing enabled.</div>` : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                `)}
+                <div class="help-text" style="margin-top: 8px;">Change these routes on <strong>Configuration -> Features -> Telegram</strong>.</div>
+              </div>
+            ` : ''}
             
             <div class="grid-2">
                 <div class="form-group">
@@ -4658,149 +5218,14 @@ export class ToolkitDashboard extends LitElement {
   }
 
   renderFeaturesConfig() {
-      const telegram = (this.config?.telegram && typeof this.config.telegram === 'object') ? this.config.telegram : {};
-      const voiceNotes = this.ensureVoiceNotesConfig();
-      const whisperModelOptions = this.getVoiceWhisperModelOptions();
-      const selectedWhisperModel = whisperModelOptions.includes(voiceNotes.whisperModel) ? voiceNotes.whisperModel : '__custom__';
-      const telegramAllowFrom = Array.isArray(telegram.allowFrom) ? telegram.allowFrom : [];
-      const telegramGroupAllowFrom = Array.isArray(telegram.groupAllowFrom) ? telegram.groupAllowFrom : [];
-      const telegramGroups = Array.isArray(telegram.groups) ? telegram.groups : [];
-      const telegramExecApprovals = (telegram.execApprovals && typeof telegram.execApprovals === 'object') ? telegram.execApprovals : { approvers: [], target: 'dm' };
-      const telegramExecApprovers = Array.isArray(telegramExecApprovals.approvers) ? telegramExecApprovals.approvers : [];
-    return html`
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-header">
-            <h3>Voice</h3>
-            <button class="btn btn-ghost" @click=${() => this.fetchVoiceModels()}>Refresh Models</button>
-          </div>
-          <div class="form-group">
-            <label class="toggle-switch">
-                <input type="checkbox" ?checked=${voiceNotes.enabled} @change=${(e: any) => { this.ensureVoiceNotesConfig().enabled = e.target.checked; this.requestUpdate(); }}>
-                Enable Voice Transcription
-            </label>
-          </div>
-          <div class="form-group">
-            <label>Whisper Model</label>
-            <select .value=${selectedWhisperModel} @change=${(e: any) => {
-              const value = e.target.value;
-              if (value !== '__custom__') {
-                this.ensureVoiceNotesConfig().whisperModel = value;
-              }
-              this.requestUpdate();
-            }}>
-              ${whisperModelOptions.map((model) => html`<option value=${model}>${model}</option>`)}
-              <option value="__custom__">Custom model...</option>
-            </select>
-            ${selectedWhisperModel === '__custom__' ? html`
-              <input
-                type="text"
-                .value=${voiceNotes.whisperModel}
-                placeholder="Enter a custom whisper model"
-                @input=${(e: any) => { this.ensureVoiceNotesConfig().whisperModel = e.target.value; this.requestUpdate(); }}>
-            ` : ''}
-            <span class="help-text">
-              ${this.voiceWhisperModelSource === 'gateway'
-                ? 'Fetched from the whisper package inside the gateway image.'
-                : 'Using the built-in whisper model list because the gateway model query is unavailable right now.'}
-            </span>
-            ${this.voiceWhisperModelError ? html`
-              <span class="help-text">Model query detail: ${this.voiceWhisperModelError}</span>
-            ` : ''}
-          </div>
+      return html`
+        <div class="tabs">
+          <div class="tab ${this.featureSubsection === 'telegram' ? 'active' : ''}" @click=${() => this.featureSubsection = 'telegram'}>Telegram</div>
+          <div class="tab ${this.featureSubsection === 'voice' ? 'active' : ''}" @click=${() => this.featureSubsection = 'voice'}>Voice</div>
         </div>
-        
-        <div class="card">
-          <div class="card-header"><h3>Telegram</h3></div>
-          <div class="form-group">
-             <label class="toggle-switch">
-                <input type="checkbox" ?checked=${telegram.enabled} @change=${(e: any) => { this.ensureTelegramConfig().enabled = e.target.checked; this.requestUpdate(); }}>
-                Enable Telegram Bot
-             </label>
-             <span class="help-text">Use the Telegram Setup action from Status or Ops to authenticate the live channel. The dashboard no longer stores Telegram token fields in toolkit config.</span>
-           </div>
-          <div class="form-group">
-            <label>DM Policy</label>
-            <select @change=${(e: any) => { this.ensureTelegramConfig().dmPolicy = e.target.value; this.requestUpdate(); }}>
-              <option value="pairing" ?selected=${(telegram.dmPolicy || 'pairing') === 'pairing'}>pairing</option>
-              <option value="allowlist" ?selected=${telegram.dmPolicy === 'allowlist'}>allowlist</option>
-              <option value="open" ?selected=${telegram.dmPolicy === 'open'}>open</option>
-              <option value="disabled" ?selected=${telegram.dmPolicy === 'disabled'}>disabled</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Allowed User IDs (comma separated)</label>
-            <input type="text" .value=${telegramAllowFrom.join(',')} @input=${(e: any) => { this.ensureTelegramConfig().allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
-          </div>
-          <div class="form-group">
-            <label>Group Policy</label>
-            <select @change=${(e: any) => { this.ensureTelegramConfig().groupPolicy = e.target.value; this.requestUpdate(); }}>
-              <option value="allowlist" ?selected=${(telegram.groupPolicy || 'allowlist') === 'allowlist'}>allowlist</option>
-              <option value="open" ?selected=${telegram.groupPolicy === 'open'}>open</option>
-              <option value="disabled" ?selected=${telegram.groupPolicy === 'disabled'}>disabled</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Allowed Group Sender IDs (comma separated)</label>
-            <input type="text" .value=${telegramGroupAllowFrom.join(',')} @input=${(e: any) => { this.ensureTelegramConfig().groupAllowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
-            <span class="help-text">Leave empty to fall back to the DM allowlist. Put group chat IDs under the groups list below, not here.</span>
-          </div>
-          <div class="form-group">
-            <label class="toggle-switch">
-                <input type="checkbox" ?checked=${!!telegramExecApprovals.enabled} @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig().enabled = e.target.checked; this.requestUpdate(); }}>
-                Enable Telegram exec approvals
-            </label>
-          </div>
-          <div class="form-group">
-            <label>Exec Approver IDs (comma separated)</label>
-            <input type="text" .value=${telegramExecApprovers.join(',')} @input=${(e: any) => { this.ensureTelegramExecApprovalsConfig().approvers = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
-          </div>
-          <div class="form-group">
-            <label>Exec Approval Target</label>
-            <select @change=${(e: any) => { this.ensureTelegramExecApprovalsConfig().target = e.target.value; this.requestUpdate(); }}>
-              <option value="dm" ?selected=${(telegramExecApprovals.target || 'dm') === 'dm'}>dm</option>
-              <option value="channel" ?selected=${telegramExecApprovals.target === 'channel'}>channel</option>
-              <option value="both" ?selected=${telegramExecApprovals.target === 'both'}>both</option>
-            </select>
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <div class="card-header" style="margin-bottom: 12px;">
-              <h3>Allowed Groups</h3>
-              <button class="btn btn-ghost" @click=${() => this.addTelegramGroup()}>+ Add Group</button>
-            </div>
-            ${telegramGroups.length === 0 ? html`
-              <span class="help-text">No Telegram groups configured yet. Add a negative Telegram group ID here to enable trusted group routing.</span>
-            ` : telegramGroups.map((group: any, index: number) => html`
-              <div class="card" style="padding: 14px; margin-bottom: 12px;">
-                <div class="form-group">
-                  <label>Group ID</label>
-                  <input type="text" .value=${group.id || ''} @input=${(e: any) => { group.id = e.target.value; this.requestUpdate(); }}>
-                </div>
-                <div class="form-group">
-                  <label class="toggle-switch">
-                    <input type="checkbox" ?checked=${!!group.requireMention} @change=${(e: any) => { group.requireMention = e.target.checked; this.requestUpdate(); }}>
-                    Require mention
-                  </label>
-                </div>
-                <div class="form-group">
-                  <label>Allowed Sender IDs (comma separated)</label>
-                  <input type="text" .value=${Array.isArray(group.allowFrom) ? group.allowFrom.join(',') : ''} @input=${(e: any) => { group.allowFrom = this.parseCommaSeparatedList(e.target.value); this.requestUpdate(); }}>
-                </div>
-                <div class="form-group">
-                  <label>Group Policy Override</label>
-                  <select @change=${(e: any) => { group.groupPolicy = e.target.value; this.requestUpdate(); }}>
-                    <option value="" ?selected=${!group.groupPolicy}>Use top-level policy</option>
-                    <option value="allowlist" ?selected=${group.groupPolicy === 'allowlist'}>allowlist</option>
-                    <option value="open" ?selected=${group.groupPolicy === 'open'}>open</option>
-                    <option value="disabled" ?selected=${group.groupPolicy === 'disabled'}>disabled</option>
-                  </select>
-                </div>
-                <button class="btn btn-danger" @click=${() => this.removeTelegramGroup(index)}>Remove Group</button>
-              </div>
-            `)}
-          </div>
-        </div>
-      </div>
+        ${this.featureSubsection === 'telegram'
+          ? this.renderTelegramFeaturesConfig()
+          : this.renderVoiceFeaturesConfig()}
       `;
   }
 

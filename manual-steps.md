@@ -810,18 +810,22 @@ teaching it how to work against the shared project tree when needed.
 Purpose routing note:
 
 - channel routing is explicit, not magical
-- trusted Telegram DM/group are routed to whichever agent you set in
-  `agents.telegramRouting.targetAgentId`
-- by default that target is `chat-local`
+- trusted Telegram DM/group are routed by
+  `agents.telegramRouting.routes[]`
+- the default account route is usually
+  `agents.telegramRouting.routes[0] = { accountId: "default", targetAgentId: "chat-local", ... }`
 - in this Windows + Docker Desktop shared-workspace setup, `chat-local`,
   `review-local`, `coder-local`, and the optional `chat-openai` default to
   `sandbox.mode=off` so they can use the real mounted shared workspace instead
   of the broken disposable `/workspace` mount seen in sandbox sessions
+- extra Telegram bots are configured under `telegram.accounts[]`
+- each Telegram account can point at a different agent, so different bots can
+  naturally use different models, toolsets, delegation rules, and workspaces
 - if you want Telegram on OpenAI while `main` uses Claude or another hosted
   model, enable `hostedTelegramAgent` and set
-  `agents.telegramRouting.targetAgentId` to `chat-openai`
+  the default-account route target to `chat-openai`
 - if you want Telegram to use the default strong agent instead, set
-  `agents.telegramRouting.targetAgentId` to `main`
+  the default-account route target to `main`
 - trusted Telegram DM/group routing is managed through
   `bindings`
 - everything else defaults to `main`
@@ -846,10 +850,67 @@ Important:
   `ollama pull`
 - if a preferred local primary model is still unavailable, bootstrap falls back
   to another available local model instead of leaving the local agent unusable
-- Telegram only routes to `chat-local` when you explicitly turn on the routing
-  flags on the selected target agent and/or in `agents.telegramRouting`
+- Telegram only routes to a managed target agent when you explicitly turn on the
+  routing flags in the matching `agents.telegramRouting.routes[]` entry
 - disabling the relevant agent or removing it from its endpoint's `agents` list keeps it toolkit-only
   and removes it from future bootstrap runs
+
+Example multi-bot Telegram snippet:
+
+```json
+"telegram": {
+  "enabled": true,
+  "defaultAccount": "default",
+  "allowFrom": ["8674459047"],
+  "groups": [
+    {
+      "id": "-1003770800252",
+      "requireMention": false,
+      "allowFrom": ["8674459047"]
+    }
+  ],
+  "accounts": [
+    {
+      "id": "alerts",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["8674459047"],
+      "groupPolicy": "allowlist",
+      "groups": [
+        {
+          "id": "-1003999999999",
+          "requireMention": true,
+          "allowFrom": ["8674459047"]
+        }
+      ]
+    }
+  ]
+},
+"agents": {
+  "telegramRouting": {
+    "routes": [
+      {
+        "accountId": "default",
+        "targetAgentId": "chat-local",
+        "routeTrustedTelegramDms": true,
+        "routeTrustedTelegramGroups": true
+      },
+      {
+        "accountId": "alerts",
+        "targetAgentId": "review-local",
+        "routeTrustedTelegramDms": true,
+        "routeTrustedTelegramGroups": true
+      }
+    ]
+  }
+}
+```
+
+To authenticate an extra Telegram account after you add it to toolkit config,
+run:
+
+```powershell
+.\run-openclaw.cmd telegram-setup -AccountId alerts
+```
 
 Bootstrap-managed keys for this starter layout live in:
 

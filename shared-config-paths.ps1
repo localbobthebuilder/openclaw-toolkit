@@ -85,6 +85,382 @@ function Set-ToolkitArrayDefaultProperty {
     }
 }
 
+function Normalize-ToolkitOptionalStringArrayProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$PropertyName
+    )
+
+    if (-not ($Object.PSObject.Properties.Name -contains $PropertyName)) {
+        return @()
+    }
+
+    if ($null -eq $Object.$PropertyName) {
+        $Object.$PropertyName = @()
+    }
+    else {
+        $Object.$PropertyName = @($Object.$PropertyName | ForEach-Object { [string]$_ })
+    }
+
+    return @($Object.$PropertyName)
+}
+
+function Normalize-ToolkitTelegramExecApprovals {
+    param($ExecApprovals)
+
+    if ($null -eq $ExecApprovals) {
+        return $null
+    }
+
+    Set-ToolkitBooleanDefaultProperty -Object $ExecApprovals -PropertyName "enabled" -DefaultValue $false
+    Normalize-ToolkitOptionalStringArrayProperty -Object $ExecApprovals -PropertyName "approvers" | Out-Null
+
+    foreach ($propertyName in @("agentFilter", "sessionFilter")) {
+        if ($ExecApprovals.PSObject.Properties.Name -contains $propertyName) {
+            Normalize-ToolkitOptionalStringArrayProperty -Object $ExecApprovals -PropertyName $propertyName | Out-Null
+        }
+    }
+
+    if (-not ($ExecApprovals.PSObject.Properties.Name -contains "target") -or [string]::IsNullOrWhiteSpace([string]$ExecApprovals.target)) {
+        Add-Member -InputObject $ExecApprovals -NotePropertyName "target" -NotePropertyValue "dm" -Force
+    }
+    else {
+        $ExecApprovals.target = [string]$ExecApprovals.target
+    }
+
+    return $ExecApprovals
+}
+
+function Normalize-ToolkitTelegramGroupRecord {
+    param($GroupRecord)
+
+    if ($null -eq $GroupRecord) {
+        return $null
+    }
+
+    Set-ToolkitBooleanDefaultProperty -Object $GroupRecord -PropertyName "enabled" -DefaultValue $true
+    Set-ToolkitBooleanDefaultProperty -Object $GroupRecord -PropertyName "requireMention" -DefaultValue $true
+    Normalize-ToolkitOptionalStringArrayProperty -Object $GroupRecord -PropertyName "allowFrom" | Out-Null
+    return $GroupRecord
+}
+
+function ConvertTo-ToolkitTelegramAccountList {
+    param($Accounts)
+
+    $results = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Accounts) {
+        return @()
+    }
+
+    if ($Accounts -is [System.Collections.IList]) {
+        foreach ($account in @($Accounts)) {
+            if ($null -ne $account) {
+                $results.Add($account)
+            }
+        }
+        return @($results.ToArray())
+    }
+
+    $properties = @()
+    if ($Accounts.PSObject) {
+        $properties = @($Accounts.PSObject.Properties)
+    }
+
+    if ($properties.Count -gt 0) {
+        foreach ($property in $properties) {
+            $account = $property.Value
+            if ($null -eq $account) {
+                $account = [pscustomobject][ordered]@{}
+            }
+            elseif ($account -is [hashtable]) {
+                $account = [pscustomobject]$account
+            }
+
+            if (-not ($account.PSObject.Properties.Name -contains "id") -or [string]::IsNullOrWhiteSpace([string]$account.id)) {
+                Add-Member -InputObject $account -NotePropertyName "id" -NotePropertyValue ([string]$property.Name) -Force
+            }
+
+            $results.Add($account)
+        }
+
+        return @($results.ToArray())
+    }
+
+    return @($Accounts)
+}
+
+function Get-ToolkitTelegramDefaultAccountId {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "telegram" -and
+        $null -ne $Config.telegram -and
+        $Config.telegram.PSObject.Properties.Name -contains "defaultAccount" -and
+        -not [string]::IsNullOrWhiteSpace([string]$Config.telegram.defaultAccount)) {
+        return ([string]$Config.telegram.defaultAccount).Trim()
+    }
+
+    return "default"
+}
+
+function Normalize-ToolkitTelegramAccountRecord {
+    param($AccountRecord)
+
+    if ($null -eq $AccountRecord) {
+        return $null
+    }
+
+    if ($AccountRecord -is [hashtable]) {
+        $AccountRecord = [pscustomobject]$AccountRecord
+    }
+
+    if ($AccountRecord.PSObject.Properties.Name -contains "id") {
+        $AccountRecord.id = [string]$AccountRecord.id
+    }
+
+    Set-ToolkitBooleanDefaultProperty -Object $AccountRecord -PropertyName "enabled" -DefaultValue $true
+
+    foreach ($propertyName in @("allowFrom", "groupAllowFrom")) {
+        if ($AccountRecord.PSObject.Properties.Name -contains $propertyName) {
+            Normalize-ToolkitOptionalStringArrayProperty -Object $AccountRecord -PropertyName $propertyName | Out-Null
+        }
+    }
+
+    if ($AccountRecord.PSObject.Properties.Name -contains "execApprovals" -and $null -ne $AccountRecord.execApprovals) {
+        Normalize-ToolkitTelegramExecApprovals -ExecApprovals $AccountRecord.execApprovals | Out-Null
+    }
+
+    if ($AccountRecord.PSObject.Properties.Name -contains "groups" -and $null -ne $AccountRecord.groups) {
+        $normalizedGroups = New-Object System.Collections.Generic.List[object]
+        foreach ($group in @($AccountRecord.groups)) {
+            if ($null -eq $group) {
+                continue
+            }
+
+            $normalizedGroup = Normalize-ToolkitTelegramGroupRecord -GroupRecord $group
+            if ($null -ne $normalizedGroup) {
+                $normalizedGroups.Add($normalizedGroup)
+            }
+        }
+        $AccountRecord.groups = @($normalizedGroups.ToArray())
+    }
+
+    return $AccountRecord
+}
+
+function Normalize-ToolkitTelegramRouteRecord {
+    param(
+        $RouteRecord,
+        [string]$DefaultAccountId = "default"
+    )
+
+    if ($null -eq $RouteRecord) {
+        return $null
+    }
+
+    if ($RouteRecord -is [hashtable]) {
+        $RouteRecord = [pscustomobject]$RouteRecord
+    }
+
+    $accountId = if ($RouteRecord.PSObject.Properties.Name -contains "accountId" -and -not [string]::IsNullOrWhiteSpace([string]$RouteRecord.accountId)) {
+        ([string]$RouteRecord.accountId).Trim()
+    }
+    else {
+        $DefaultAccountId
+    }
+
+    if ($RouteRecord.PSObject.Properties.Name -contains "accountId") {
+        $RouteRecord.accountId = $accountId
+    }
+    else {
+        Add-Member -InputObject $RouteRecord -NotePropertyName "accountId" -NotePropertyValue $accountId -Force
+    }
+
+    if ($RouteRecord.PSObject.Properties.Name -contains "targetAgentId") {
+        $RouteRecord.targetAgentId = [string]$RouteRecord.targetAgentId
+    }
+    else {
+        Add-Member -InputObject $RouteRecord -NotePropertyName "targetAgentId" -NotePropertyValue "" -Force
+    }
+
+    Set-ToolkitBooleanDefaultProperty -Object $RouteRecord -PropertyName "routeTrustedTelegramGroups" -DefaultValue $false
+    Set-ToolkitBooleanDefaultProperty -Object $RouteRecord -PropertyName "routeTrustedTelegramDms" -DefaultValue $false
+    return $RouteRecord
+}
+
+function Get-ToolkitTelegramAccountList {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains "telegram" -and
+        $null -ne $Config.telegram -and
+        $Config.telegram.PSObject.Properties.Name -contains "accounts" -and
+        $null -ne $Config.telegram.accounts) {
+        return @($Config.telegram.accounts)
+    }
+
+    return @()
+}
+
+function Get-ToolkitTelegramAccountById {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$AccountId
+    )
+
+    foreach ($account in @(Get-ToolkitTelegramAccountList -Config $Config)) {
+        if ($null -eq $account) {
+            continue
+        }
+
+        if ($account.PSObject.Properties.Name -contains "id" -and [string]$account.id -eq $AccountId) {
+            return $account
+        }
+    }
+
+    return $null
+}
+
+function Normalize-ToolkitTelegramRoutingConfig {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $agentsContainer = Get-ToolkitAgentsContainer -Config $Config
+    if ($null -eq $agentsContainer) {
+        return $null
+    }
+
+    if (-not ($agentsContainer.PSObject.Properties.Name -contains "telegramRouting") -or $null -eq $agentsContainer.telegramRouting) {
+        return $null
+    }
+
+    $telegramRouting = if ($agentsContainer.telegramRouting -is [hashtable]) {
+        [pscustomobject]$agentsContainer.telegramRouting
+    }
+    else {
+        $agentsContainer.telegramRouting
+    }
+
+    $defaultAccountId = Get-ToolkitTelegramDefaultAccountId -Config $Config
+    $rawRoutes = New-Object System.Collections.Generic.List[object]
+    if ($telegramRouting.PSObject.Properties.Name -contains "routes" -and $null -ne $telegramRouting.routes) {
+        foreach ($route in @($telegramRouting.routes)) {
+            if ($null -ne $route) {
+                $rawRoutes.Add($route)
+            }
+        }
+    }
+    elseif ($telegramRouting.PSObject.Properties.Name -contains "targetAgentId" -or
+        $telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramGroups" -or
+        $telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramDms") {
+        $rawRoutes.Add([pscustomobject][ordered]@{
+                accountId                  = $defaultAccountId
+                targetAgentId              = if ($telegramRouting.PSObject.Properties.Name -contains "targetAgentId") { [string]$telegramRouting.targetAgentId } else { "" }
+                routeTrustedTelegramGroups = if ($telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramGroups") { ConvertTo-ToolkitBooleanValue -Value $telegramRouting.routeTrustedTelegramGroups -DefaultValue $false } else { $false }
+                routeTrustedTelegramDms    = if ($telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramDms") { ConvertTo-ToolkitBooleanValue -Value $telegramRouting.routeTrustedTelegramDms -DefaultValue $false } else { $false }
+            })
+    }
+
+    $routesByAccountId = [ordered]@{}
+    foreach ($route in @($rawRoutes.ToArray())) {
+        $normalizedRoute = Normalize-ToolkitTelegramRouteRecord -RouteRecord $route -DefaultAccountId $defaultAccountId
+        if ($null -eq $normalizedRoute) {
+            continue
+        }
+
+        $accountId = [string]$normalizedRoute.accountId
+        if ([string]::IsNullOrWhiteSpace($accountId)) {
+            continue
+        }
+
+        $routesByAccountId[$accountId] = $normalizedRoute
+    }
+
+    $normalizedRoutes = @($routesByAccountId.Values)
+    if ($telegramRouting.PSObject.Properties.Name -contains "routes") {
+        $telegramRouting.routes = $normalizedRoutes
+    }
+    else {
+        Add-Member -InputObject $telegramRouting -NotePropertyName "routes" -NotePropertyValue $normalizedRoutes -Force
+    }
+
+    foreach ($legacyProperty in @("targetAgentId", "routeTrustedTelegramGroups", "routeTrustedTelegramDms")) {
+        if ($telegramRouting.PSObject.Properties.Name -contains $legacyProperty) {
+            $telegramRouting.PSObject.Properties.Remove($legacyProperty)
+        }
+    }
+
+    $agentsContainer.telegramRouting = $telegramRouting
+    return $telegramRouting
+}
+
+function Get-ToolkitTelegramRouteList {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $telegramRouting = Normalize-ToolkitTelegramRoutingConfig -Config $Config
+    if ($null -ne $telegramRouting -and
+        $telegramRouting.PSObject.Properties.Name -contains "routes" -and
+        $null -ne $telegramRouting.routes) {
+        return @($telegramRouting.routes)
+    }
+
+    return @()
+}
+
+function Get-ToolkitTelegramAccountTrustedDirectIds {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$AccountId
+    )
+
+    $accountConfig = Get-ToolkitTelegramAccountById -Config $Config -AccountId $AccountId
+    if ($null -ne $accountConfig -and $accountConfig.PSObject.Properties.Name -contains "allowFrom" -and $null -ne $accountConfig.allowFrom) {
+        return @($accountConfig.allowFrom | ForEach-Object { [string]$_ })
+    }
+
+    if ($Config.PSObject.Properties.Name -contains "telegram" -and
+        $null -ne $Config.telegram -and
+        $Config.telegram.PSObject.Properties.Name -contains "allowFrom" -and
+        $null -ne $Config.telegram.allowFrom) {
+        return @($Config.telegram.allowFrom | ForEach-Object { [string]$_ })
+    }
+
+    return @()
+}
+
+function Get-ToolkitTelegramAccountTrustedGroupIds {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$AccountId
+    )
+
+    $accountConfig = Get-ToolkitTelegramAccountById -Config $Config -AccountId $AccountId
+    if ($null -ne $accountConfig -and $accountConfig.PSObject.Properties.Name -contains "groups" -and $null -ne $accountConfig.groups) {
+        return @(
+            foreach ($group in @($accountConfig.groups)) {
+                if ($null -ne $group -and $group.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$group.id)) {
+                    [string]$group.id
+                }
+            }
+        )
+    }
+
+    $defaultAccountId = Get-ToolkitTelegramDefaultAccountId -Config $Config
+    if ($AccountId -eq $defaultAccountId -or @((Get-ToolkitTelegramAccountList -Config $Config)).Count -eq 0) {
+        if ($Config.PSObject.Properties.Name -contains "telegram" -and
+            $null -ne $Config.telegram -and
+            $Config.telegram.PSObject.Properties.Name -contains "groups" -and
+            $null -ne $Config.telegram.groups) {
+            return @(
+                foreach ($group in @($Config.telegram.groups)) {
+                    if ($null -ne $group -and $group.PSObject.Properties.Name -contains "id" -and -not [string]::IsNullOrWhiteSpace([string]$group.id)) {
+                        [string]$group.id
+                    }
+                }
+            )
+        }
+    }
+
+    return @()
+}
+
 function Ensure-ToolkitMarkdownTemplateKeysProperty {
     param(
         [Parameter(Mandatory = $true)]$Object
@@ -666,20 +1042,37 @@ function Normalize-ToolkitConfigDefaults {
 
     if ($Config.PSObject.Properties.Name -contains "telegram" -and $null -ne $Config.telegram) {
         Set-ToolkitBooleanDefaultProperty -Object $Config.telegram -PropertyName "enabled" -DefaultValue $true
+        if ($Config.telegram.PSObject.Properties.Name -contains "defaultAccount" -and $Config.telegram.defaultAccount) {
+            $Config.telegram.defaultAccount = [string]$Config.telegram.defaultAccount
+        }
+        if ($Config.telegram.PSObject.Properties.Name -contains "allowFrom") {
+            Normalize-ToolkitOptionalStringArrayProperty -Object $Config.telegram -PropertyName "allowFrom" | Out-Null
+        }
+        if ($Config.telegram.PSObject.Properties.Name -contains "groupAllowFrom") {
+            Normalize-ToolkitOptionalStringArrayProperty -Object $Config.telegram -PropertyName "groupAllowFrom" | Out-Null
+        }
         if ($Config.telegram.PSObject.Properties.Name -contains "execApprovals" -and $null -ne $Config.telegram.execApprovals) {
-            Set-ToolkitBooleanDefaultProperty -Object $Config.telegram.execApprovals -PropertyName "enabled" -DefaultValue $false
-            Set-ToolkitArrayDefaultProperty -Object $Config.telegram.execApprovals -PropertyName "approvers"
+            Normalize-ToolkitTelegramExecApprovals -ExecApprovals $Config.telegram.execApprovals | Out-Null
         }
         if ($Config.telegram.PSObject.Properties.Name -contains "groups" -and $null -ne $Config.telegram.groups) {
+            $normalizedTelegramGroups = New-Object System.Collections.Generic.List[object]
             foreach ($group in @($Config.telegram.groups)) {
-                if ($null -eq $group) {
-                    continue
+                $normalizedGroup = Normalize-ToolkitTelegramGroupRecord -GroupRecord $group
+                if ($null -ne $normalizedGroup) {
+                    $normalizedTelegramGroups.Add($normalizedGroup)
                 }
-
-                Set-ToolkitBooleanDefaultProperty -Object $group -PropertyName "enabled" -DefaultValue $true
-                Set-ToolkitBooleanDefaultProperty -Object $group -PropertyName "requireMention" -DefaultValue $true
-                Set-ToolkitArrayDefaultProperty -Object $group -PropertyName "allowFrom"
             }
+            $Config.telegram.groups = @($normalizedTelegramGroups.ToArray())
+        }
+        if ($Config.telegram.PSObject.Properties.Name -contains "accounts" -and $null -ne $Config.telegram.accounts) {
+            $normalizedAccounts = New-Object System.Collections.Generic.List[object]
+            foreach ($account in @(ConvertTo-ToolkitTelegramAccountList -Accounts $Config.telegram.accounts)) {
+                $normalizedAccount = Normalize-ToolkitTelegramAccountRecord -AccountRecord $account
+                if ($null -ne $normalizedAccount) {
+                    $normalizedAccounts.Add($normalizedAccount)
+                }
+            }
+            $Config.telegram.accounts = @($normalizedAccounts.ToArray())
         }
     }
 
@@ -731,6 +1124,8 @@ function Normalize-ToolkitConfigDefaults {
 
         Normalize-ToolkitAgentConfig -AgentConfig $agent | Out-Null
     }
+
+    Normalize-ToolkitTelegramRoutingConfig -Config $Config | Out-Null
 
     Sync-ToolkitEndpointAssignments -Config $Config | Out-Null
 
@@ -917,14 +1312,7 @@ function Get-ToolkitAgentByKey {
 function Get-ToolkitTelegramRouting {
     param([Parameter(Mandatory = $true)]$Config)
 
-    $agentsContainer = Get-ToolkitAgentsContainer -Config $Config
-    if ($null -ne $agentsContainer -and
-        $agentsContainer.PSObject.Properties.Name -contains "telegramRouting" -and
-        $null -ne $agentsContainer.telegramRouting) {
-        return $agentsContainer.telegramRouting
-    }
-
-    return $null
+    return (Normalize-ToolkitTelegramRoutingConfig -Config $Config)
 }
 
 function Get-ToolkitWorkspaceList {

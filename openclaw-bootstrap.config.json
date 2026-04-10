@@ -154,6 +154,7 @@
   "clearRedundantDangerousNodeDenyCommands": true,
   "telegram": {
     "enabled": true,
+    "defaultAccount": "default",
     "dmPolicy": "allowlist",
     "allowFrom": [
       "8674459047"
@@ -176,7 +177,8 @@
           "8674459047"
         ]
       }
-    ]
+    ],
+    "accounts": []
   },
   "voiceNotes": {
     "enabled": true,
@@ -765,9 +767,14 @@
   },
   "agents": {
     "telegramRouting": {
-      "targetAgentId": "chat-local",
-      "routeTrustedTelegramGroups": true,
-      "routeTrustedTelegramDms": true
+      "routes": [
+        {
+          "accountId": "default",
+          "targetAgentId": "chat-local",
+          "routeTrustedTelegramGroups": true,
+          "routeTrustedTelegramDms": true
+        }
+      ]
     },
     "list": [
       {

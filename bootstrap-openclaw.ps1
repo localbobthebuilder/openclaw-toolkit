@@ -2246,11 +2246,71 @@ function Configure-TelegramSurface {
         return $false
     }
 
+    function Convert-TelegramExecApprovalsValue {
+        param($ExecApprovalsConfig)
+
+        if ($null -eq $ExecApprovalsConfig) {
+            return $null
+        }
+
+        $execApprovals = [ordered]@{}
+        if ($null -ne $ExecApprovalsConfig.enabled) {
+            $execApprovals.enabled = [bool]$ExecApprovalsConfig.enabled
+        }
+        if ($ExecApprovalsConfig.PSObject.Properties.Name -contains "approvers" -and $null -ne $ExecApprovalsConfig.approvers) {
+            $execApprovals.approvers = @($ExecApprovalsConfig.approvers | ForEach-Object { [string]$_ })
+        }
+        if ($ExecApprovalsConfig.target) {
+            $execApprovals.target = [string]$ExecApprovalsConfig.target
+        }
+        if ($ExecApprovalsConfig.PSObject.Properties.Name -contains "agentFilter" -and $null -ne $ExecApprovalsConfig.agentFilter) {
+            $execApprovals.agentFilter = @($ExecApprovalsConfig.agentFilter | ForEach-Object { [string]$_ })
+        }
+        if ($ExecApprovalsConfig.PSObject.Properties.Name -contains "sessionFilter" -and $null -ne $ExecApprovalsConfig.sessionFilter) {
+            $execApprovals.sessionFilter = @($ExecApprovalsConfig.sessionFilter | ForEach-Object { [string]$_ })
+        }
+
+        return $execApprovals
+    }
+
+    function Convert-TelegramGroupsValue {
+        param($GroupsConfig)
+
+        $groupsMap = [ordered]@{}
+        foreach ($group in @($GroupsConfig)) {
+            if ($null -eq $group -or -not $group.id) {
+                continue
+            }
+
+            $groupEntry = [ordered]@{}
+            if ($null -ne $group.requireMention) {
+                $groupEntry.requireMention = [bool]$group.requireMention
+            }
+            if ($group.PSObject.Properties.Name -contains "allowFrom" -and $null -ne $group.allowFrom) {
+                $groupEntry.allowFrom = @($group.allowFrom | ForEach-Object { [string]$_ })
+            }
+            if ($group.groupPolicy) {
+                $groupEntry.groupPolicy = [string]$group.groupPolicy
+            }
+            if ($null -ne $group.enabled) {
+                $groupEntry.enabled = [bool]$group.enabled
+            }
+            if ($group.agentId) {
+                $groupEntry.agentId = [string]$group.agentId
+            }
+            $groupsMap[[string]$group.id] = $groupEntry
+        }
+
+        return $groupsMap
+    }
+
     if ($null -eq $Config.telegram) {
         return
     }
 
     $telegramConfig = Get-OpenClawConfigJsonValue -Config $Config -Path "channels.telegram"
+    $defaultTelegramAccountId = Get-ToolkitTelegramDefaultAccountId -Config $Config
+    $managedTelegramAccounts = @(Get-ToolkitTelegramAccountList -Config $Config)
 
     if (-not $Config.telegram.enabled) {
         if ($null -ne $telegramConfig -and [bool]$telegramConfig.enabled) {
@@ -2264,6 +2324,7 @@ function Configure-TelegramSurface {
     $bootstrapTokenFile = if ($Config.telegram.PSObject.Properties.Name -contains "tokenFile") { [string]$Config.telegram.tokenFile } else { "" }
     $bootstrapHasBotToken = -not [string]::IsNullOrWhiteSpace($bootstrapBotToken)
     $bootstrapHasTokenFile = -not [string]::IsNullOrWhiteSpace($bootstrapTokenFile)
+    $bootstrapHasAnyCredentials = Test-TelegramCredentialConfigured -TelegramDocument $Config.telegram
 
     $liveHasBotToken = $false
     $liveHasTokenFile = $false
@@ -2278,7 +2339,7 @@ function Configure-TelegramSurface {
     $liveHasAnyCredentials = Test-TelegramCredentialConfigured -TelegramDocument $telegramConfig
 
     if ($null -eq $telegramConfig) {
-        if (-not ($bootstrapHasBotToken -or $bootstrapHasTokenFile -or $liveHasAnyCredentials)) {
+        if (-not ($bootstrapHasAnyCredentials -or $liveHasAnyCredentials)) {
             Write-WarnLine "Telegram is enabled in toolkit config but no botToken or tokenFile is configured yet. Skipping live Telegram initialization until setup is completed."
             return
         }
@@ -2303,8 +2364,8 @@ function Configure-TelegramSurface {
         Write-WarnLine "Telegram channel exists but no botToken or tokenFile is configured yet. Telegram will stay unavailable until credentials are added."
     }
 
-    if ($Config.telegram.defaultAccount) {
-        Set-OpenClawConfigValue -Path "channels.telegram.defaultAccount" -Value ([string]$Config.telegram.defaultAccount)
+    if ($Config.telegram.defaultAccount -or $managedTelegramAccounts.Count -gt 0) {
+        Set-OpenClawConfigValue -Path "channels.telegram.defaultAccount" -Value $defaultTelegramAccountId
     }
 
     if ($Config.telegram.webhookUrl) {
@@ -2349,58 +2410,89 @@ function Configure-TelegramSurface {
     }
 
     if ($Config.telegram.execApprovals) {
-        $execApprovals = [ordered]@{}
-        if ($null -ne $Config.telegram.execApprovals.enabled) {
-            $execApprovals.enabled = [bool]$Config.telegram.execApprovals.enabled
-        }
-        if ($null -ne $Config.telegram.execApprovals.approvers) {
-            $execApprovals.approvers = @($Config.telegram.execApprovals.approvers | ForEach-Object { [string]$_ })
-        }
-        if ($Config.telegram.execApprovals.target) {
-            $execApprovals.target = [string]$Config.telegram.execApprovals.target
-        }
-        if ($null -ne $Config.telegram.execApprovals.agentFilter) {
-            $execApprovals.agentFilter = @($Config.telegram.execApprovals.agentFilter | ForEach-Object { [string]$_ })
-        }
-        if ($null -ne $Config.telegram.execApprovals.sessionFilter) {
-            $execApprovals.sessionFilter = @($Config.telegram.execApprovals.sessionFilter | ForEach-Object { [string]$_ })
-        }
+        $execApprovals = Convert-TelegramExecApprovalsValue -ExecApprovalsConfig $Config.telegram.execApprovals
         Set-OpenClawConfigJson -Path "channels.telegram.execApprovals" -Value $execApprovals
     }
 
     $configuredGroups = @($Config.telegram.groups)
     if ($configuredGroups.Count -gt 0) {
-        $groupsMap = [ordered]@{}
-        foreach ($group in $configuredGroups) {
-            if (-not $group.id) {
-                continue
-            }
-
-            $groupEntry = [ordered]@{}
-            if ($null -ne $group.requireMention) {
-                $groupEntry.requireMention = [bool]$group.requireMention
-            }
-            if ($null -ne $group.allowFrom) {
-                $groupEntry.allowFrom = @($group.allowFrom)
-            }
-            if ($group.groupPolicy) {
-                $groupEntry.groupPolicy = [string]$group.groupPolicy
-            }
-            if ($null -ne $group.enabled) {
-                $groupEntry.enabled = [bool]$group.enabled
-            }
-            if ($group.agentId) {
-                $groupEntry.agentId = [string]$group.agentId
-            }
-            $groupsMap[$group.id] = $groupEntry
-        }
-
+        $groupsMap = Convert-TelegramGroupsValue -GroupsConfig $configuredGroups
         if ($groupsMap.Count -gt 0) {
             Set-OpenClawConfigJson -Path "channels.telegram.groups" -Value $groupsMap
         }
     }
     elseif ($telegramConfig.groups) {
         Unset-OpenClawConfigPath -Path "channels.telegram.groups"
+    }
+
+    foreach ($telegramAccount in @($managedTelegramAccounts)) {
+        if ($null -eq $telegramAccount -or -not $telegramAccount.id) {
+            continue
+        }
+
+        $accountId = [string]$telegramAccount.id
+        $accountBasePath = "channels.telegram.accounts.$accountId"
+        $liveAccountConfig = $null
+        if ($null -ne $telegramConfig -and
+            $telegramConfig.PSObject.Properties.Name -contains "accounts" -and
+            $null -ne $telegramConfig.accounts -and
+            $telegramConfig.accounts.PSObject.Properties.Name -contains $accountId) {
+            $liveAccountConfig = $telegramConfig.accounts.$accountId
+        }
+
+        Set-OpenClawConfigValue -Path "$accountBasePath.enabled" -Value ([bool]$telegramAccount.enabled)
+
+        $bootstrapAccountBotToken = if ($telegramAccount.PSObject.Properties.Name -contains "botToken") { [string]$telegramAccount.botToken } else { "" }
+        $bootstrapAccountTokenFile = if ($telegramAccount.PSObject.Properties.Name -contains "tokenFile") { [string]$telegramAccount.tokenFile } else { "" }
+        $bootstrapAccountHasBotToken = -not [string]::IsNullOrWhiteSpace($bootstrapAccountBotToken)
+        $bootstrapAccountHasTokenFile = -not [string]::IsNullOrWhiteSpace($bootstrapAccountTokenFile)
+        $liveAccountHasCredentials = Test-TelegramCredentialConfigured -TelegramDocument $liveAccountConfig
+
+        if ($bootstrapAccountHasBotToken) {
+            Set-OpenClawConfigValue -Path "$accountBasePath.botToken" -Value $bootstrapAccountBotToken
+            Unset-OpenClawConfigPath -Path "$accountBasePath.tokenFile"
+        }
+        elseif ($bootstrapAccountHasTokenFile) {
+            Set-OpenClawConfigValue -Path "$accountBasePath.tokenFile" -Value $bootstrapAccountTokenFile
+            Unset-OpenClawConfigPath -Path "$accountBasePath.botToken"
+        }
+        elseif (-not $liveAccountHasCredentials) {
+            Write-WarnLine "Telegram account '$accountId' has no bot token yet. Run .\run-openclaw.cmd telegram-setup -AccountId $accountId when you are ready to authenticate it."
+        }
+
+        if ($telegramAccount.name) {
+            Set-OpenClawConfigValue -Path "$accountBasePath.name" -Value ([string]$telegramAccount.name)
+        }
+        if ($telegramAccount.dmPolicy) {
+            Set-OpenClawConfigValue -Path "$accountBasePath.dmPolicy" -Value ([string]$telegramAccount.dmPolicy)
+        }
+        if ($telegramAccount.PSObject.Properties.Name -contains "allowFrom") {
+            Set-OpenClawConfigJson -Path "$accountBasePath.allowFrom" -Value @($telegramAccount.allowFrom | ForEach-Object { [string]$_ }) -AsArray
+        }
+        if ($telegramAccount.groupPolicy) {
+            Set-OpenClawConfigValue -Path "$accountBasePath.groupPolicy" -Value ([string]$telegramAccount.groupPolicy)
+        }
+        if ($telegramAccount.PSObject.Properties.Name -contains "groupAllowFrom") {
+            Set-OpenClawConfigJson -Path "$accountBasePath.groupAllowFrom" -Value @($telegramAccount.groupAllowFrom | ForEach-Object { [string]$_ }) -AsArray
+        }
+        if ($telegramAccount.defaultTo) {
+            Set-OpenClawConfigValue -Path "$accountBasePath.defaultTo" -Value ([string]$telegramAccount.defaultTo)
+        }
+
+        if ($telegramAccount.PSObject.Properties.Name -contains "execApprovals" -and $null -ne $telegramAccount.execApprovals) {
+            $accountExecApprovals = Convert-TelegramExecApprovalsValue -ExecApprovalsConfig $telegramAccount.execApprovals
+            Set-OpenClawConfigJson -Path "$accountBasePath.execApprovals" -Value $accountExecApprovals
+        }
+
+        if ($telegramAccount.PSObject.Properties.Name -contains "groups" -and $null -ne $telegramAccount.groups) {
+            $accountGroupsMap = Convert-TelegramGroupsValue -GroupsConfig $telegramAccount.groups
+            if ($accountGroupsMap.Count -gt 0) {
+                Set-OpenClawConfigJson -Path "$accountBasePath.groups" -Value $accountGroupsMap
+            }
+            elseif ($null -ne $liveAccountConfig -and $liveAccountConfig.PSObject.Properties.Name -contains "groups" -and $null -ne $liveAccountConfig.groups) {
+                Unset-OpenClawConfigPath -Path "$accountBasePath.groups"
+            }
+        }
     }
 
     Write-Host "Applied Telegram channel configuration." -ForegroundColor Green

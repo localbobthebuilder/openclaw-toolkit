@@ -2,6 +2,7 @@
 param(
     [string]$ConfigPath,
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
+    [string]$AccountId,
     [switch]$SkipRelaunch
 )
 
@@ -18,6 +19,7 @@ if (-not $SkipRelaunch) {
     $launchArgs = @()
     if ($ConfigPath) { $launchArgs += @("-ConfigPath", $ConfigPath) }
     if ($ContainerName) { $launchArgs += @("-ContainerName", $ContainerName) }
+    if ($AccountId) { $launchArgs += @("-AccountId", $AccountId) }
     $launchArgs += "-SkipRelaunch"
 
     $launched = Restart-InInteractiveWindowIfNeeded `
@@ -93,13 +95,28 @@ if (($containerProbe.Output -split "`r?`n") -notcontains $ContainerName) {
 }
 
 Write-Step "Launching Telegram channel setup"
-Write-Host "Complete the interactive Telegram setup in this window." -ForegroundColor Yellow
+if ($AccountId) {
+    Write-Host "Complete the interactive Telegram setup for account '$AccountId' in this window." -ForegroundColor Yellow
+}
+else {
+    Write-Host "Complete the interactive Telegram setup in this window." -ForegroundColor Yellow
+}
 Write-Host "When it finishes, return to the toolkit dashboard and refresh status." -ForegroundColor Yellow
 
-& $dockerCommand.Source @(Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments @("channels", "add", "--channel", "telegram"))
+$channelArgs = @("channels", "add", "--channel", "telegram")
+if ($AccountId) {
+    $channelArgs += @("--account", $AccountId)
+}
+
+& $dockerCommand.Source @(Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Interactive -Arguments $channelArgs)
 if ($LASTEXITCODE -ne 0) {
     throw "Telegram channel setup did not complete successfully."
 }
 
 Write-Host ""
-Write-Host "Telegram channel setup finished." -ForegroundColor Green
+if ($AccountId) {
+    Write-Host "Telegram channel setup finished for account '$AccountId'." -ForegroundColor Green
+}
+else {
+    Write-Host "Telegram channel setup finished." -ForegroundColor Green
+}
