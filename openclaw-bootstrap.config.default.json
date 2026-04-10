@@ -1,10 +1,10 @@
 {
   "repoUrl": "https://github.com/openclaw/openclaw.git",
   "repoCloneDepth": 1,
-  "repoPath": "D:\\openclaw\\openclaw",
-  "composeFilePath": "D:\\openclaw\\openclaw\\docker-compose.yml",
-  "envFilePath": "D:\\openclaw\\openclaw\\.env",
-  "envTemplatePath": "D:\\openclaw\\openclaw-toolkit\\openclaw.env.template",
+  "repoPath": "../openclaw",
+  "composeFilePath": "../openclaw/docker-compose.yml",
+  "envFilePath": "../openclaw/.env",
+  "envTemplatePath": "openclaw.env.template",
   "dockerSetupScriptRelativePath": "scripts/docker/setup.sh",
   "gatewayPort": 18789,
   "bridgePort": 18790,
@@ -222,6 +222,6 @@
   "workspaces": [],
   "verification": {
     "healthUrl": "http://127.0.0.1:18789/healthz",
-    "reportPath": "D:\\openclaw\\openclaw-toolkit\\bootstrap-report.txt"
+    "reportPath": "bootstrap-report.txt"
   }
 }

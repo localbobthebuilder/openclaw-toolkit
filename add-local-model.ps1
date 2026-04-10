@@ -718,6 +718,7 @@ if ($config.PSObject.Properties.Name -contains "toolsets" -and $null -ne $config
     $config.PSObject.Properties.Remove("toolPolicy")
 }
 
+$config = ConvertTo-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
 $json = $config | ConvertTo-Json -Depth 50
 Set-Content -Path $ConfigPath -Value $json -Encoding UTF8
 

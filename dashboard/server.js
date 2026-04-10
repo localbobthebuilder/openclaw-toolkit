@@ -110,6 +110,85 @@ function readToolkitConfig() {
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
 
+function expandWindowsEnvVars(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return value;
+  }
+  return value.replace(/%([^%]+)%/g, (_, name) => process.env[name] ?? `%${name}%`);
+}
+
+function toPortableRelativeConfigPath(value, baseDir) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return value;
+  }
+  const trimmed = value.trim();
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+
+  const expanded = expandWindowsEnvVars(trimmed);
+  if (!path.isAbsolute(expanded)) {
+    return trimmed.replace(/\\/g, '/');
+  }
+
+  const relative = path.relative(baseDir, path.resolve(expanded));
+  if (!relative || path.isAbsolute(relative)) {
+    return path.resolve(expanded);
+  }
+  return relative.replace(/\\/g, '/');
+}
+
+function toPortableUserProfileConfigPath(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return value;
+  }
+  const trimmed = value.trim();
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+
+  const expanded = expandWindowsEnvVars(trimmed);
+  if (!path.isAbsolute(expanded)) {
+    return trimmed.replace(/\\/g, '/');
+  }
+
+  const homeDir = path.resolve(process.env.USERPROFILE || os.homedir());
+  const targetPath = path.resolve(expanded);
+  if (!targetPath.toLowerCase().startsWith(homeDir.toLowerCase())) {
+    return trimmed;
+  }
+
+  const suffix = targetPath.slice(homeDir.length).replace(/^([\\/]+)/, '');
+  if (!suffix) {
+    return '%USERPROFILE%';
+  }
+  return `%USERPROFILE%/${suffix.replace(/\\/g, '/')}`;
+}
+
+function compactToolkitConfigPaths(config) {
+  if (!config || typeof config !== 'object') {
+    return config;
+  }
+
+  for (const propertyName of ['repoPath', 'composeFilePath', 'envFilePath', 'envTemplatePath']) {
+    if (typeof config[propertyName] === 'string' && config[propertyName].trim()) {
+      config[propertyName] = toPortableRelativeConfigPath(config[propertyName], toolkitDir);
+    }
+  }
+
+  for (const propertyName of ['hostConfigDir', 'hostWorkspaceDir']) {
+    if (typeof config[propertyName] === 'string' && config[propertyName].trim()) {
+      config[propertyName] = toPortableUserProfileConfigPath(config[propertyName]);
+    }
+  }
+
+  if (config.verification && typeof config.verification === 'object' && typeof config.verification.reportPath === 'string' && config.verification.reportPath.trim()) {
+    config.verification.reportPath = toPortableRelativeConfigPath(config.verification.reportPath, toolkitDir);
+  }
+
+  return config;
+}
+
 function readJsonFileIfExists(filePath) {
   if (!filePath || !fs.existsSync(filePath)) {
     return null;
@@ -427,6 +506,7 @@ app.post('/api/config', (req, res) => {
   try {
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
     const newConfig = payload.config && typeof payload.config === 'object' ? payload.config : payload;
+    const portableConfig = compactToolkitConfigPaths(JSON.parse(JSON.stringify(newConfig)));
     const templates = payload.templates && typeof payload.templates === 'object' ? payload.templates : null;
     
     // Create backup before writing
@@ -434,9 +514,9 @@ app.post('/api/config', (req, res) => {
       fs.copyFileSync(configPath, configPath + '.bak');
     }
     
-    fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf8');
+    fs.writeFileSync(configPath, JSON.stringify(portableConfig, null, 2), 'utf8');
     if (templates) {
-      saveToolkitTemplates(newConfig, templates);
+      saveToolkitTemplates(portableConfig, templates);
     }
     console.log('Configuration updated and backup created.');
     res.json({ success: true });

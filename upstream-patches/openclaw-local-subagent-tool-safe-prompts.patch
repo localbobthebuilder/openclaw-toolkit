@@ -1,8 +1,8 @@
 diff --git a/src/agents/subagent-announce.ts b/src/agents/subagent-announce.ts
-index a074baa50f..3ee120b1ea 100644
+index d1a49bc8f..5025c99da 100644
 --- a/src/agents/subagent-announce.ts
 +++ b/src/agents/subagent-announce.ts
-@@ -63,6 +63,8 @@ export function buildSubagentSystemPrompt(params: {
+@@ -67,6 +67,8 @@ export function buildSubagentSystemPrompt(params: {
    childSessionKey: string;
    label?: string;
    task?: string;
@@ -11,7 +11,7 @@ index a074baa50f..3ee120b1ea 100644
    /** Whether ACP-specific routing guidance should be included. Defaults to true. */
    acpEnabled?: boolean;
    /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
-@@ -82,6 +84,40 @@ export function buildSubagentSystemPrompt(params: {
+@@ -86,6 +88,40 @@ export function buildSubagentSystemPrompt(params: {
    const acpEnabled = params.acpEnabled !== false;
    const canSpawn = childDepth < maxSpawnDepth;
    const parentLabel = childDepth >= 2 ? "parent orchestrator" : "main agent";
@@ -52,19 +52,29 @@ index a074baa50f..3ee120b1ea 100644
  
    const lines = [
      "# Subagent Context",
-diff --git a/src/agents/subagent-announce.prompt.test.ts b/src/agents/subagent-announce.prompt.test.ts
-new file mode 100644
-index 0000000000..8554946c30
---- /dev/null
-+++ b/src/agents/subagent-announce.prompt.test.ts
-@@ -0,0 +1,33 @@
-+import { describe, expect, it } from "vitest";
-+import { buildSubagentSystemPrompt } from "./subagent-announce.js";
+diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
+index 2a20fa791..207860c62 100644
+--- a/src/agents/subagent-spawn.ts
++++ b/src/agents/subagent-spawn.ts
+@@ -606,6 +606,7 @@ export async function spawnSubagentDirect(
+     childSessionKey,
+     label: label || undefined,
+     task,
++    modelRef: resolvedModel,
+     acpEnabled: cfg.acp?.enabled !== false && !childRuntime.sandboxed,
+     childDepth,
+     maxSpawnDepth,
+diff --git a/src/agents/system-prompt.test.ts b/src/agents/system-prompt.test.ts
+index aa1dadb6b..040a17b51 100644
+--- a/src/agents/system-prompt.test.ts
++++ b/src/agents/system-prompt.test.ts
+@@ -1059,4 +1059,31 @@ describe("buildSubagentSystemPrompt", () => {
+       }
+     }
+   });
 +
-+describe("buildSubagentSystemPrompt", () => {
 +  it("uses a compact tool-safe prompt for ollama-backed subagents", () => {
 +    const prompt = buildSubagentSystemPrompt({
-+      requesterSessionKey: "agent:main:main",
 +      childSessionKey: "agent:coder-local:subagent:test",
 +      task: "Create a file and stop.",
 +      modelRef: "ollama/qwen3-coder:30b",
@@ -79,7 +89,6 @@ index 0000000000..8554946c30
 +
 +  it("keeps the full prompt for hosted subagents", () => {
 +    const prompt = buildSubagentSystemPrompt({
-+      requesterSessionKey: "agent:main:main",
 +      childSessionKey: "agent:coder-local:subagent:test",
 +      task: "Create a file and stop.",
 +      modelRef: "openai-codex/gpt-5.4",
@@ -90,84 +99,4 @@ index 0000000000..8554946c30
 +    expect(prompt).toContain("## Output Format");
 +    expect(prompt).toContain("## What You DON'T Do");
 +  });
-+});
-diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index 00a6be3cca..53a0956e4a 100644
---- a/src/agents/subagent-spawn.ts
-+++ b/src/agents/subagent-spawn.ts
-@@ -139,6 +139,52 @@ export function splitModelRef(ref?: string) {
-   return { provider: undefined, model: trimmed };
- }
- 
-+function usesLocalToolSafeSubagentPrompt(modelRef?: string): boolean {
-+  const normalized = modelRef?.trim().toLowerCase() ?? "";
-+  return normalized.startsWith("ollama/") || normalized.startsWith("llama.cpp/");
-+}
-+
-+function buildForcedLocalSubagentPrompt(params: {
-+  requesterSessionKey?: string;
-+  requesterOrigin?: { channel?: string };
-+  childSessionKey: string;
-+  label?: string;
-+  task: string;
-+  childDepth: number;
-+  maxSpawnDepth: number;
-+}): string {
-+  const canSpawn = params.childDepth < params.maxSpawnDepth;
-+  const parentLabel = params.childDepth >= 2 ? "parent orchestrator" : "main agent";
-+  const taskText = params.task.replace(/\s+/g, " ").trim();
-+  return [
-+    "# Subagent Context",
-+    "",
-+    `You are a temporary subagent helping the ${parentLabel}.`,
-+    `Your only task is: ${taskText}`,
-+    "Stay focused on that task only.",
-+    "Use the available tools normally when needed.",
-+    "When a tool is needed, invoke the real tool call instead of writing pseudo XML, pseudo JSON, or narrated tool markup.",
-+    "Do not describe a tool call in text; perform it.",
-+    canSpawn
-+      ? "If you genuinely need parallel help, you may spawn descendants and wait for their auto-announced results."
-+      : "You are a leaf worker and cannot spawn further subagents.",
-+    "When the task is complete, return a short plain-text summary for your parent agent.",
-+    "",
-+    "## Session Context",
-+    ...[
-+      params.label ? `- Label: ${params.label}` : undefined,
-+      params.requesterSessionKey
-+        ? `- Requester session: ${params.requesterSessionKey}.`
-+        : undefined,
-+      params.requesterOrigin?.channel
-+        ? `- Requester channel: ${params.requesterOrigin.channel}.`
-+        : undefined,
-+      `- Your session: ${params.childSessionKey}.`,
-+    ].filter((line): line is string => line !== undefined),
-+    "",
-+  ].join("\n");
-+}
-+
- async function updateSubagentSessionStore(
-   storePath: string,
-   mutator: Parameters<typeof updateSessionStore>[1],
-@@ -628,10 +674,22 @@ export async function spawnSubagentDirect(
-     childSessionKey,
-     label: label || undefined,
-     task,
-+    modelRef: resolvedModel,
-     acpEnabled: cfg.acp?.enabled !== false && !childRuntime.sandboxed,
-     childDepth,
-     maxSpawnDepth,
-   });
-+  if (usesLocalToolSafeSubagentPrompt(resolvedModel)) {
-+    childSystemPrompt = buildForcedLocalSubagentPrompt({
-+      requesterSessionKey,
-+      requesterOrigin,
-+      childSessionKey,
-+      label: label || undefined,
-+      task,
-+      childDepth,
-+      maxSpawnDepth,
-+    });
-+  }
- 
-   let retainOnSessionKeep = false;
-   let attachmentsReceipt:
+ });

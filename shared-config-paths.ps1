@@ -8,15 +8,77 @@ function Resolve-ConfigPathValue {
         return $Value
     }
 
-    if ($Value -match '^[A-Za-z][A-Za-z0-9+.-]*://') {
+    $expandedValue = [Environment]::ExpandEnvironmentVariables([string]$Value)
+
+    if ($expandedValue -match '^[A-Za-z][A-Za-z0-9+.-]*://') {
+        return $expandedValue
+    }
+
+    if ([System.IO.Path]::IsPathRooted($expandedValue)) {
+        return [System.IO.Path]::GetFullPath($expandedValue)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $BaseDir $expandedValue))
+}
+
+function ConvertTo-PortableRelativeConfigPathValue {
+    param(
+        [string]$Value,
+        [Parameter(Mandatory = $true)][string]$BaseDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
         return $Value
     }
 
-    if ([System.IO.Path]::IsPathRooted($Value)) {
-        return [System.IO.Path]::GetFullPath($Value)
+    $expandedValue = [Environment]::ExpandEnvironmentVariables([string]$Value)
+    if ($expandedValue -match '^[A-Za-z][A-Za-z0-9+.-]*://') {
+        return [string]$Value
     }
 
-    return [System.IO.Path]::GetFullPath((Join-Path $BaseDir $Value))
+    if (-not [System.IO.Path]::IsPathRooted($expandedValue)) {
+        return ([string]$Value -replace '\\', '/')
+    }
+
+    $baseFullPath = [System.IO.Path]::GetFullPath($BaseDir)
+    $fullPath = [System.IO.Path]::GetFullPath($expandedValue)
+    $relativePath = [System.IO.Path]::GetRelativePath($baseFullPath, $fullPath)
+
+    return ($relativePath -replace '\\', '/')
+}
+
+function ConvertTo-PortableUserProfileConfigPathValue {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Value
+    }
+
+    $expandedValue = [Environment]::ExpandEnvironmentVariables([string]$Value)
+    if ($expandedValue -match '^[A-Za-z][A-Za-z0-9+.-]*://') {
+        return [string]$Value
+    }
+
+    if (-not [System.IO.Path]::IsPathRooted($expandedValue)) {
+        return ([string]$Value -replace '\\', '/')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        return [string]$Value
+    }
+
+    $userProfileFullPath = [System.IO.Path]::GetFullPath($env:USERPROFILE)
+    $targetFullPath = [System.IO.Path]::GetFullPath($expandedValue)
+    if (-not $targetFullPath.StartsWith($userProfileFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [string]$Value
+    }
+
+    $suffix = $targetFullPath.Substring($userProfileFullPath.Length).TrimStart('\', '/')
+    if ([string]::IsNullOrWhiteSpace($suffix)) {
+        return "%USERPROFILE%"
+    }
+
+    return ("%USERPROFILE%/" + ($suffix -replace '\\', '/'))
 }
 
 function ConvertTo-ToolkitBooleanValue {
@@ -1341,6 +1403,31 @@ function Resolve-PortableConfigPaths {
 
     if ($Config.verification -and $Config.verification.PSObject.Properties.Name -contains "reportPath" -and $Config.verification.reportPath) {
         $Config.verification.reportPath = Resolve-ConfigPathValue -Value ([string]$Config.verification.reportPath) -BaseDir $BaseDir
+    }
+
+    return $Config
+}
+
+function ConvertTo-PortableConfigPaths {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$BaseDir
+    )
+
+    foreach ($propertyName in @("repoPath", "composeFilePath", "envFilePath", "envTemplatePath")) {
+        if ($Config.PSObject.Properties.Name -contains $propertyName -and $Config.$propertyName) {
+            $Config.$propertyName = ConvertTo-PortableRelativeConfigPathValue -Value ([string]$Config.$propertyName) -BaseDir $BaseDir
+        }
+    }
+
+    foreach ($propertyName in @("hostConfigDir", "hostWorkspaceDir")) {
+        if ($Config.PSObject.Properties.Name -contains $propertyName -and $Config.$propertyName) {
+            $Config.$propertyName = ConvertTo-PortableUserProfileConfigPathValue -Value ([string]$Config.$propertyName)
+        }
+    }
+
+    if ($Config.verification -and $Config.verification.PSObject.Properties.Name -contains "reportPath" -and $Config.verification.reportPath) {
+        $Config.verification.reportPath = ConvertTo-PortableRelativeConfigPathValue -Value ([string]$Config.verification.reportPath) -BaseDir $BaseDir
     }
 
     return $Config

@@ -56,12 +56,15 @@ function Invoke-ApplyManagedUpstreamPatches {
         [scriptblock]$WriteStatus
     )
 
+    $gitApplyWhitespaceArgs = @("--ignore-space-change", "--ignore-whitespace")
+
     foreach ($patch in $Patches) {
         if (-not (Test-Path -LiteralPath $patch.Path)) {
             throw "Managed upstream patch file not found: $($patch.Path)"
         }
 
-        $reverseCheck = & $InvokeExternal -FilePath "git" -Arguments @("-C", $RepoPath, "apply", "--reverse", "--check", $patch.Path) -AllowFailure -Quiet
+        $reverseCheckArgs = @("-C", $RepoPath, "apply", "--reverse", "--check") + $gitApplyWhitespaceArgs + @($patch.Path)
+        $reverseCheck = & $InvokeExternal -FilePath "git" -Arguments $reverseCheckArgs -AllowFailure -Quiet
         if ($reverseCheck.ExitCode -eq 0) {
             if ($WriteStatus) {
                 & $WriteStatus "Managed upstream patch already applied: $($patch.Name)"
@@ -69,13 +72,15 @@ function Invoke-ApplyManagedUpstreamPatches {
             continue
         }
 
-        $forwardCheck = & $InvokeExternal -FilePath "git" -Arguments @("-C", $RepoPath, "apply", "--check", $patch.Path) -AllowFailure -Quiet
+        $forwardCheckArgs = @("-C", $RepoPath, "apply", "--check") + $gitApplyWhitespaceArgs + @($patch.Path)
+        $forwardCheck = & $InvokeExternal -FilePath "git" -Arguments $forwardCheckArgs -AllowFailure -Quiet
         if ($forwardCheck.ExitCode -ne 0) {
             $detail = if ($forwardCheck.Output) { "`n$($forwardCheck.Output)" } else { "" }
             throw "Managed upstream patch '$($patch.Name)' could not be applied to $RepoPath.$detail"
         }
 
-        $null = & $InvokeExternal -FilePath "git" -Arguments @("-C", $RepoPath, "apply", "--whitespace=nowarn", $patch.Path)
+        $applyArgs = @("-C", $RepoPath, "apply", "--whitespace=nowarn") + $gitApplyWhitespaceArgs + @($patch.Path)
+        $null = & $InvokeExternal -FilePath "git" -Arguments $applyArgs
         if ($WriteStatus) {
             & $WriteStatus "Applied managed upstream patch: $($patch.Name)"
         }
