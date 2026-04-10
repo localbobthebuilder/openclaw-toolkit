@@ -123,6 +123,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private topologyLinkSourceAgentId: string | null = null;
   @state() private topologyHoverAgentId: string | null = null;
   @state() private topologyHoverEdgeKey: string | null = null;
+  @state() private topologySelectedAgentId: string | null = null;
   @state() private topologyDraggedAgentKey: string | null = null;
   @state() private topologyHoverEndpointKey: string | null = null;
   @state() private topologyNotice: string = '';
@@ -130,6 +131,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private topologyBoardHeight: number = 0;
   @state() private topologyEdges: any[] = [];
   @state() private topologyShowAllArrows: boolean = false;
+  @state() private topologyInspectorMarkdownFile: string = 'AGENTS.md';
   @state() private showModelSelector: boolean = false;
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   private ws: WebSocket | null = null;
@@ -238,12 +240,17 @@ export class ToolkitDashboard extends LitElement {
     .step-done-badge { color: #4caf50; font-size: 0.75rem; font-weight: bold; }
     .setup-step .btn { white-space: nowrap; flex-shrink: 0; }
     .topology-shell { display: flex; flex-direction: column; gap: 20px; }
+    .topology-main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
+    .topology-board-column { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+    .topology-inspector-column { min-width: 0; }
+    .topology-inspector-sticky { position: sticky; top: 20px; }
     .topology-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
     .topology-toolbar-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
     .topology-legend { display: flex; flex-wrap: wrap; gap: 10px; color: #888; font-size: 0.8rem; }
     .topology-legend-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #333; border-radius: 999px; background: #181818; }
-    .topology-notice { padding: 12px 14px; border-radius: 8px; border: 1px solid #3a3a3a; background: #151515; color: #ddd; }
+    .topology-notice { min-height: 50px; padding: 12px 14px; border-radius: 8px; border: 1px solid #3a3a3a; background: #151515; color: #ddd; display: flex; align-items: center; }
     .topology-notice strong { color: #fff; }
+    .topology-notice.placeholder { color: #66757f; border-color: #2d3438; background: #131619; }
     .topology-scroll { overflow: auto; padding-bottom: 8px; }
     .topology-board { position: relative; display: inline-block; min-width: 100%; min-height: 480px; overflow: visible; }
     .topology-columns { position: relative; z-index: 0; display: flex; align-items: stretch; gap: 28px; width: max-content; min-width: 100%; }
@@ -271,6 +278,7 @@ export class ToolkitDashboard extends LitElement {
     .topology-agent.disabled { opacity: 0.6; }
     .topology-agent.main-agent { border-color: #d4a514; box-shadow: 0 0 0 1px rgba(212,165,20,0.2), 0 8px 18px rgba(0,0,0,0.2); }
     .topology-agent.link-source { border-color: #00bcd4; box-shadow: 0 0 0 2px rgba(0,188,212,0.2), 0 8px 18px rgba(0,0,0,0.2); }
+    .topology-agent.selected { border-color: #7e57c2; box-shadow: 0 0 0 2px rgba(126,87,194,0.2), 0 8px 18px rgba(0,0,0,0.2); }
     .topology-agent-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .topology-agent-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .topology-agent-title strong { color: #fff; font-size: 0.92rem; white-space: normal; overflow: visible; text-overflow: unset; overflow-wrap: anywhere; }
@@ -285,12 +293,29 @@ export class ToolkitDashboard extends LitElement {
     .topology-pill.local { border-color: #4b5b24; color: #c5e1a5; }
     .topology-pill.hosted { border-color: #6b4d2c; color: #ffcc80; }
     .topology-agent-meta { color: #8f8f8f; font-size: 0.74rem; line-height: 1.45; min-height: 32px; overflow-wrap: anywhere; }
-    .topology-agent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 10px; }
+    .topology-agent-workspace { display: flex; align-items: center; gap: 6px; color: #b7c4ca; margin-bottom: 4px; }
+    .topology-agent-workspace-icon { flex-shrink: 0; }
+    .topology-agent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 0; }
     .topology-agent-actions .btn { flex: 1 1 120px; padding: 7px 10px; font-size: 0.75rem; min-width: 0; }
     .topology-card-link-hint { margin-top: 8px; color: #00bcd4; font-size: 0.72rem; }
     .topology-hover-preview { border-color: #5b6f79; box-shadow: 0 0 0 1px rgba(110,198,255,0.22), 0 8px 18px rgba(0,0,0,0.2); }
+    .topology-inspector-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid #333; }
+    .topology-inspector-meta { display: flex; flex-direction: column; gap: 6px; color: #9aa7ad; font-size: 0.82rem; }
+    .topology-inspector-meta strong { color: #fff; }
+    .topology-expander { border: 1px solid #333; border-radius: 12px; background: #181818; overflow: hidden; }
+    .topology-expander summary { cursor: pointer; list-style: none; padding: 12px 14px; color: #d6e0e5; font-weight: 700; }
+    .topology-expander summary::-webkit-details-marker { display: none; }
+    .topology-expander[open] summary { border-bottom: 1px solid #333; }
+    .topology-expander-body { padding: 12px; }
+    .topology-markdown-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .topology-markdown-tab { padding: 6px 10px; border: 1px solid #333; border-radius: 999px; background: #181818; color: #888; cursor: pointer; font-size: 0.78rem; }
+    .topology-markdown-tab.active { background: #00bcd4; border-color: #00bcd4; color: #000; font-weight: 700; }
     .topology-help { color: #888; font-size: 0.82rem; line-height: 1.55; }
     .topology-help strong { color: #ddd; }
+    @media (max-width: 1480px) {
+      .topology-main-grid { grid-template-columns: minmax(0, 1fr); }
+      .topology-inspector-sticky { position: static; }
+    }
   `;
 
   async firstUpdated() {
@@ -3567,6 +3592,8 @@ export class ToolkitDashboard extends LitElement {
     const boardHeight = this.topologyBoardHeight || 560;
     const previewSourceAgentId = this.getTopologyPreviewSourceAgentId();
     const visibleEdges = this.getVisibleTopologyEdges();
+    const selectedTopologyEntry = this.getTopologySelectedAgentEntry();
+    const selectedTopologyAgentId = this.topologySelectedAgentId || selectedTopologyEntry?.id || null;
     const orderedVisibleEdges = [...visibleEdges].sort((left: any, right: any) => {
       const leftHovered = this.topologyHoverEdgeKey === left.key ? 1 : 0;
       const rightHovered = this.topologyHoverEdgeKey === right.key ? 1 : 0;
@@ -3619,180 +3646,335 @@ export class ToolkitDashboard extends LitElement {
             </div>
           ` : ''}
         </div>
+        <div class="topology-main-grid">
+          <div class="topology-board-column">
+            <div class="topology-notice ${this.topologyNotice ? '' : 'placeholder'}">
+              ${this.topologyNotice
+                ? html`<span><strong>Workbench:</strong> ${this.topologyNotice}</span>`
+                : html`<span>Workbench status and delegation feedback appears here.</span>`}
+            </div>
 
-        ${this.topologyNotice ? html`
-          <div class="topology-notice"><strong>Workbench:</strong> ${this.topologyNotice}</div>
-        ` : ''}
-
-        <div class="card">
-          <div class="topology-scroll">
-            <div class="topology-board" style="min-width: ${Math.max(estimatedBoardWidth, 960)}px; min-height: ${boardHeight}px;">
-              <div class="topology-columns">
-              ${slots.map((slot: any) => {
-                const isDropTarget = this.topologyHoverEndpointKey === slot.key;
-                return html`
-                  <section
-                    class="topology-slot ${isDropTarget ? 'drop-target' : ''}"
-                    style="width: ${slot.slotWidth}px;"
-                    @dragover=${(event: DragEvent) => {
-                      event.preventDefault();
-                      this.topologyHoverEndpointKey = slot.key;
-                    }}
-                    @dragleave=${() => {
-                      if (this.topologyHoverEndpointKey === slot.key) {
-                        this.topologyHoverEndpointKey = null;
-                      }
-                    }}
-                    @drop=${(event: DragEvent) => {
-                      event.preventDefault();
-                      this.handleTopologyDrop(slot.endpointKey);
-                    }}>
-                    <div class="topology-slot-header">
-                      <div class="topology-slot-title">
-                        <span class="topology-slot-icon">${slot.icon}</span>
-                        <div class="topology-slot-heading">
-                          <strong>${slot.title}</strong>
-                          <span>${slot.subtitle}</span>
-                        </div>
-                      </div>
-                      <span class="topology-slot-badge">${slot.agents.length} agent${slot.agents.length === 1 ? '' : 's'}</span>
-                    </div>
-                    <div class="topology-slot-body" style=${`grid-template-columns: repeat(${slot.columnCount}, minmax(0, 1fr)); column-gap: ${slot.columnGap}px;`}>
-                      ${slot.agents.length === 0 ? html`
-                        <div class="topology-slot-empty">
-                          ${slot.endpointKey ? 'Drop an agent here to assign this endpoint.' : 'Agents without a resolved endpoint appear here.'}
-                        </div>
-                      ` : ''}
-                      ${slot.agents.map((entry: any, index: number) => {
-                        const delegateCount = this.getAgentDelegationTargets(entry.agent).length;
-                        const isLinkSource = this.topologyLinkSourceAgentId === entry.id;
-                        const isHoverPreview = !this.topologyShowAllArrows && !isLinkSource && previewSourceAgentId === entry.id && delegateCount > 0;
-                        const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
-                        const columnIndex = slot.columnCount > 1 ? (index % slot.columnCount) : 0;
-                        return html`
-                          <div
-                            class="topology-agent ${entry.enabled ? '' : 'disabled'} ${entry.isMain ? 'main-agent' : ''} ${isLinkSource ? 'link-source' : ''} ${isHoverPreview ? 'topology-hover-preview' : ''} ${this.topologyDraggedAgentKey === entry.key ? 'dragging' : ''}"
-                            data-topology-agent-id=${entry.id}
-                            data-topology-slot-key=${slot.key}
-                            data-topology-column=${String(columnIndex)}
-                            draggable="true"
-                            @mouseenter=${() => { this.topologyHoverAgentId = entry.id; }}
-                            @mouseleave=${() => {
-                              if (this.topologyHoverAgentId === entry.id) {
-                                this.topologyHoverAgentId = null;
-                              }
-                            }}
-                            @dragstart=${(event: DragEvent) => {
-                              this.startTopologyDrag(entry.key);
-                              event.dataTransfer?.setData('text/plain', entry.key);
-                              if (event.dataTransfer) {
-                                event.dataTransfer.effectAllowed = 'move';
-                              }
-                            }}
-                            @dragend=${() => this.endTopologyDrag()}
-                            @click=${() => this.handleTopologyAgentClick(entry.id)}>
-                            <div class="topology-agent-header">
-                              <div class="topology-agent-title">
-                                <span class="topology-agent-avatar">${entry.isMain ? '👑' : '🧍'}</span>
-                                <div style="min-width: 0;">
-                                  <strong>${entry.name}</strong>
-                                  <div style="color: #777; font-size: 0.72rem;">${entry.id}</div>
-                                </div>
-                              </div>
-                              ${entry.isMain ? html`<span class="topology-agent-main">👑</span>` : ''}
+            <div class="card">
+              <div class="topology-scroll">
+                <div class="topology-board" style="min-width: ${Math.max(estimatedBoardWidth, 960)}px; min-height: ${boardHeight}px;">
+                  <div class="topology-columns">
+                  ${slots.map((slot: any) => {
+                    const isDropTarget = this.topologyHoverEndpointKey === slot.key;
+                    return html`
+                      <section
+                        class="topology-slot ${isDropTarget ? 'drop-target' : ''}"
+                        style="width: ${slot.slotWidth}px;"
+                        @dragover=${(event: DragEvent) => {
+                          event.preventDefault();
+                          this.topologyHoverEndpointKey = slot.key;
+                        }}
+                        @dragleave=${() => {
+                          if (this.topologyHoverEndpointKey === slot.key) {
+                            this.topologyHoverEndpointKey = null;
+                          }
+                        }}
+                        @drop=${(event: DragEvent) => {
+                          event.preventDefault();
+                          this.handleTopologyDrop(slot.endpointKey);
+                        }}>
+                        <div class="topology-slot-header">
+                          <div class="topology-slot-title">
+                            <span class="topology-slot-icon">${slot.icon}</span>
+                            <div class="topology-slot-heading">
+                              <strong>${slot.title}</strong>
+                              <span>${slot.subtitle}</span>
                             </div>
-
-                            <div class="topology-agent-badges">
-                              ${entry.isMain ? html`<span class="topology-pill main">Main</span>` : ''}
-                              ${!entry.enabled ? html`<span class="topology-pill disabled">Disabled</span>` : ''}
-                              <span class="topology-pill ${entry.workspaceMode === 'shared' ? 'shared' : 'private'}">${entry.workspaceMode}</span>
-                              <span class="topology-pill ${entry.modelSource === 'local' ? 'local' : 'hosted'}">${entry.modelSource}</span>
-                              <span class="topology-pill">${delegateCount} delegate${delegateCount === 1 ? '' : 's'}</span>
-                              ${hasSubagentsDisabled ? html`<span class="topology-pill disabled">delegation off</span>` : ''}
-                            </div>
-
-                            <div class="topology-agent-meta">
-                              AGENTS.md: ${this.getMarkdownTemplateSelection(entry.agent, 'AGENTS.md', VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) || 'custom'}<br>
-                              Model: ${entry.agent.modelRef || 'unassigned'}
-                            </div>
-
-                            <div class="topology-agent-actions">
-                              <button class="btn btn-ghost" @click=${(event: Event) => {
-                                event.stopPropagation();
-                                this.selectTopologyDelegationSource(entry.id);
-                              }}>
-                                ${isLinkSource ? 'Cancel' : 'Delegation'}
-                              </button>
-                              <button class="btn btn-ghost" @click=${(event: Event) => {
-                                event.stopPropagation();
-                                this.openTopologyAgentEditor(entry.key);
-                              }}>
-                                Details
-                              </button>
-                            </div>
-
-                            ${this.topologyLinkSourceAgentId && this.topologyLinkSourceAgentId !== entry.id ? html`
-                              <div class="topology-card-link-hint">
-                                ${this.hasDelegationEdge(this.topologyLinkSourceAgentId, entry.id)
-                                  ? 'Click to remove delegation'
-                                  : 'Click to delegate here'}
-                              </div>
-                            ` : ''}
                           </div>
-                        `;
-                      })}
-                    </div>
-                  </section>
-                `;
-              })}
-              </div>
-              <div class="topology-edge-overlay" aria-hidden="true">
-                ${orderedVisibleEdges.flatMap((edge: any) => {
-                  const edgeColor = this.getTopologyEdgeColor(edge);
-                  return (Array.isArray(edge.renderSegments) ? edge.renderSegments : []).map((segment: any) => html`
-                  <div
-                    class="topology-edge-hit ${segment.orientation}"
-                    style=${segment.orientation === 'h'
-                      ? `left:${segment.left}px; top:${segment.top - 2}px; width:${segment.width}px; height:${segment.height + 4}px;`
-                      : `left:${segment.left - 2}px; top:${segment.top}px; width:${segment.width + 4}px; height:${segment.height}px;`}
-                    @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
-                    @mouseleave=${() => {
-                      if (this.topologyHoverEdgeKey === edge.key) {
-                        this.topologyHoverEdgeKey = null;
+                          <span class="topology-slot-badge">${slot.agents.length} agent${slot.agents.length === 1 ? '' : 's'}</span>
+                        </div>
+                        <div class="topology-slot-body" style=${`grid-template-columns: repeat(${slot.columnCount}, minmax(0, 1fr)); column-gap: ${slot.columnGap}px;`}>
+                          ${slot.agents.length === 0 ? html`
+                            <div class="topology-slot-empty">
+                              ${slot.endpointKey ? 'Drop an agent here to assign this endpoint.' : 'Agents without a resolved endpoint appear here.'}
+                            </div>
+                          ` : ''}
+                          ${slot.agents.map((entry: any, index: number) => {
+                            const delegateCount = this.getAgentDelegationTargets(entry.agent).length;
+                            const isLinkSource = this.topologyLinkSourceAgentId === entry.id;
+                            const isHoverPreview = !this.topologyShowAllArrows && !isLinkSource && previewSourceAgentId === entry.id && delegateCount > 0;
+                            const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
+                            const primaryWorkspace = this.getWorkspaceForAgentId(entry.id);
+                            const workspaceLabel = primaryWorkspace ? String(primaryWorkspace.name || primaryWorkspace.id || 'Workspace') : 'Unassigned';
+                            const columnIndex = slot.columnCount > 1 ? (index % slot.columnCount) : 0;
+                            const isSelected = selectedTopologyAgentId === entry.id;
+                            return html`
+                              <div
+                                class="topology-agent ${entry.enabled ? '' : 'disabled'} ${entry.isMain ? 'main-agent' : ''} ${isLinkSource ? 'link-source' : ''} ${isHoverPreview ? 'topology-hover-preview' : ''} ${isSelected ? 'selected' : ''} ${this.topologyDraggedAgentKey === entry.key ? 'dragging' : ''}"
+                                data-topology-agent-id=${entry.id}
+                                data-topology-slot-key=${slot.key}
+                                data-topology-column=${String(columnIndex)}
+                                draggable="true"
+                                @mouseenter=${() => { this.topologyHoverAgentId = entry.id; }}
+                                @mouseleave=${() => {
+                                  if (this.topologyHoverAgentId === entry.id) {
+                                    this.topologyHoverAgentId = null;
+                                  }
+                                }}
+                                @dragstart=${(event: DragEvent) => {
+                                  this.startTopologyDrag(entry.key);
+                                  event.dataTransfer?.setData('text/plain', entry.key);
+                                  if (event.dataTransfer) {
+                                    event.dataTransfer.effectAllowed = 'move';
+                                  }
+                                }}
+                                @dragend=${() => this.endTopologyDrag()}
+                                @click=${() => this.handleTopologyAgentClick(entry.id)}>
+                                <div class="topology-agent-header">
+                                  <div class="topology-agent-title">
+                                    <span class="topology-agent-avatar">${entry.isMain ? '👑' : '🧍'}</span>
+                                    <div style="min-width: 0;">
+                                      <strong>${entry.name}</strong>
+                                      <div style="color: #777; font-size: 0.72rem;">${entry.id}</div>
+                                    </div>
+                                  </div>
+                                  ${entry.isMain ? html`<span class="topology-agent-main">👑</span>` : ''}
+                                </div>
+
+                                <div class="topology-agent-badges">
+                                  ${entry.isMain ? html`<span class="topology-pill main">Main</span>` : ''}
+                                  ${!entry.enabled ? html`<span class="topology-pill disabled">Disabled</span>` : ''}
+                                  <span class="topology-pill ${entry.workspaceMode === 'shared' ? 'shared' : 'private'}">${entry.workspaceMode}</span>
+                                  <span class="topology-pill ${entry.modelSource === 'local' ? 'local' : 'hosted'}">${entry.modelSource}</span>
+                                  <span class="topology-pill">${delegateCount} delegate${delegateCount === 1 ? '' : 's'}</span>
+                                  ${hasSubagentsDisabled ? html`<span class="topology-pill disabled">delegation off</span>` : ''}
+                                </div>
+
+                                <div class="topology-agent-meta">
+                                  <div class="topology-agent-workspace">
+                                    <span class="topology-agent-workspace-icon">📁</span>
+                                    <span>${workspaceLabel}</span>
+                                  </div>
+                                  AGENTS.md: ${this.getMarkdownTemplateSelection(entry.agent, 'AGENTS.md', VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) || 'custom'}<br>
+                                  Model: ${entry.agent.modelRef || 'unassigned'}
+                                </div>
+
+                                <div class="topology-agent-actions">
+                                  <button class="btn btn-ghost" @click=${(event: Event) => {
+                                    event.stopPropagation();
+                                    this.selectTopologyDelegationSource(entry.id);
+                                  }}>
+                                    ${isLinkSource ? 'Cancel' : 'Delegation'}
+                                  </button>
+                                  <button class="btn btn-ghost" @click=${(event: Event) => {
+                                    event.stopPropagation();
+                                    this.setTopologyAgentDelegationEnabled(entry.id, hasSubagentsDisabled);
+                                  }}>
+                                    ${hasSubagentsDisabled ? 'Enable Delegation' : 'Disable Delegation'}
+                                  </button>
+                                  <button class="btn btn-ghost" @click=${(event: Event) => {
+                                    event.stopPropagation();
+                                    this.openTopologyAgentEditor(entry.key);
+                                  }}>
+                                    Details
+                                  </button>
+                                </div>
+
+                                ${this.topologyLinkSourceAgentId && this.topologyLinkSourceAgentId !== entry.id ? html`
+                                  <div class="topology-card-link-hint">
+                                    ${this.hasDelegationEdge(this.topologyLinkSourceAgentId, entry.id)
+                                      ? 'Click to remove delegation'
+                                      : 'Click to delegate here'}
+                                  </div>
+                                ` : ''}
+                              </div>
+                            `;
+                          })}
+                        </div>
+                      </section>
+                    `;
+                  })}
+                  </div>
+                  <div class="topology-edge-overlay" aria-hidden="true">
+                    ${orderedVisibleEdges.flatMap((edge: any) => {
+                      const edgeColor = this.getTopologyEdgeColor(edge);
+                      return (Array.isArray(edge.renderSegments) ? edge.renderSegments : []).map((segment: any) => html`
+                      <div
+                        class="topology-edge-hit ${segment.orientation}"
+                        style=${segment.orientation === 'h'
+                          ? `left:${segment.left}px; top:${segment.top - 2}px; width:${segment.width}px; height:${segment.height + 4}px;`
+                          : `left:${segment.left - 2}px; top:${segment.top}px; width:${segment.width + 4}px; height:${segment.height}px;`}
+                        @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
+                        @mouseleave=${() => {
+                          if (this.topologyHoverEdgeKey === edge.key) {
+                            this.topologyHoverEdgeKey = null;
+                          }
+                        }}>
+                      </div>
+                      <div
+                        class="topology-edge-segment ${segment.orientation}"
+                        style=${`left:${segment.left}px; top:${segment.top}px; width:${segment.width}px; height:${segment.height}px; --edge-color:${edgeColor};`}>
+                      </div>
+                    `);
+                    })}
+                    ${orderedVisibleEdges.map((edge: any) => {
+                      if (!edge.arrowHead) {
+                        return '';
                       }
-                    }}>
+                      const edgeColor = this.getTopologyEdgeColor(edge);
+                      return html`
+                      <div
+                        class="topology-edge-arrowhead-hit"
+                        style=${`left:${edge.arrowHead.x}px; top:${edge.arrowHead.y}px; transform: translate(-50%, -50%) rotate(${edge.arrowHead.rotation}deg);`}
+                        @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
+                        @mouseleave=${() => {
+                          if (this.topologyHoverEdgeKey === edge.key) {
+                            this.topologyHoverEdgeKey = null;
+                          }
+                        }}>
+                      </div>
+                      <div
+                        class="topology-edge-arrowhead"
+                        style=${`left:${edge.arrowHead.x}px; top:${edge.arrowHead.y}px; --edge-color:${edgeColor}; transform: translate(-50%, -50%) rotate(${edge.arrowHead.rotation}deg);`}>
+                      </div>
+                    `;
+                    })}
                   </div>
-                  <div
-                    class="topology-edge-segment ${segment.orientation}"
-                    style=${`left:${segment.left}px; top:${segment.top}px; width:${segment.width}px; height:${segment.height}px; --edge-color:${edgeColor};`}>
-                  </div>
-                `);
-                })}
-                ${orderedVisibleEdges.map((edge: any) => {
-                  if (!edge.arrowHead) {
-                    return '';
-                  }
-                  const edgeColor = this.getTopologyEdgeColor(edge);
-                  return html`
-                  <div
-                    class="topology-edge-arrowhead-hit"
-                    style=${`left:${edge.arrowHead.x}px; top:${edge.arrowHead.y}px; transform: translate(-50%, -50%) rotate(${edge.arrowHead.rotation}deg);`}
-                    @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
-                    @mouseleave=${() => {
-                      if (this.topologyHoverEdgeKey === edge.key) {
-                        this.topologyHoverEdgeKey = null;
-                      }
-                    }}>
-                  </div>
-                  <div
-                    class="topology-edge-arrowhead"
-                    style=${`left:${edge.arrowHead.x}px; top:${edge.arrowHead.y}px; --edge-color:${edgeColor}; transform: translate(-50%, -50%) rotate(${edge.arrowHead.rotation}deg);`}>
-                  </div>
-                `;
-                })}
+                </div>
               </div>
             </div>
           </div>
+
+          <div class="topology-inspector-column">
+            <div class="topology-inspector-sticky">
+              ${selectedTopologyEntry ? this.renderTopologyInspector(selectedTopologyEntry) : html`
+                <div class="card">
+                  <div class="card-header"><h3>Agent Inspector</h3></div>
+                  <div class="topology-help">Select an agent card to inspect its effective markdown, toolsets, and delegation settings.</div>
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderTopologyInspector(selectedEntry: any) {
+    const agent = selectedEntry.agent;
+    const subagents = this.ensureSubagentsConfig(agent);
+    const delegateTargets = this.getAgentDelegationTargets(agent);
+    const selectedEndpoint = this.resolveAgentEndpoint(agent);
+    const primaryWorkspace = this.getWorkspaceForAgentId(agent.id);
+    const appliedToolsets = this.getAgentAppliedToolsets(agent);
+    const effectiveToolState = this.getEffectiveAgentToolState(agent);
+    const selectedMarkdownFile = VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.includes(this.topologyInspectorMarkdownFile as any)
+      ? this.topologyInspectorMarkdownFile
+      : 'AGENTS.md';
+    const selectedMarkdown = this.getEffectiveAgentBootstrapMarkdown(agent, selectedMarkdownFile);
+    const markdownValue = selectedMarkdown.effectiveValue || '';
+
+    return html`
+      <div class="card">
+        <div class="card-header">
+          <h3>Agent Inspector</h3>
+          <button class="btn btn-ghost" @click=${() => this.openTopologyAgentEditor(selectedEntry.key)}>Open Full Editor</button>
+        </div>
+
+        <div class="topology-inspector-meta">
+          <div><strong>${selectedEntry.name}</strong> <span style="color:#777;">(${selectedEntry.id})</span></div>
+          <div>Endpoint: <strong>${selectedEndpoint ? this.getEndpointLabel(selectedEndpoint) : 'Unassigned'}</strong></div>
+          <div>Workspace: <strong>${primaryWorkspace ? this.getWorkspaceDisplayLabel(primaryWorkspace) : 'Unassigned'}</strong></div>
+          <div>Model: <strong>${agent.modelRef || 'unassigned'}</strong></div>
+        </div>
+
+        <div class="topology-inspector-section">
+          <label class="toggle-switch" style="font-size: 0.95rem; font-weight: 700; color: #fff;">
+            <input type="checkbox" ?checked=${!!subagents.enabled} @change=${(event: any) => this.setTopologyAgentDelegationEnabled(selectedEntry.id, !!event.target.checked)}>
+            Delegation enabled for this agent
+          </label>
+          <div class="help-text" style="margin-top: 8px;">Turning delegation off pauses this agent's ability to spawn or delegate, but it keeps the configured allowed agents in place.</div>
+          <div class="toolset-preview-rows" style="margin-top: 12px;">
+            <div class="toolset-preview-row">
+              <div class="toolset-preview-label">Allowed Delegatees</div>
+              ${delegateTargets.length === 0
+                ? html`<div class="toolset-preview-empty">No delegate targets configured.</div>`
+                : html`<div class="toolset-preview-tags">
+                    ${delegateTargets.map((targetId: string) => {
+                      const targetEntry = this.getTopologyAgentEntryById(targetId);
+                      return html`<div class="tag">${targetEntry ? `${targetEntry.name} (${targetId})` : targetId}</div>`;
+                    })}
+                  </div>`}
+            </div>
+          </div>
+        </div>
+
+        <div class="topology-inspector-section">
+          <div class="card-header" style="padding: 0 0 10px; margin-bottom: 0; border-bottom: none;">
+            <h3 style="font-size: 1rem;">Combined Toolset</h3>
+          </div>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">This is the effective toolkit toolset stack for the selected agent, including the always-on global <code>minimal</code> layer.</div>
+          <details class="topology-expander">
+            <summary>Applied toolset layers (${appliedToolsets.length})</summary>
+            <div class="topology-expander-body">
+              <div class="applied-toolset-list">
+                ${appliedToolsets.map((toolset: any) => {
+                  const allowedTools = this.normalizeToolNameList(toolset.allow);
+                  const deniedTools = this.normalizeToolNameList(toolset.deny);
+                  return html`
+                    <div class="applied-toolset-card">
+                      <div class="applied-toolset-header">
+                        <strong>${toolset.name || toolset.key}</strong>
+                        ${toolset.key === 'minimal' ? html`<span class="badge">Global</span>` : ''}
+                      </div>
+                      <div class="toolset-preview-rows">
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Allow</div>
+                          ${allowedTools.length === 0
+                            ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
+                            : html`<div class="toolset-preview-tags">${allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
+                        </div>
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Deny</div>
+                          ${deniedTools.length === 0
+                            ? html`<div class="toolset-preview-empty">No denied tools.</div>`
+                            : html`<div class="toolset-preview-tags">${deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                })}
+              </div>
+            </div>
+          </details>
+          <div class="toolset-preview-rows" style="margin-top: 14px;">
+            <div class="toolset-preview-row">
+              <div class="toolset-preview-label">Final Allow</div>
+              ${effectiveToolState.allowedTools.length === 0
+                ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
+                : html`<div class="toolset-preview-tags">${effectiveToolState.allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
+            </div>
+            <div class="toolset-preview-row">
+              <div class="toolset-preview-label">Final Deny</div>
+              ${effectiveToolState.deniedTools.length === 0
+                ? html`<div class="toolset-preview-empty">No denied tools.</div>`
+                : html`<div class="toolset-preview-tags">${effectiveToolState.deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
+            </div>
+          </div>
+        </div>
+
+        <div class="topology-inspector-section">
+          <div class="card-header" style="padding: 0 0 10px; margin-bottom: 0; border-bottom: none;">
+            <h3 style="font-size: 1rem;">Combined Markdown</h3>
+          </div>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">Preview the effective bootstrap markdown for the selected agent. Template-backed files show the shared template content; custom files show the agent-specific markdown.</div>
+          <div class="topology-markdown-tabs">
+            ${VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => html`
+              <div class="topology-markdown-tab ${selectedMarkdownFile === fileName ? 'active' : ''}" @click=${() => { this.topologyInspectorMarkdownFile = fileName; }}>
+                ${fileName.replace('.md', '')}
+              </div>
+            `)}
+          </div>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 8px;">
+            ${selectedMarkdown.selectedTemplateKey
+              ? html`Using template <code>${selectedMarkdown.selectedTemplateKey}</code> for <code>${selectedMarkdownFile}</code>.`
+              : html`Using custom markdown for <code>${selectedMarkdownFile}</code>.`}
+          </div>
+          <textarea rows=${Math.max(8, this.getMarkdownEditorRows(selectedMarkdownFile))} .value=${markdownValue} readonly placeholder="No effective markdown content for this file yet."></textarea>
         </div>
       </div>
     `;
@@ -4736,6 +4918,9 @@ export class ToolkitDashboard extends LitElement {
     if (this.topologyHoverEdgeKey && this.topologyHoverEdgeKey.startsWith(`${agentId}->`)) {
       this.topologyHoverEdgeKey = null;
     }
+    if (this.topologySelectedAgentId === agentId) {
+      this.topologySelectedAgentId = null;
+    }
   }
 
   getAllowedAgentChoices(currentAgentId?: string) {
@@ -4777,6 +4962,23 @@ export class ToolkitDashboard extends LitElement {
   getTopologyAgentEntryByKey(agentKey: string | null | undefined) {
     if (!agentKey) return null;
     return this.getTopologyAgentEntries().find((entry: any) => entry.key === agentKey) || null;
+  }
+
+  getTopologySelectedAgentEntry() {
+    return this.getTopologyAgentEntryById(this.topologySelectedAgentId)
+      || this.getTopologyAgentEntries()[0]
+      || null;
+  }
+
+  getEffectiveAgentBootstrapMarkdown(agent: any, fileName: string) {
+    const selectedTemplateKey = this.getMarkdownTemplateSelection(agent, fileName, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
+    const agentTemplateFiles = this.ensureAgentTemplateFiles(agent);
+    return {
+      selectedTemplateKey,
+      effectiveValue: selectedTemplateKey
+        ? this.getMarkdownTemplateContent('agents', fileName, selectedTemplateKey)
+        : (agentTemplateFiles[fileName] || '')
+    };
   }
 
   getAgentDelegationTargets(agent: any) {
@@ -4903,6 +5105,27 @@ export class ToolkitDashboard extends LitElement {
     this.topologyNotice = '';
   }
 
+  selectTopologyAgent(agentId: string) {
+    this.topologySelectedAgentId = agentId;
+  }
+
+  setTopologyAgentDelegationEnabled(agentId: string, enabled: boolean) {
+    const entry = this.getTopologyAgentEntryById(agentId);
+    if (!entry) {
+      return;
+    }
+    const subagents = this.ensureSubagentsConfig(entry.agent);
+    subagents.enabled = enabled;
+    if (!enabled && this.topologyLinkSourceAgentId === agentId) {
+      this.topologyLinkSourceAgentId = null;
+    }
+    this.topologySelectedAgentId = agentId;
+    this.setTopologyNotice(enabled
+      ? `${entry.name} can delegate again using its configured allowed agents.`
+      : `${entry.name} delegation is now turned off. Existing delegate targets were kept.`);
+    this.requestUpdate();
+  }
+
   selectTopologyDelegationSource(agentId: string) {
     if (this.topologyLinkSourceAgentId === agentId) {
       this.topologyLinkSourceAgentId = null;
@@ -4951,6 +5174,7 @@ export class ToolkitDashboard extends LitElement {
   }
 
   handleTopologyAgentClick(agentId: string) {
+    this.topologySelectedAgentId = agentId;
     if (!this.topologyLinkSourceAgentId) {
       return;
     }
@@ -5005,6 +5229,10 @@ export class ToolkitDashboard extends LitElement {
   }
 
   openTopologyAgentEditor(agentKey: string) {
+    const entry = this.getTopologyAgentEntryByKey(agentKey);
+    if (entry) {
+      this.topologySelectedAgentId = entry.id;
+    }
     this.startEditingAgent(agentKey);
     this.activeTab = 'config';
     this.configSection = 'agents';
@@ -5507,11 +5735,19 @@ export class ToolkitDashboard extends LitElement {
                 </div>
               </div>
 
-              <div class="help-text" style="margin-top: 0; margin-bottom: 14px;">${this.getToolsetPreviewText(toolset)}</div>
-
               <div class="grid-2">
                 <div class="form-group">
                   <label>Allowed Tools</label>
+                  <select @change=${(e: any) => {
+                    const value = e.target.value;
+                    if (value) {
+                      this.addToolToToolset(toolset, 'allow', value);
+                      e.target.value = '';
+                    }
+                  }}>
+                    <option value="">+ Add allowed tool</option>
+                    ${availableAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
+                  </select>
                   <div class="tag-list">
                     ${this.normalizeToolNameList(toolset.allow).map((toolId: string) => html`
                       <div class="tag">
@@ -5520,22 +5756,20 @@ export class ToolkitDashboard extends LitElement {
                       </div>
                     `)}
                   </div>
-                  <div style="margin-top: 10px;">
-                    <select @change=${(e: any) => {
-                      const value = e.target.value;
-                      if (value) {
-                        this.addToolToToolset(toolset, 'allow', value);
-                        e.target.value = '';
-                      }
-                    }}>
-                      <option value="">+ Add allowed tool</option>
-                      ${availableAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
-                    </select>
-                  </div>
                 </div>
 
                 <div class="form-group">
                   <label>Denied Tools</label>
+                  <select @change=${(e: any) => {
+                    const value = e.target.value;
+                    if (value) {
+                      this.addToolToToolset(toolset, 'deny', value);
+                      e.target.value = '';
+                    }
+                  }}>
+                    <option value="">+ Add denied tool</option>
+                    ${availableDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
+                  </select>
                   <div class="tag-list">
                     ${this.normalizeToolNameList(toolset.deny).map((toolId: string) => html`
                       <div class="tag">
@@ -5543,18 +5777,6 @@ export class ToolkitDashboard extends LitElement {
                         <span class="tag-remove" @click=${() => this.removeToolFromToolset(toolset, 'deny', toolId)}>×</span>
                       </div>
                     `)}
-                  </div>
-                  <div style="margin-top: 10px;">
-                    <select @change=${(e: any) => {
-                      const value = e.target.value;
-                      if (value) {
-                        this.addToolToToolset(toolset, 'deny', value);
-                        e.target.value = '';
-                      }
-                    }}>
-                      <option value="">+ Add denied tool</option>
-                      ${availableDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
-                    </select>
                   </div>
                 </div>
               </div>
