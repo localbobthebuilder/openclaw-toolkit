@@ -124,6 +124,9 @@ export class ToolkitDashboard extends LitElement {
   @state() private topologyDraggedAgentKey: string | null = null;
   @state() private topologyHoverEndpointKey: string | null = null;
   @state() private topologyNotice: string = '';
+  @state() private topologyBoardWidth: number = 0;
+  @state() private topologyBoardHeight: number = 0;
+  @state() private topologyEdges: any[] = [];
   @state() private showModelSelector: boolean = false;
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   private ws: WebSocket | null = null;
@@ -132,6 +135,7 @@ export class ToolkitDashboard extends LitElement {
   private reconnectTimer: number | null = null;
   private pendingSocketAction: string | null = null;
   private pendingSocketRetryTimer: number | null = null;
+  private topologyMeasureFrame: number | null = null;
 
   // Helper for API URL construction
   private getBaseUrl() {
@@ -236,10 +240,11 @@ export class ToolkitDashboard extends LitElement {
     .topology-legend-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #333; border-radius: 999px; background: #181818; }
     .topology-notice { padding: 12px 14px; border-radius: 8px; border: 1px solid #3a3a3a; background: #151515; color: #ddd; }
     .topology-notice strong { color: #fff; }
-    .topology-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; }
-    .topology-board { position: relative; min-height: 480px; }
-    .topology-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-    .topology-slot { position: absolute; top: 0; border: 1px solid #333; border-radius: 16px; background: linear-gradient(180deg, #191919 0%, #111 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+    .topology-scroll { overflow: auto; padding-bottom: 8px; }
+    .topology-board { position: relative; display: inline-block; min-width: 100%; min-height: 480px; }
+    .topology-columns { position: relative; z-index: 0; display: flex; align-items: stretch; gap: 28px; width: max-content; min-width: 100%; }
+    .topology-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; z-index: 1; }
+    .topology-slot { position: relative; top: auto; border: 1px solid #333; border-radius: 16px; background: linear-gradient(180deg, #191919 0%, #111 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); flex: 0 0 auto; min-height: 100%; }
     .topology-slot.drop-target { border-color: #00bcd4; box-shadow: 0 0 0 2px rgba(0, 188, 212, 0.2); }
     .topology-slot-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid #2e2e2e; }
     .topology-slot-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -248,17 +253,17 @@ export class ToolkitDashboard extends LitElement {
     .topology-slot-heading strong { color: #fff; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .topology-slot-heading span { color: #777; font-size: 0.76rem; }
     .topology-slot-badge { color: #00bcd4; font-size: 0.74rem; border: 1px solid #24434a; border-radius: 999px; padding: 4px 8px; background: rgba(0,188,212,0.08); }
-    .topology-slot-body { position: relative; }
-    .topology-slot-empty { position: absolute; left: 16px; right: 16px; top: 82px; padding: 14px; border: 1px dashed #333; border-radius: 12px; color: #777; font-size: 0.82rem; text-align: center; background: rgba(255,255,255,0.01); }
-    .topology-agent { position: absolute; left: 16px; right: 16px; border: 1px solid #353535; border-radius: 14px; background: #202020; padding: 12px 12px 10px; cursor: pointer; user-select: none; box-shadow: 0 8px 18px rgba(0,0,0,0.2); }
+    .topology-slot-body { position: relative; display: grid; align-content: start; gap: 16px; padding: 16px; }
+    .topology-slot-empty { position: static; min-height: 150px; display: flex; align-items: center; justify-content: center; padding: 14px; border: 1px dashed #333; border-radius: 12px; color: #777; font-size: 0.82rem; text-align: center; background: rgba(255,255,255,0.01); }
+    .topology-agent { position: relative; left: auto; right: auto; top: auto; min-height: 170px; border: 1px solid #353535; border-radius: 14px; background: #202020; padding: 12px 12px 10px; cursor: pointer; user-select: none; box-shadow: 0 8px 18px rgba(0,0,0,0.2); display: flex; flex-direction: column; z-index: 2; min-width: 0; }
     .topology-agent:hover { border-color: #4a4a4a; }
     .topology-agent.dragging { opacity: 0.55; border-style: dashed; }
     .topology-agent.disabled { opacity: 0.6; }
     .topology-agent.main-agent { border-color: #d4a514; box-shadow: 0 0 0 1px rgba(212,165,20,0.2), 0 8px 18px rgba(0,0,0,0.2); }
     .topology-agent.link-source { border-color: #00bcd4; box-shadow: 0 0 0 2px rgba(0,188,212,0.2), 0 8px 18px rgba(0,0,0,0.2); }
-    .topology-agent-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .topology-agent-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .topology-agent-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .topology-agent-title strong { color: #fff; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topology-agent-title strong { color: #fff; font-size: 0.92rem; white-space: normal; overflow: visible; text-overflow: unset; overflow-wrap: anywhere; }
     .topology-agent-avatar { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #2c2c2c; font-size: 0.95rem; flex-shrink: 0; }
     .topology-agent-main { color: #ffc107; font-size: 1rem; }
     .topology-agent-badges { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -269,9 +274,9 @@ export class ToolkitDashboard extends LitElement {
     .topology-pill.private { border-color: #234f6d; color: #90caf9; }
     .topology-pill.local { border-color: #4b5b24; color: #c5e1a5; }
     .topology-pill.hosted { border-color: #6b4d2c; color: #ffcc80; }
-    .topology-agent-meta { color: #8f8f8f; font-size: 0.74rem; line-height: 1.45; min-height: 32px; }
-    .topology-agent-actions { display: flex; gap: 8px; margin-top: 10px; }
-    .topology-agent-actions .btn { flex: 1; padding: 7px 10px; font-size: 0.75rem; }
+    .topology-agent-meta { color: #8f8f8f; font-size: 0.74rem; line-height: 1.45; min-height: 32px; overflow-wrap: anywhere; }
+    .topology-agent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 10px; }
+    .topology-agent-actions .btn { flex: 1 1 120px; padding: 7px 10px; font-size: 0.75rem; min-width: 0; }
     .topology-card-link-hint { margin-top: 8px; color: #00bcd4; font-size: 0.72rem; }
     .topology-help { color: #888; font-size: 0.82rem; line-height: 1.55; }
     .topology-help strong { color: #ddd; }
@@ -301,6 +306,135 @@ export class ToolkitDashboard extends LitElement {
         this.connectWS();
     } else {
         console.error('Server failed to initialize after multiple attempts');
+    }
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener('resize', this.handleTopologyResize);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener('resize', this.handleTopologyResize);
+    if (this.topologyMeasureFrame !== null) {
+      window.cancelAnimationFrame(this.topologyMeasureFrame);
+      this.topologyMeasureFrame = null;
+    }
+  }
+
+  updated() {
+    if (this.activeTab === 'topology') {
+      this.scheduleTopologyMeasure();
+    }
+  }
+
+  private handleTopologyResize = () => {
+    if (this.activeTab === 'topology') {
+      this.scheduleTopologyMeasure();
+    }
+  };
+
+  private scheduleTopologyMeasure() {
+    if (this.topologyMeasureFrame !== null) {
+      return;
+    }
+    this.topologyMeasureFrame = window.requestAnimationFrame(() => {
+      this.topologyMeasureFrame = null;
+      this.measureTopologyLayout();
+    });
+  }
+
+  private measureTopologyLayout() {
+    if (this.activeTab !== 'topology') {
+      return;
+    }
+    const board = this.shadowRoot?.querySelector('.topology-board') as HTMLElement | null;
+    if (!board) {
+      return;
+    }
+
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.ceil(Math.max(board.scrollWidth, boardRect.width));
+    const height = Math.ceil(Math.max(board.scrollHeight, boardRect.height));
+    const agentElements = new Map<string, HTMLElement>();
+    for (const element of Array.from(board.querySelectorAll<HTMLElement>('[data-topology-agent-id]'))) {
+      const agentId = element.dataset.topologyAgentId;
+      if (agentId) {
+        agentElements.set(agentId, element);
+      }
+    }
+
+    const nextEdges: any[] = [];
+    for (const sourceEntry of this.getTopologyAgentEntries()) {
+      const sourceElement = agentElements.get(sourceEntry.id);
+      if (!sourceElement) continue;
+      const sourceRect = sourceElement.getBoundingClientRect();
+      const sourceCenterX = sourceRect.left - boardRect.left + (sourceRect.width / 2);
+      const sourceCenterY = sourceRect.top - boardRect.top + (sourceRect.height / 2);
+      for (const targetId of this.getAgentDelegationTargets(sourceEntry.agent)) {
+        const targetElement = agentElements.get(targetId);
+        const targetEntry = this.getTopologyAgentEntryById(targetId);
+        if (!targetElement || !targetEntry) {
+          continue;
+        }
+        const targetRect = targetElement.getBoundingClientRect();
+        const targetCenterX = targetRect.left - boardRect.left + (targetRect.width / 2);
+        const targetCenterY = targetRect.top - boardRect.top + (targetRect.height / 2);
+        const deltaX = targetCenterX - sourceCenterX;
+        const deltaY = targetCenterY - sourceCenterY;
+
+        let path = '';
+        if (Math.abs(deltaX) < 64) {
+          const direction = deltaY >= 0 ? 1 : -1;
+          const fromX = sourceCenterX;
+          const fromY = direction > 0
+            ? (sourceRect.bottom - boardRect.top)
+            : (sourceRect.top - boardRect.top);
+          const toX = targetCenterX;
+          const toY = direction > 0
+            ? (targetRect.top - boardRect.top)
+            : (targetRect.bottom - boardRect.top);
+          const curveY = Math.max(42, Math.abs(deltaY) * 0.35);
+          path = `M ${fromX} ${fromY} C ${fromX} ${fromY + (direction * curveY)}, ${toX} ${toY - (direction * curveY)}, ${toX} ${toY}`;
+        } else {
+          const direction = deltaX >= 0 ? 1 : -1;
+          const fromX = direction > 0
+            ? (sourceRect.right - boardRect.left)
+            : (sourceRect.left - boardRect.left);
+          const fromY = sourceCenterY;
+          const toX = direction > 0
+            ? (targetRect.left - boardRect.left)
+            : (targetRect.right - boardRect.left);
+          const toY = targetCenterY;
+          const curveX = Math.max(56, Math.abs(deltaX) * 0.35);
+          path = `M ${fromX} ${fromY} C ${fromX + (direction * curveX)} ${fromY}, ${toX - (direction * curveX)} ${toY}, ${toX} ${toY}`;
+        }
+
+        nextEdges.push({
+          key: `${sourceEntry.id}->${targetId}`,
+          path,
+          active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
+          main: sourceEntry.isMain
+        });
+      }
+    }
+
+    const nextSignature = JSON.stringify({
+      width,
+      height,
+      edges: nextEdges.map((edge: any) => ({ key: edge.key, path: edge.path, active: edge.active, main: edge.main }))
+    });
+    const currentSignature = JSON.stringify({
+      width: this.topologyBoardWidth,
+      height: this.topologyBoardHeight,
+      edges: this.topologyEdges.map((edge: any) => ({ key: edge.key, path: edge.path, active: edge.active, main: edge.main }))
+    });
+
+    if (nextSignature !== currentSignature) {
+      this.topologyBoardWidth = width;
+      this.topologyBoardHeight = height;
+      this.topologyEdges = nextEdges;
     }
   }
 
@@ -3196,59 +3330,22 @@ export class ToolkitDashboard extends LitElement {
   renderTopology() {
     if (!this.config) return html`<p>Loading topology...</p>`;
 
-    const slots = this.getTopologySlots();
-    const slotWidth = 308;
+    const slots = this.getTopologySlots().map((slot: any) => {
+      const columnCount = slot.agents.length >= 4 ? 2 : 1;
+      const cardMinWidth = 304;
+      const innerGap = 16;
+      const innerPadding = 32;
+      const slotWidth = innerPadding + (columnCount * cardMinWidth) + ((columnCount - 1) * innerGap);
+      return {
+        ...slot,
+        columnCount,
+        slotWidth
+      };
+    });
     const slotGap = 28;
-    const slotHeaderHeight = 74;
-    const slotTopPadding = 22;
-    const agentHeight = 136;
-    const agentGap = 18;
-    const agentStep = agentHeight + agentGap;
-    const agentStartTop = slotHeaderHeight + slotTopPadding;
-    const maxRows = Math.max(1, ...slots.map((slot: any) => slot.agents.length));
-    const boardWidth = Math.max(1, slots.length) * slotWidth + Math.max(0, slots.length - 1) * slotGap;
-    const boardHeight = agentStartTop + maxRows * agentStep + 24;
-
-    const getAgentPosition = (agentId: string) => {
-      for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
-        const slot = slots[slotIndex];
-        const rowIndex = slot.agents.findIndex((entry: any) => entry.id === agentId);
-        if (rowIndex >= 0) {
-          const left = slotIndex * (slotWidth + slotGap) + 16;
-          const top = agentStartTop + rowIndex * agentStep;
-          return {
-            x: left + ((slotWidth - 32) / 2),
-            y: top + (agentHeight / 2)
-          };
-        }
-      }
-      return null;
-    };
-
-    const edges: any[] = [];
-    for (const sourceEntry of this.getTopologyAgentEntries()) {
-      for (const targetId of this.getAgentDelegationTargets(sourceEntry.agent)) {
-        const targetEntry = this.getTopologyAgentEntryById(targetId);
-        if (!targetEntry) {
-          continue;
-        }
-        const from = getAgentPosition(sourceEntry.id);
-        const to = getAgentPosition(targetId);
-        if (!from || !to) {
-          continue;
-        }
-        const deltaX = to.x - from.x;
-        const curve = deltaX === 0 ? 90 : Math.max(60, Math.abs(deltaX) * 0.35);
-        const c1x = from.x + (deltaX >= 0 ? curve : -curve);
-        const c2x = to.x - (deltaX >= 0 ? curve : -curve);
-        edges.push({
-          key: `${sourceEntry.id}->${targetId}`,
-          path: `M ${from.x} ${from.y} C ${c1x} ${from.y}, ${c2x} ${to.y}, ${to.x} ${to.y}`,
-          active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
-          main: sourceEntry.isMain
-        });
-      }
-    }
+    const estimatedBoardWidth = slots.reduce((total: number, slot: any, index: number) => total + slot.slotWidth + (index > 0 ? slotGap : 0), 0);
+    const boardWidth = this.topologyBoardWidth || estimatedBoardWidth || 1200;
+    const boardHeight = this.topologyBoardHeight || 560;
 
     return html`
       <header>
@@ -3288,32 +3385,14 @@ export class ToolkitDashboard extends LitElement {
 
         <div class="card">
           <div class="topology-scroll">
-            <div class="topology-board" style="width: ${boardWidth}px; height: ${boardHeight}px;">
-              <svg class="topology-links" width=${boardWidth} height=${boardHeight} viewBox=${`0 0 ${boardWidth} ${boardHeight}`} preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <marker id="topologyArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ec6ff"></path>
-                  </marker>
-                </defs>
-                ${edges.map((edge: any) => html`
-                  <path
-                    d=${edge.path}
-                    fill="none"
-                    stroke=${edge.active ? '#00bcd4' : edge.main ? '#ffd54f' : '#6ec6ff'}
-                    stroke-width=${edge.active ? '3' : '2'}
-                    stroke-dasharray="6 7"
-                    marker-end="url(#topologyArrow)"
-                    opacity=${edge.active ? '0.95' : '0.75'}></path>
-                `)}
-              </svg>
-
-              ${slots.map((slot: any, slotIndex: number) => {
-                const left = slotIndex * (slotWidth + slotGap);
+            <div class="topology-board" style="min-width: ${Math.max(estimatedBoardWidth, 960)}px; min-height: ${boardHeight}px;">
+              <div class="topology-columns">
+              ${slots.map((slot: any) => {
                 const isDropTarget = this.topologyHoverEndpointKey === slot.key;
                 return html`
                   <section
                     class="topology-slot ${isDropTarget ? 'drop-target' : ''}"
-                    style="left: ${left}px; width: ${slotWidth}px; height: ${boardHeight}px;"
+                    style="width: ${slot.slotWidth}px;"
                     @dragover=${(event: DragEvent) => {
                       event.preventDefault();
                       this.topologyHoverEndpointKey = slot.key;
@@ -3337,21 +3416,20 @@ export class ToolkitDashboard extends LitElement {
                       </div>
                       <span class="topology-slot-badge">${slot.agents.length} agent${slot.agents.length === 1 ? '' : 's'}</span>
                     </div>
-                    <div class="topology-slot-body" style="height: ${boardHeight - slotHeaderHeight}px;">
+                    <div class="topology-slot-body" style=${`grid-template-columns: repeat(${slot.columnCount}, minmax(0, 1fr));`}>
                       ${slot.agents.length === 0 ? html`
                         <div class="topology-slot-empty">
                           ${slot.endpointKey ? 'Drop an agent here to assign this endpoint.' : 'Agents without a resolved endpoint appear here.'}
                         </div>
                       ` : ''}
-                      ${slot.agents.map((entry: any, rowIndex: number) => {
-                        const top = agentStartTop + rowIndex * agentStep;
+                      ${slot.agents.map((entry: any) => {
                         const delegateCount = this.getAgentDelegationTargets(entry.agent).length;
                         const isLinkSource = this.topologyLinkSourceAgentId === entry.id;
                         const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
                         return html`
                           <div
                             class="topology-agent ${entry.enabled ? '' : 'disabled'} ${entry.isMain ? 'main-agent' : ''} ${isLinkSource ? 'link-source' : ''} ${this.topologyDraggedAgentKey === entry.key ? 'dragging' : ''}"
-                            style="top: ${top}px; height: ${agentHeight}px;"
+                            data-topology-agent-id=${entry.id}
                             draggable="true"
                             @dragstart=${(event: DragEvent) => {
                               this.startTopologyDrag(entry.key);
@@ -3416,6 +3494,26 @@ export class ToolkitDashboard extends LitElement {
                   </section>
                 `;
               })}
+              </div>
+              <svg class="topology-links" width=${boardWidth} height=${boardHeight} viewBox=${`0 0 ${boardWidth} ${boardHeight}`} preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <marker id="topologyArrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto" markerUnits="strokeWidth">
+                    <path d="M 0 0 L 12 6 L 0 12 z" fill="#6ec6ff"></path>
+                  </marker>
+                </defs>
+                ${this.topologyEdges.map((edge: any) => html`
+                  <path
+                    d=${edge.path}
+                    fill="none"
+                    stroke=${edge.active ? '#00bcd4' : edge.main ? '#ffd54f' : '#6ec6ff'}
+                    stroke-width=${edge.active ? '3' : '2'}
+                    stroke-dasharray="6 7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    marker-end="url(#topologyArrow)"
+                    opacity=${edge.active ? '0.95' : '0.82'}></path>
+                `)}
+              </svg>
             </div>
           </div>
         </div>

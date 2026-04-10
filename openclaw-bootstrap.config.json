@@ -419,7 +419,7 @@
         "chat-local",
         "review-local",
         "coder-local",
-        "notes-helper"
+        "research"
       ],
       "hostedModels": [
         {
@@ -643,9 +643,8 @@
         "gpuTotalMiB": 8192
       },
       "agents": [
-        "review-remote",
         "coder-remote",
-        "research"
+        "review-remote"
       ],
       "hostedModels": [
         {
@@ -795,7 +794,7 @@
         "default": true,
         "sandboxMode": "off",
         "subagents": {
-          "enabled": false,
+          "enabled": true,
           "requireAgentId": true,
           "allowAgents": [
             "research",
