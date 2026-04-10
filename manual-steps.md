@@ -658,8 +658,8 @@ Agent config note:
   reusable AGENTS template is written into managed `AGENTS.md`
 - AGENTS template keys are reusable, so multiple agents can intentionally share
   one template
-- use ordered `toolsetKeys` to stack reusable toolsets such as `research`,
-  `review`, or `codingDelegate`
+- use ordered `toolsetKeys` to stack reusable toolsets that you define in
+  `toolsets.list`, such as `research`, `review`, or `codingDelegate`
 - use `toolOverrides.allow` / `toolOverrides.deny` when you only need a small
   per-agent tweak after the toolsets merge
 
@@ -721,8 +721,8 @@ Shared workspace note:
 - `sharedWorkspaceIds` adds config-managed instructions telling that private
   agent where the shared project workspace lives and to use exact
   absolute paths there when joining collaborative work.
-- The managed toolkit layout still includes the built-in role slots, but it now
-  also supports arbitrary managed extras through `agents.list`.
+- The managed toolkit layout still includes the sample role agents, and it also
+  supports arbitrary managed extras through `agents.list`.
 
 Example extra agent:
 
@@ -768,8 +768,8 @@ Notes for extra agents in `agents.list`:
 - private extra agents can still collaborate through `sharedWorkspaceIds`
 - `markdownTemplateKeys.AGENTS.md` controls which managed `AGENTS.md` template
   is written
-- `toolsetKeys` can stack reusable toolsets such as `research`, `review`, or
-  `codingDelegate`
+- `toolsetKeys` can stack reusable toolsets defined in `toolsets.list`, such as
+  `research`, `review`, or `codingDelegate`
 - or you can provide an explicit `tools` object directly on the agent
 - removing an entry from `agents.list` now removes that managed extra agent from
   live config and cleans up its managed marker / managed workspace prompt file
@@ -995,10 +995,10 @@ toolkit `toolsets` library into each managed agent's final `tools` block.
 
 Current managed defaults:
 
-- built-in global `minimal` is always applied first
+- global `minimal` is always applied first as a safe chat-only baseline (`message` only by default)
 - agent `toolsetKeys` are merged from top to bottom, so lower entries win
 - optional agent `toolOverrides.allow` / `toolOverrides.deny` are applied after the toolsets for one-off tweaks
-- `research` adds `web_search` and `web_fetch` while denying write/exec tools
+- `toolsets.list` is the source of truth for stronger roles such as `research`, `review`, and `codingDelegate`, and they must explicitly grant any non-chat tools they need
 - direct agent `tools` blocks still work and override the compiled preview
 
 That means a fresh machine does not need a pre-configured

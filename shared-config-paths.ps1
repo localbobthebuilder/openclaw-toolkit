@@ -751,100 +751,59 @@ function New-ToolkitToolsetRecord {
     }
 }
 
-function Get-ToolkitBuiltinToolsetDefinitions {
-    return @(
-        (New-ToolkitToolsetRecord -Key "minimal" -Name "Minimal" -Allow @(
-                "read",
-                "write",
-                "edit",
-                "apply_patch",
-                "exec",
-                "process",
-                "sessions_list",
-                "sessions_history",
-                "sessions_send",
-                "sessions_spawn",
-                "sessions_yield",
-                "subagents",
-                "session_status",
-                "memory_search",
-                "memory_get"
-            ) -Deny @(
-                "browser",
-                "canvas",
-                "nodes",
-                "cron",
-                "gateway"
-            )),
-        (New-ToolkitToolsetRecord -Key "research" -Name "Research" -Allow @(
-                "read",
-                "sessions_list",
-                "sessions_history",
-                "sessions_send",
-                "sessions_spawn",
-                "sessions_yield",
-                "subagents",
-                "session_status",
-                "memory_search",
-                "memory_get",
-                "web_search",
-                "web_fetch"
-            ) -Deny @(
-                "exec",
-                "process",
-                "write",
-                "edit",
-                "browser",
-                "canvas",
-                "nodes",
-                "cron",
-                "gateway"
-            )),
-        (New-ToolkitToolsetRecord -Key "review" -Name "Review" -Allow @(
-                "read",
-                "sessions_list",
-                "sessions_history",
-                "sessions_send",
-                "sessions_spawn",
-                "session_status"
-            ) -Deny @(
-                "exec",
-                "write",
-                "edit",
-                "browser",
-                "canvas",
-                "nodes",
-                "cron"
-            )),
-        (New-ToolkitToolsetRecord -Key "codingDelegate" -Name "Coding Delegate" -Allow @(
-                "read",
-                "write",
-                "edit",
-                "exec",
-                "sessions_list",
-                "sessions_history",
-                "sessions_send",
-                "sessions_spawn",
-                "session_status"
-            ) -Deny @(
-                "browser",
-                "canvas",
-                "nodes",
-                "cron"
-            ))
+function New-ToolkitDefaultMinimalToolsetRecord {
+    param(
+        [string[]]$Allow = @(),
+        [string[]]$Deny = @()
     )
-}
 
-function Get-ToolkitBuiltinToolsetDefinition {
-    param([Parameter(Mandatory = $true)][string]$Key)
-
-    foreach ($toolset in @(Get-ToolkitBuiltinToolsetDefinitions)) {
-        if ([string]$toolset.key -eq $Key) {
-            return $toolset
-        }
+    $resolvedAllow = if (@($Allow).Count -gt 0) {
+        @($Allow)
+    }
+    else {
+        @("message")
     }
 
-    return $null
+    $resolvedDeny = if (@($Deny).Count -gt 0) {
+        @($Deny)
+    }
+    else {
+        @(
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "code_execution",
+            "web_search",
+            "web_fetch",
+            "x_search",
+            "memory_search",
+            "memory_get",
+            "sessions_list",
+            "sessions_history",
+            "sessions_send",
+            "sessions_spawn",
+            "sessions_yield",
+            "subagents",
+            "session_status",
+            "browser",
+            "canvas",
+            "agents_list",
+            "update_plan",
+            "image",
+            "image_generate",
+            "music_generate",
+            "video_generate",
+            "tts",
+            "nodes",
+            "cron",
+            "gateway"
+        )
+    }
+
+    return (New-ToolkitToolsetRecord -Key "minimal" -Name "Minimal" -Allow $resolvedAllow -Deny $resolvedDeny)
 }
 
 function Normalize-ToolkitToolsetRecord {
@@ -948,45 +907,13 @@ function Ensure-ToolkitToolsetsConfig {
     }
 
     if (-not $knownToolsetKeys.Contains("minimal")) {
-        $minimalBuiltin = Get-ToolkitBuiltinToolsetDefinition -Key "minimal"
-        $minimalAllow = if (@($legacyGlobalAllow).Count -gt 0) { $legacyGlobalAllow } else { @($minimalBuiltin.allow) }
-        $minimalDeny = if (@($legacyGlobalDeny).Count -gt 0) { $legacyGlobalDeny } else { @($minimalBuiltin.deny) }
-        $normalizedToolsets.Insert(0, (New-ToolkitToolsetRecord -Key "minimal" -Name "Minimal" -Allow $minimalAllow -Deny $minimalDeny))
+        $normalizedToolsets.Insert(0, (New-ToolkitDefaultMinimalToolsetRecord -Allow $legacyGlobalAllow -Deny $legacyGlobalDeny))
         [void]$knownToolsetKeys.Add("minimal")
     }
 
     if ((@($legacyResearchAllow).Count -gt 0 -or @($legacyResearchDeny).Count -gt 0) -and -not $knownToolsetKeys.Contains("research")) {
         $normalizedToolsets.Add((New-ToolkitToolsetRecord -Key "research" -Name "Research" -Allow $legacyResearchAllow -Deny $legacyResearchDeny))
         [void]$knownToolsetKeys.Add("research")
-    }
-
-    $legacyToolProfileKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    if ($Config.PSObject.Properties.Name -contains "agents" -and
-        $null -ne $Config.agents -and
-        $Config.agents.PSObject.Properties.Name -contains "list" -and
-        $null -ne $Config.agents.list) {
-        foreach ($agent in @($Config.agents.list)) {
-            if ($null -eq $agent) {
-                continue
-            }
-            $legacyToolProfile = if ($agent.PSObject.Properties.Name -contains "toolProfile") { [string]$agent.toolProfile } else { "" }
-            $mappedKey = Get-ToolkitToolProfileMappedKey -ToolProfile $legacyToolProfile
-            if (-not [string]::IsNullOrWhiteSpace([string]$mappedKey)) {
-                [void]$legacyToolProfileKeys.Add($mappedKey)
-            }
-        }
-    }
-
-    foreach ($toolsetKey in @($legacyToolProfileKeys)) {
-        if ($knownToolsetKeys.Contains($toolsetKey)) {
-            continue
-        }
-        $builtinToolset = Get-ToolkitBuiltinToolsetDefinition -Key $toolsetKey
-        if ($null -eq $builtinToolset) {
-            continue
-        }
-        $normalizedToolsets.Add((New-ToolkitToolsetRecord -Key ([string]$builtinToolset.key) -Name ([string]$builtinToolset.name) -Allow @($builtinToolset.allow) -Deny @($builtinToolset.deny)))
-        [void]$knownToolsetKeys.Add($toolsetKey)
     }
 
     $Config.toolsets.list = @($normalizedToolsets.ToArray())
@@ -1013,7 +940,9 @@ function Ensure-ToolkitToolsetsConfig {
 
             if ($toolsetKeys.Count -eq 0 -and $agent.PSObject.Properties.Name -contains "toolProfile") {
                 $mappedKey = Get-ToolkitToolProfileMappedKey -ToolProfile ([string]$agent.toolProfile)
-                if (-not [string]::IsNullOrWhiteSpace([string]$mappedKey) -and $mappedKey -ne "minimal") {
+                if (-not [string]::IsNullOrWhiteSpace([string]$mappedKey) -and
+                    $mappedKey -ne "minimal" -and
+                    $knownToolsetKeys.Contains($mappedKey)) {
                     $toolsetKeys.Add($mappedKey)
                 }
             }

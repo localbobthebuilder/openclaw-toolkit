@@ -24,13 +24,6 @@ type AvailableToolOption = {
   note?: string;
 };
 
-type BuiltinToolsetDefinition = {
-  key: string;
-  name: string;
-  allow: string[];
-  deny: string[];
-};
-
 const AVAILABLE_TOOL_OPTIONS: AvailableToolOption[] = [
   { id: 'read', description: 'Read files and directories' },
   { id: 'write', description: 'Write files' },
@@ -66,32 +59,10 @@ const AVAILABLE_TOOL_OPTIONS: AvailableToolOption[] = [
   { id: 'tts', description: 'Text to speech' }
 ];
 
-const BUILTIN_TOOLSET_LIBRARY: BuiltinToolsetDefinition[] = [
-  {
-    key: 'minimal',
-    name: 'Minimal',
-    allow: ['read', 'write', 'edit', 'apply_patch', 'exec', 'process', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'sessions_yield', 'subagents', 'session_status', 'memory_search', 'memory_get'],
-    deny: ['browser', 'canvas', 'nodes', 'cron', 'gateway']
-  },
-  {
-    key: 'research',
-    name: 'Research',
-    allow: ['read', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'sessions_yield', 'subagents', 'session_status', 'memory_search', 'memory_get', 'web_search', 'web_fetch'],
-    deny: ['exec', 'process', 'write', 'edit', 'browser', 'canvas', 'nodes', 'cron', 'gateway']
-  },
-  {
-    key: 'review',
-    name: 'Review',
-    allow: ['read', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'session_status'],
-    deny: ['exec', 'write', 'edit', 'browser', 'canvas', 'nodes', 'cron']
-  },
-  {
-    key: 'codingDelegate',
-    name: 'Coding Delegate',
-    allow: ['read', 'write', 'edit', 'exec', 'sessions_list', 'sessions_history', 'sessions_send', 'sessions_spawn', 'session_status'],
-    deny: ['browser', 'canvas', 'nodes', 'cron']
-  }
-];
+const MINIMAL_CHAT_ONLY_ALLOW = ['message'];
+const MINIMAL_CHAT_ONLY_DENY = AVAILABLE_TOOL_OPTIONS
+  .map((tool) => tool.id)
+  .filter((toolId) => !MINIMAL_CHAT_ONLY_ALLOW.includes(toolId));
 
 @customElement('toolkit-dashboard')
 export class ToolkitDashboard extends LitElement {
@@ -2044,8 +2015,13 @@ export class ToolkitDashboard extends LitElement {
     }
   }
 
-  getBuiltinToolsetDefinition(key: string) {
-    return BUILTIN_TOOLSET_LIBRARY.find((toolset) => toolset.key === key) || null;
+  createDefaultMinimalToolsetRecord(overrides?: { allow?: any; deny?: any }) {
+    return this.createToolsetRecord({
+      key: 'minimal',
+      name: 'Minimal',
+      allow: Array.isArray(overrides?.allow) && overrides!.allow.length > 0 ? overrides!.allow : MINIMAL_CHAT_ONLY_ALLOW,
+      deny: Array.isArray(overrides?.deny) && overrides!.deny.length > 0 ? overrides!.deny : MINIMAL_CHAT_ONLY_DENY
+    });
   }
 
   createToolsetRecord(toolset: any) {
@@ -2058,15 +2034,20 @@ export class ToolkitDashboard extends LitElement {
     };
   }
 
-  ensureAgentToolsetKeys(agent: any) {
+  ensureAgentToolsetKeys(agent: any, config: any = this.config) {
     if (!agent || typeof agent !== 'object') {
       return [];
     }
 
+    const availableToolsetKeys = new Set(
+      Array.isArray(config?.toolsets?.list)
+        ? config.toolsets.list.map((toolset: any) => this.normalizeToolsetKey(toolset?.key)).filter((key: string) => key.length > 0)
+        : []
+    );
     const toolsetKeys = this.normalizeToolNameList(agent.toolsetKeys).filter((key) => key !== 'minimal');
     if (toolsetKeys.length === 0) {
       const mappedKey = this.mapLegacyToolProfileKey(agent.toolProfile);
-      if (mappedKey) {
+      if (mappedKey && availableToolsetKeys.has(mappedKey)) {
         toolsetKeys.push(mappedKey);
       }
     }
@@ -2143,12 +2124,9 @@ export class ToolkitDashboard extends LitElement {
     const legacyGlobalAllow = this.normalizeToolNameList(config?.toolPolicy?.globalAlsoAllow ?? config?.toolPolicy?.globalAllow);
     const legacyGlobalDeny = this.normalizeToolNameList(config?.toolPolicy?.globalDeny);
     if (!seenKeys.has('minimal')) {
-      const builtin = this.getBuiltinToolsetDefinition('minimal');
-      normalizedToolsets.unshift(this.createToolsetRecord({
-        key: 'minimal',
-        name: 'Minimal',
-        allow: legacyGlobalAllow.length > 0 ? legacyGlobalAllow : builtin?.allow,
-        deny: legacyGlobalDeny.length > 0 ? legacyGlobalDeny : builtin?.deny
+      normalizedToolsets.unshift(this.createDefaultMinimalToolsetRecord({
+        allow: legacyGlobalAllow,
+        deny: legacyGlobalDeny
       }));
       seenKeys.add('minimal');
     }
@@ -2163,21 +2141,6 @@ export class ToolkitDashboard extends LitElement {
         deny: legacyResearchDeny
       }));
       seenKeys.add('research');
-    }
-
-    if (Array.isArray(config?.agents?.list)) {
-      for (const agent of config.agents.list) {
-        const mappedKey = this.mapLegacyToolProfileKey(agent?.toolProfile);
-        if (!mappedKey || seenKeys.has(mappedKey)) {
-          continue;
-        }
-        const builtin = this.getBuiltinToolsetDefinition(mappedKey);
-        if (!builtin) {
-          continue;
-        }
-        normalizedToolsets.push(this.createToolsetRecord(builtin));
-        seenKeys.add(mappedKey);
-      }
     }
 
     config.toolsets.list = normalizedToolsets;
@@ -3016,11 +2979,12 @@ export class ToolkitDashboard extends LitElement {
 
   startNewAgentDraft() {
     const draftKey = `draft:agent:${Date.now()}`;
+    const defaultToolsetKey = this.getToolsetByKey('codingDelegate') ? 'codingDelegate' : '';
     const newAgent = {
       enabled: true,
       id: 'new-agent-' + Date.now(),
       name: 'New Agent',
-      toolsetKeys: ['codingDelegate'],
+      toolsetKeys: defaultToolsetKey ? [defaultToolsetKey] : [],
       markdownTemplateKeys: this.getMarkdownTemplateContent('agents', 'AGENTS.md', 'codingDelegate') ? { 'AGENTS.md': 'codingDelegate' } : {},
       sandboxMode: 'off',
       modelRef: 'ollama/qwen2.5-coder:3b',
@@ -3907,7 +3871,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="card-header" style="padding: 0 0 10px; margin-bottom: 0; border-bottom: none;">
             <h3 style="font-size: 1rem;">Combined Toolset</h3>
           </div>
-          <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">This is the effective toolkit toolset stack for the selected agent, including the always-on global <code>minimal</code> layer.</div>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">This is the effective toolkit toolset stack for the selected agent, including the always-on global <code>minimal</code> chat-only baseline.</div>
           <details class="topology-expander">
             <summary>Applied toolset layers (${appliedToolsets.length})</summary>
             <div class="topology-expander-body">
@@ -5703,7 +5667,7 @@ export class ToolkitDashboard extends LitElement {
             this.requestUpdate();
           }}>+ Add Toolset</button>
         </div>
-        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Toolsets are reusable allow/deny layers. The built-in <code>minimal</code> toolset is always applied first, then each agent's own toolsets are merged from top to bottom so lower entries win conflicts.</p>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Toolsets are reusable allow/deny layers. The built-in <code>minimal</code> toolset is always applied first as a safe chat-only baseline, then each agent's own toolsets are merged from top to bottom so lower entries win conflicts.</p>
 
         ${toolsets.map((toolset: any) => {
           const isMinimal = toolset.key === 'minimal';
@@ -5731,7 +5695,7 @@ export class ToolkitDashboard extends LitElement {
                     ?disabled=${isMinimal}
                     @change=${(e: any) => this.renameToolsetKey(toolset, e.target.value)}
                   >
-                  ${isMinimal ? html`<div class="help-text">The global minimal toolset key is locked.</div>` : html`<div class="help-text">Agents reference this key. Renaming updates existing agent assignments.</div>`}
+                  ${isMinimal ? html`<div class="help-text">The global minimal toolset key is locked. It is the safe chat-only baseline applied to every managed agent.</div>` : html`<div class="help-text">Agents reference this key. Renaming updates existing agent assignments.</div>`}
                 </div>
               </div>
 

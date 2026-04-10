@@ -15,8 +15,9 @@ Config note:
 - The same config also owns the managed global tool-policy baseline.
 - Current managed defaults: `safeguard` compaction with
   `reserveTokensFloor=4000` + `cache-ttl` pruning.
-- Current managed tool baseline: `minimal` profile + explicit allow/deny lists,
-  with extra web tools only on the `research` agent.
+- Current managed tool baseline: a chat-only `minimal` profile (`message`
+  only) plus explicit per-agent toolsets from `toolsets.list` for anything
+  stronger.
 - Toolkit-managed upstream source patches are reapplied during `bootstrap` and
   `update`, so the OpenClaw repo can stay upstream-clean between releases.
 

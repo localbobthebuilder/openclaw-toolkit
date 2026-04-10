@@ -20,12 +20,21 @@
         "key": "minimal",
         "name": "Minimal",
         "allow": [
+          "message"
+        ],
+        "deny": [
           "read",
           "write",
           "edit",
           "apply_patch",
           "exec",
           "process",
+          "code_execution",
+          "web_search",
+          "web_fetch",
+          "x_search",
+          "memory_search",
+          "memory_get",
           "sessions_list",
           "sessions_history",
           "sessions_send",
@@ -33,12 +42,15 @@
           "sessions_yield",
           "subagents",
           "session_status",
-          "memory_search",
-          "memory_get"
-        ],
-        "deny": [
           "browser",
           "canvas",
+          "agents_list",
+          "update_plan",
+          "image",
+          "image_generate",
+          "music_generate",
+          "video_generate",
+          "tts",
           "nodes",
           "cron",
           "gateway"
@@ -106,6 +118,8 @@
           "sessions_history",
           "sessions_send",
           "sessions_spawn",
+          "sessions_yield",
+          "subagents",
           "session_status"
         ],
         "deny": [
@@ -814,7 +828,9 @@
           "google/gemini-3.1-flash-lite-preview"
         ],
         "allowLocalFallback": true,
-        "toolsetKeys": []
+        "toolsetKeys": [
+          "codingDelegate"
+        ]
       },
       {
         "key": "researchAgent",
