@@ -296,58 +296,24 @@ function Normalize-ToolkitTelegramRouteRecord {
         ""
     }
 
-    $normalizedRoutes = New-Object System.Collections.Generic.List[object]
-    if (-not [string]::IsNullOrWhiteSpace($matchType)) {
-        if ($matchType -notin @("trusted-dms", "trusted-groups", "direct", "group")) {
-            return @()
-        }
-
-        if ($matchType -in @("direct", "group") -and [string]::IsNullOrWhiteSpace($peerId)) {
-            return @()
-        }
-
-        $normalizedRoutes.Add([pscustomobject][ordered]@{
-                accountId     = $accountId
-                targetAgentId = $targetAgentId
-                matchType     = $matchType
-                peerId        = $peerId
-            })
-        return @($normalizedRoutes.ToArray())
+    if ([string]::IsNullOrWhiteSpace($matchType)) {
+        return @()
     }
 
-    $routeTrustedGroups = if ($RouteRecord.PSObject.Properties.Name -contains "routeTrustedTelegramGroups") {
-        ConvertTo-ToolkitBooleanValue -Value $RouteRecord.routeTrustedTelegramGroups -DefaultValue $false
-    }
-    else {
-        $false
+    if ($matchType -notin @("trusted-dms", "trusted-groups", "direct", "group")) {
+        return @()
     }
 
-    $routeTrustedDms = if ($RouteRecord.PSObject.Properties.Name -contains "routeTrustedTelegramDms") {
-        ConvertTo-ToolkitBooleanValue -Value $RouteRecord.routeTrustedTelegramDms -DefaultValue $false
-    }
-    else {
-        $false
+    if ($matchType -in @("direct", "group") -and [string]::IsNullOrWhiteSpace($peerId)) {
+        return @()
     }
 
-    if ($routeTrustedGroups) {
-        $normalizedRoutes.Add([pscustomobject][ordered]@{
-                accountId     = $accountId
-                targetAgentId = $targetAgentId
-                matchType     = "trusted-groups"
-                peerId        = ""
-            })
-    }
-
-    if ($routeTrustedDms) {
-        $normalizedRoutes.Add([pscustomobject][ordered]@{
-                accountId     = $accountId
-                targetAgentId = $targetAgentId
-                matchType     = "trusted-dms"
-                peerId        = ""
-            })
-    }
-
-    return @($normalizedRoutes.ToArray())
+    return @([pscustomobject][ordered]@{
+            accountId     = $accountId
+            targetAgentId = $targetAgentId
+            matchType     = $matchType
+            peerId        = $peerId
+        })
 }
 
 function Get-ToolkitTelegramAccountList {
@@ -410,17 +376,6 @@ function Normalize-ToolkitTelegramRoutingConfig {
             }
         }
     }
-    elseif ($telegramRouting.PSObject.Properties.Name -contains "targetAgentId" -or
-        $telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramGroups" -or
-        $telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramDms") {
-        $rawRoutes.Add([pscustomobject][ordered]@{
-                accountId                  = $defaultAccountId
-                targetAgentId              = if ($telegramRouting.PSObject.Properties.Name -contains "targetAgentId") { [string]$telegramRouting.targetAgentId } else { "" }
-                routeTrustedTelegramGroups = if ($telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramGroups") { ConvertTo-ToolkitBooleanValue -Value $telegramRouting.routeTrustedTelegramGroups -DefaultValue $false } else { $false }
-                routeTrustedTelegramDms    = if ($telegramRouting.PSObject.Properties.Name -contains "routeTrustedTelegramDms") { ConvertTo-ToolkitBooleanValue -Value $telegramRouting.routeTrustedTelegramDms -DefaultValue $false } else { $false }
-            })
-    }
-
     $normalizedRoutes = New-Object System.Collections.Generic.List[object]
     $seenRouteKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($route in @($rawRoutes.ToArray())) {
@@ -447,12 +402,6 @@ function Normalize-ToolkitTelegramRoutingConfig {
     }
     else {
         Add-Member -InputObject $telegramRouting -NotePropertyName "routes" -NotePropertyValue @($normalizedRoutes.ToArray()) -Force
-    }
-
-    foreach ($legacyProperty in @("targetAgentId", "routeTrustedTelegramGroups", "routeTrustedTelegramDms")) {
-        if ($telegramRouting.PSObject.Properties.Name -contains $legacyProperty) {
-            $telegramRouting.PSObject.Properties.Remove($legacyProperty)
-        }
     }
 
     $agentsContainer.telegramRouting = $telegramRouting

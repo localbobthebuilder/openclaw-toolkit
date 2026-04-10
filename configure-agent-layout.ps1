@@ -2081,26 +2081,6 @@ foreach ($existing in $currentAgents) {
 
 $defaultTelegramAccountId = Get-ToolkitTelegramDefaultAccountId -Config $config
 $telegramRoutes = @(Get-ToolkitTelegramRouteList -Config $config)
-if ($telegramRoutes.Count -eq 0 -and $chatAgentId -and $localChatAgent) {
-    $legacyFallbackRoutes = New-Object System.Collections.Generic.List[object]
-    if ([bool]$localChatAgent.routeTrustedTelegramGroups) {
-        $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
-                accountId     = $defaultTelegramAccountId
-                targetAgentId = $chatAgentId
-                matchType     = "trusted-groups"
-                peerId        = ""
-            })
-    }
-    if ([bool]$localChatAgent.routeTrustedTelegramDms) {
-        $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
-                accountId     = $defaultTelegramAccountId
-                targetAgentId = $chatAgentId
-                matchType     = "trusted-dms"
-                peerId        = ""
-            })
-    }
-    $telegramRoutes = @($legacyFallbackRoutes.ToArray())
-}
 
 $managedTelegramRoutes = New-Object System.Collections.Generic.List[object]
 $validatedTelegramRoutes = New-Object System.Collections.Generic.List[object]

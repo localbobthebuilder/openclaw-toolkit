@@ -964,23 +964,7 @@ export class ToolkitDashboard extends LitElement {
         }, defaultAccountId);
         return normalized ? [normalized] : [];
       }
-
-      const expanded: any[] = [];
-      if (this.normalizeBoolean(source.routeTrustedTelegramDms, false)) {
-        expanded.push(this.normalizeSingleTelegramRouteRule({
-          accountId,
-          targetAgentId,
-          matchType: 'trusted-dms'
-        }, defaultAccountId));
-      }
-      if (this.normalizeBoolean(source.routeTrustedTelegramGroups, false)) {
-        expanded.push(this.normalizeSingleTelegramRouteRule({
-          accountId,
-          targetAgentId,
-          matchType: 'trusted-groups'
-        }, defaultAccountId));
-      }
-      return expanded.filter(Boolean);
+      return [];
   }
 
   getTelegramRouteKey(route: any) {
@@ -1001,45 +985,10 @@ export class ToolkitDashboard extends LitElement {
       return Array.from(normalizedRoutes.values());
   }
 
-  getLegacyAgentTelegramRoutes(agentList: any[], defaultAccountId: string) {
-      const legacyRoutes: any[] = [];
-      for (const agent of Array.isArray(agentList) ? agentList : []) {
-        const targetAgentId = typeof agent?.id === 'string' ? agent.id.trim() : '';
-        if (!targetAgentId) continue;
-        if (this.normalizeBoolean(agent?.routeTrustedTelegramDms, false)) {
-          legacyRoutes.push({
-            accountId: defaultAccountId,
-            targetAgentId,
-            matchType: 'trusted-dms'
-          });
-        }
-        if (this.normalizeBoolean(agent?.routeTrustedTelegramGroups, false)) {
-          legacyRoutes.push({
-            accountId: defaultAccountId,
-            targetAgentId,
-            matchType: 'trusted-groups'
-          });
-        }
-      }
-      return this.normalizeTelegramRouteList(legacyRoutes, defaultAccountId);
-  }
-
   ensureTelegramRoutingConfig() {
       const telegramRouting = this.getTelegramRoutingRoot();
       const defaultAccountId = this.getDefaultTelegramAccountId();
-      const legacyRoute = (!Array.isArray(telegramRouting.routes)
-        && (telegramRouting.targetAgentId || telegramRouting.routeTrustedTelegramGroups || telegramRouting.routeTrustedTelegramDms))
-        ? [{
-            accountId: defaultAccountId,
-            targetAgentId: telegramRouting.targetAgentId || '',
-            routeTrustedTelegramGroups: this.normalizeBoolean(telegramRouting.routeTrustedTelegramGroups, false),
-            routeTrustedTelegramDms: this.normalizeBoolean(telegramRouting.routeTrustedTelegramDms, false)
-          }]
-        : [];
-      telegramRouting.routes = this.normalizeTelegramRouteList(Array.isArray(telegramRouting.routes) ? telegramRouting.routes : legacyRoute, defaultAccountId);
-      delete telegramRouting.targetAgentId;
-      delete telegramRouting.routeTrustedTelegramGroups;
-      delete telegramRouting.routeTrustedTelegramDms;
+      telegramRouting.routes = this.normalizeTelegramRouteList(Array.isArray(telegramRouting.routes) ? telegramRouting.routes : [], defaultAccountId);
       return telegramRouting;
   }
 
@@ -3978,8 +3927,6 @@ export class ToolkitDashboard extends LitElement {
     if (typeof clone.modelRef !== 'string') {
       clone.modelRef = '';
     }
-    delete clone.routeTrustedTelegramGroups;
-    delete clone.routeTrustedTelegramDms;
     clone.modelSource = this.inferModelSourceFromAgent(clone);
     return clone;
   }
@@ -3990,21 +3937,9 @@ export class ToolkitDashboard extends LitElement {
     clone.agents = clone.agents || { telegramRouting: {}, list: [] };
     clone.agents.telegramRouting = clone.agents.telegramRouting || {};
     clone.agents.telegramRouting.routes = this.normalizeTelegramRouteList(
-      Array.isArray(clone.agents.telegramRouting.routes)
-        ? clone.agents.telegramRouting.routes
-        : ((clone.agents.telegramRouting.targetAgentId || clone.agents.telegramRouting.routeTrustedTelegramGroups || clone.agents.telegramRouting.routeTrustedTelegramDms)
-          ? [{
-              accountId: defaultTelegramAccountId,
-              targetAgentId: clone.agents.telegramRouting.targetAgentId || '',
-              routeTrustedTelegramGroups: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramGroups, false),
-              routeTrustedTelegramDms: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramDms, false)
-            }]
-          : this.getLegacyAgentTelegramRoutes(clone.agents?.list, defaultTelegramAccountId)),
+      Array.isArray(clone.agents.telegramRouting.routes) ? clone.agents.telegramRouting.routes : [],
       defaultTelegramAccountId
     );
-    delete clone.agents.telegramRouting.targetAgentId;
-    delete clone.agents.telegramRouting.routeTrustedTelegramGroups;
-    delete clone.agents.telegramRouting.routeTrustedTelegramDms;
     clone.workspaces = Array.isArray(clone.workspaces) ? clone.workspaces.map((workspace: any) => this.normalizeWorkspaceRecord(workspace)) : [];
     this.ensureToolsetsConfig(clone);
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
@@ -4056,21 +3991,9 @@ export class ToolkitDashboard extends LitElement {
     }
     clone.agents.telegramRouting = clone.agents.telegramRouting || {};
     clone.agents.telegramRouting.routes = this.normalizeTelegramRouteList(
-      Array.isArray(clone.agents.telegramRouting.routes)
-        ? clone.agents.telegramRouting.routes
-        : ((clone.agents.telegramRouting.targetAgentId || clone.agents.telegramRouting.routeTrustedTelegramGroups || clone.agents.telegramRouting.routeTrustedTelegramDms)
-          ? [{
-              accountId: defaultTelegramAccountId,
-              targetAgentId: clone.agents.telegramRouting.targetAgentId || '',
-              routeTrustedTelegramGroups: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramGroups, false),
-              routeTrustedTelegramDms: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramDms, false)
-            }]
-          : this.getLegacyAgentTelegramRoutes(clone.agents?.list, defaultTelegramAccountId)),
+      Array.isArray(clone.agents.telegramRouting.routes) ? clone.agents.telegramRouting.routes : [],
       defaultTelegramAccountId
     );
-    delete clone.agents.telegramRouting.targetAgentId;
-    delete clone.agents.telegramRouting.routeTrustedTelegramGroups;
-    delete clone.agents.telegramRouting.routeTrustedTelegramDms;
     if (!Array.isArray(clone.agents.list)) {
       clone.agents.list = [];
     }

@@ -2220,26 +2220,6 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         $liveTelegramConfig = Resolve-OpenClawConfigDocumentPathValue -Document $liveConfig -Path "channels.telegram"
         $defaultTelegramAccountId = Get-ToolkitTelegramDefaultAccountId -Config $config
         $telegramRoutes = @(Get-ToolkitTelegramRouteList -Config $config)
-        if ($telegramRoutes.Count -eq 0 -and $localChatAgentAssigned) {
-            $legacyFallbackRoutes = New-Object System.Collections.Generic.List[object]
-            if ([bool]$localChatAgentConfig.routeTrustedTelegramGroups) {
-                $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
-                        accountId     = $defaultTelegramAccountId
-                        targetAgentId = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
-                        matchType     = "trusted-groups"
-                        peerId        = ""
-                    })
-            }
-            if ([bool]$localChatAgentConfig.routeTrustedTelegramDms) {
-                $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
-                        accountId     = $defaultTelegramAccountId
-                        targetAgentId = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
-                        matchType     = "trusted-dms"
-                        peerId        = ""
-                    })
-            }
-            $telegramRoutes = @($legacyFallbackRoutes.ToArray())
-        }
 
         $validatedTelegramRoutes = New-Object System.Collections.Generic.List[object]
         foreach ($telegramRoute in @($telegramRoutes)) {
