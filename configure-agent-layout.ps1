@@ -1421,10 +1421,10 @@ function Add-BindingIfMissing {
     return $result
 }
 
-function Remove-TelegramTrustedBindings {
+function Remove-TelegramManagedBindings {
     param(
         [object[]]$Bindings = @(),
-        [object[]]$ManagedRoutes = @(),
+        [object[]]$ManagedBindingSpecs = @(),
         [string]$DefaultAccountId = "default"
     )
 
@@ -1443,20 +1443,16 @@ function Remove-TelegramTrustedBindings {
                 $DefaultAccountId
             }
 
-            foreach ($managedRoute in @($ManagedRoutes)) {
-                if ($null -eq $managedRoute) {
+            foreach ($bindingSpec in @($ManagedBindingSpecs)) {
+                if ($null -eq $bindingSpec) {
                     continue
                 }
 
-                if ([string]$managedRoute.accountId -ne $bindingAccountId) {
+                if ([string]$bindingSpec.accountId -ne $bindingAccountId) {
                     continue
                 }
 
-                if ($binding.match.peer.kind -eq "group" -and ([string]$binding.match.peer.id) -in @($managedRoute.trustedGroupIds)) {
-                    $isManagedTelegramBinding = $true
-                    break
-                }
-                elseif ($binding.match.peer.kind -eq "direct" -and ([string]$binding.match.peer.id) -in @($managedRoute.trustedDirectIds)) {
+                if ([string]$binding.match.peer.kind -eq [string]$bindingSpec.peerKind -and [string]$binding.match.peer.id -eq [string]$bindingSpec.peerId) {
                     $isManagedTelegramBinding = $true
                     break
                 }
@@ -2086,87 +2082,66 @@ foreach ($existing in $currentAgents) {
 $defaultTelegramAccountId = Get-ToolkitTelegramDefaultAccountId -Config $config
 $telegramRoutes = @(Get-ToolkitTelegramRouteList -Config $config)
 if ($telegramRoutes.Count -eq 0 -and $chatAgentId -and $localChatAgent) {
-    $telegramRoutes = @([pscustomobject][ordered]@{
-            accountId                  = $defaultTelegramAccountId
-            targetAgentId              = $chatAgentId
-            routeTrustedTelegramGroups = [bool]$localChatAgent.routeTrustedTelegramGroups
-            routeTrustedTelegramDms    = [bool]$localChatAgent.routeTrustedTelegramDms
-        })
+    $legacyFallbackRoutes = New-Object System.Collections.Generic.List[object]
+    if ([bool]$localChatAgent.routeTrustedTelegramGroups) {
+        $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
+                accountId     = $defaultTelegramAccountId
+                targetAgentId = $chatAgentId
+                matchType     = "trusted-groups"
+                peerId        = ""
+            })
+    }
+    if ([bool]$localChatAgent.routeTrustedTelegramDms) {
+        $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
+                accountId     = $defaultTelegramAccountId
+                targetAgentId = $chatAgentId
+                matchType     = "trusted-dms"
+                peerId        = ""
+            })
+    }
+    $telegramRoutes = @($legacyFallbackRoutes.ToArray())
 }
 
 $managedTelegramRoutes = New-Object System.Collections.Generic.List[object]
 $validatedTelegramRoutes = New-Object System.Collections.Generic.List[object]
 foreach ($telegramRoute in @($telegramRoutes)) {
-    if ($null -eq $telegramRoute) {
-        continue
-    }
+    foreach ($normalizedRoute in @(Normalize-ToolkitTelegramRouteRecord -RouteRecord $telegramRoute -DefaultAccountId $defaultTelegramAccountId)) {
+        if ($null -eq $normalizedRoute) {
+            continue
+        }
 
-    $accountId = if ($telegramRoute.PSObject.Properties.Name -contains "accountId" -and -not [string]::IsNullOrWhiteSpace([string]$telegramRoute.accountId)) {
-        [string]$telegramRoute.accountId
-    }
-    else {
-        $defaultTelegramAccountId
-    }
+        $managedTelegramRoutes.Add($normalizedRoute)
+        if ([string]::IsNullOrWhiteSpace([string]$normalizedRoute.targetAgentId)) {
+            continue
+        }
 
-    $managedRoute = [pscustomobject][ordered]@{
-        accountId                  = $accountId
-        targetAgentId              = if ($telegramRoute.PSObject.Properties.Name -contains "targetAgentId") { [string]$telegramRoute.targetAgentId } else { "" }
-        routeTrustedTelegramGroups = if ($telegramRoute.PSObject.Properties.Name -contains "routeTrustedTelegramGroups") { [bool]$telegramRoute.routeTrustedTelegramGroups } else { $false }
-        routeTrustedTelegramDms    = if ($telegramRoute.PSObject.Properties.Name -contains "routeTrustedTelegramDms") { [bool]$telegramRoute.routeTrustedTelegramDms } else { $false }
-        trustedGroupIds            = @(Get-ToolkitTelegramAccountTrustedGroupIds -Config $config -AccountId $accountId)
-        trustedDirectIds           = @(Get-ToolkitTelegramAccountTrustedDirectIds -Config $config -AccountId $accountId)
-    }
-    $managedTelegramRoutes.Add($managedRoute)
+        $targetAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$normalizedRoute.targetAgentId)
+        if ($null -eq $targetAgent -or -not (Test-ToolkitAgentEnabled -AgentConfig $targetAgent) -or -not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $targetAgent)) {
+            continue
+        }
 
-    if ([string]::IsNullOrWhiteSpace([string]$managedRoute.targetAgentId)) {
-        continue
+        $validatedTelegramRoutes.Add($normalizedRoute)
     }
-
-    $targetAgent = Get-ToolkitAgentById -Config $config -AgentId ([string]$managedRoute.targetAgentId)
-    if ($null -eq $targetAgent -or -not (Test-ToolkitAgentEnabled -AgentConfig $targetAgent) -or -not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $targetAgent)) {
-        continue
-    }
-
-    $validatedTelegramRoutes.Add($managedRoute)
 }
 
 $telegramConfig = Get-OpenClawConfigJsonValue -Path "channels.telegram"
-$currentBindings = @(Remove-TelegramTrustedBindings -Bindings $currentBindings -ManagedRoutes @($managedTelegramRoutes.ToArray()) -DefaultAccountId $defaultTelegramAccountId)
+$managedTelegramBindingSpecs = @(Get-ToolkitTelegramRouteBindingSpecs -Config $config -Routes @($managedTelegramRoutes.ToArray()) -DefaultAccountId $defaultTelegramAccountId)
+$validatedTelegramBindingSpecs = @(Get-ToolkitTelegramRouteBindingSpecs -Config $config -Routes @($validatedTelegramRoutes.ToArray()) -DefaultAccountId $defaultTelegramAccountId)
+$currentBindings = @(Remove-TelegramManagedBindings -Bindings $currentBindings -ManagedBindingSpecs $managedTelegramBindingSpecs -DefaultAccountId $defaultTelegramAccountId)
 if ($null -ne $telegramConfig) {
-    foreach ($telegramRoute in @($validatedTelegramRoutes.ToArray())) {
-        if ($telegramRoute.routeTrustedTelegramGroups) {
-            foreach ($groupId in @($telegramRoute.trustedGroupIds)) {
-                $binding = [ordered]@{
-                    agentId = [string]$telegramRoute.targetAgentId
-                    match   = [ordered]@{
-                        channel   = "telegram"
-                        accountId = [string]$telegramRoute.accountId
-                        peer    = [ordered]@{
-                            kind = "group"
-                            id   = [string]$groupId
-                        }
-                    }
+    foreach ($bindingSpec in @($validatedTelegramBindingSpecs)) {
+        $binding = [ordered]@{
+            agentId = [string]$bindingSpec.targetAgentId
+            match   = [ordered]@{
+                channel   = "telegram"
+                accountId = [string]$bindingSpec.accountId
+                peer      = [ordered]@{
+                    kind = [string]$bindingSpec.peerKind
+                    id   = [string]$bindingSpec.peerId
                 }
-                $currentBindings = Add-BindingIfMissing -Bindings $currentBindings -Binding $binding
             }
         }
-
-        if ($telegramRoute.routeTrustedTelegramDms) {
-            foreach ($senderId in @($telegramRoute.trustedDirectIds)) {
-                $binding = [ordered]@{
-                    agentId = [string]$telegramRoute.targetAgentId
-                    match   = [ordered]@{
-                        channel   = "telegram"
-                        accountId = [string]$telegramRoute.accountId
-                        peer    = [ordered]@{
-                            kind = "direct"
-                            id   = [string]$senderId
-                        }
-                    }
-                }
-                $currentBindings = Add-BindingIfMissing -Bindings $currentBindings -Binding $binding
-            }
-        }
+        $currentBindings = Add-BindingIfMissing -Bindings $currentBindings -Binding $binding
     }
 }
 

@@ -810,22 +810,23 @@ teaching it how to work against the shared project tree when needed.
 Purpose routing note:
 
 - channel routing is explicit, not magical
-- trusted Telegram DM/group are routed by
+- trusted Telegram DM/group and specific peer overrides are routed by
   `agents.telegramRouting.routes[]`
-- the default account route is usually
-  `agents.telegramRouting.routes[0] = { accountId: "default", targetAgentId: "chat-local", ... }`
+- the default account usually has two broad managed routes:
+  `trusted-dms` and `trusted-groups`
 - in this Windows + Docker Desktop shared-workspace setup, `chat-local`,
   `review-local`, `coder-local`, and the optional `chat-openai` default to
   `sandbox.mode=off` so they can use the real mounted shared workspace instead
   of the broken disposable `/workspace` mount seen in sandbox sessions
 - extra Telegram bots are configured under `telegram.accounts[]`
-- each Telegram account can point at a different agent, so different bots can
-  naturally use different models, toolsets, delegation rules, and workspaces
+- each Telegram account can point at different agents for trusted DMs, trusted
+  groups, and specific peers, so different bots can naturally use different
+  models, toolsets, delegation rules, and workspaces
 - if you want Telegram on OpenAI while `main` uses Claude or another hosted
-  model, enable `hostedTelegramAgent` and set
-  the default-account route target to `chat-openai`
-- if you want Telegram to use the default strong agent instead, set
-  the default-account route target to `main`
+  model, enable `hostedTelegramAgent` and point the relevant Telegram route
+  entries at `chat-openai`
+- if you want Telegram to use the default strong agent instead, point the
+  relevant Telegram route entries at `main`
 - trusted Telegram DM/group routing is managed through
   `bindings`
 - everything else defaults to `main`
@@ -850,8 +851,8 @@ Important:
   `ollama pull`
 - if a preferred local primary model is still unavailable, bootstrap falls back
   to another available local model instead of leaving the local agent unusable
-- Telegram only routes to a managed target agent when you explicitly turn on the
-  routing flags in the matching `agents.telegramRouting.routes[]` entry
+- Telegram only routes to a managed target agent when a matching
+  `agents.telegramRouting.routes[]` entry exists
 - disabling the relevant agent or removing it from its endpoint's `agents` list keeps it toolkit-only
   and removes it from future bootstrap runs
 
@@ -891,14 +892,22 @@ Example multi-bot Telegram snippet:
       {
         "accountId": "default",
         "targetAgentId": "chat-local",
-        "routeTrustedTelegramDms": true,
-        "routeTrustedTelegramGroups": true
+        "matchType": "trusted-dms"
+      },
+      {
+        "accountId": "default",
+        "targetAgentId": "chat-local",
+        "matchType": "trusted-groups"
       },
       {
         "accountId": "alerts",
         "targetAgentId": "review-local",
-        "routeTrustedTelegramDms": true,
-        "routeTrustedTelegramGroups": true
+        "matchType": "trusted-dms"
+      },
+      {
+        "accountId": "alerts",
+        "targetAgentId": "review-local",
+        "matchType": "trusted-groups"
       }
     ]
   }
@@ -950,9 +959,21 @@ Toolkit-managed routing keys (`agents.telegramRouting.routes[]`):
 | Path | Meaning |
 | --- | --- |
 | `accountId` | Which Telegram account this managed route applies to. Usually `default` for the first bot, or the `id` of an entry in `telegram.accounts[]`. |
-| `targetAgentId` | Toolkit-managed target agent for trusted Telegram traffic on that account. This matters only for the route toggles enabled below. Selecting a target agent alone does not change routing. |
-| `routeTrustedTelegramDms` | When `true`, trusted Telegram DMs for that account are always sent to `targetAgentId`. When `false`, the toolkit does not create a DM-specific override for that account and OpenClaw falls back to its normal agent routing order: explicit binding first, then account/channel binding, then the configured default agent, otherwise the first agent, and finally `main`. |
-| `routeTrustedTelegramGroups` | When `true`, messages from allowed Telegram groups for that account are always sent to `targetAgentId`. When `false`, the toolkit does not create a group-specific override for that account and OpenClaw falls back to the same normal routing order described above. |
+| `targetAgentId` | Toolkit-managed target agent for the matching Telegram traffic on that route. |
+| `matchType` | What this rule matches: `trusted-dms`, `trusted-groups`, `direct`, or `group`. |
+| `peerId` | Required only for `direct` and `group` routes. Use a numeric Telegram user ID for `direct`, or a negative Telegram group/supergroup ID for `group`. |
+
+Routing notes:
+
+- `trusted-dms` sends trusted direct-message senders from that account to `targetAgentId`
+- `trusted-groups` sends allowed groups from that account to `targetAgentId`
+- `direct` overrides one specific Telegram user ID on that account
+- `group` overrides one specific Telegram group ID on that account
+- specific `direct` / `group` routes win over the broader `trusted-dms` /
+  `trusted-groups` defaults for the same account
+- if no managed route matches, OpenClaw falls back to its normal routing order:
+  explicit binding first, then account/channel binding, then the configured
+  default agent, otherwise the first agent, and finally `main`
 
 To authenticate an extra Telegram account after you add it to toolkit config,
 run:
@@ -1192,8 +1213,8 @@ The multi-agent verification section checks:
   local-model cases
 - shared-workspace usage for the managed agents
 - agent-to-agent delegation allowlist
-- Telegram DM/group bindings to the configured Telegram target agent when those
-  routing flags are enabled
+- Telegram bindings generated from the configured managed Telegram route rules,
+  including broad trusted DM/group routes and specific peer overrides
 
 ## 8. Backup snapshots
 

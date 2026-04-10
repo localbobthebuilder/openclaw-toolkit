@@ -2221,89 +2221,78 @@ if (Test-CheckRequested -Names @("multi-agent")) {
         $defaultTelegramAccountId = Get-ToolkitTelegramDefaultAccountId -Config $config
         $telegramRoutes = @(Get-ToolkitTelegramRouteList -Config $config)
         if ($telegramRoutes.Count -eq 0 -and $localChatAgentAssigned) {
-            $telegramRoutes = @([pscustomobject][ordered]@{
-                    accountId                  = $defaultTelegramAccountId
-                    targetAgentId              = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
-                    routeTrustedTelegramGroups = [bool]$localChatAgentConfig.routeTrustedTelegramGroups
-                    routeTrustedTelegramDms    = [bool]$localChatAgentConfig.routeTrustedTelegramDms
-                })
+            $legacyFallbackRoutes = New-Object System.Collections.Generic.List[object]
+            if ([bool]$localChatAgentConfig.routeTrustedTelegramGroups) {
+                $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
+                        accountId     = $defaultTelegramAccountId
+                        targetAgentId = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
+                        matchType     = "trusted-groups"
+                        peerId        = ""
+                    })
+            }
+            if ([bool]$localChatAgentConfig.routeTrustedTelegramDms) {
+                $legacyFallbackRoutes.Add([pscustomobject][ordered]@{
+                        accountId     = $defaultTelegramAccountId
+                        targetAgentId = if ($localChatAgentConfig.id) { [string]$localChatAgentConfig.id } else { "chat-local" }
+                        matchType     = "trusted-dms"
+                        peerId        = ""
+                    })
+            }
+            $telegramRoutes = @($legacyFallbackRoutes.ToArray())
         }
 
         $validatedTelegramRoutes = New-Object System.Collections.Generic.List[object]
         foreach ($telegramRoute in @($telegramRoutes)) {
-            if ($null -eq $telegramRoute) {
-                continue
-            }
+            foreach ($normalizedRoute in @(Normalize-ToolkitTelegramRouteRecord -RouteRecord $telegramRoute -DefaultAccountId $defaultTelegramAccountId)) {
+                if ($null -eq $normalizedRoute) {
+                    continue
+                }
 
-            $accountId = if ($telegramRoute.PSObject.Properties.Name -contains "accountId" -and -not [string]::IsNullOrWhiteSpace([string]$telegramRoute.accountId)) {
-                [string]$telegramRoute.accountId
-            }
-            else {
-                $defaultTelegramAccountId
-            }
+                $accountId = if ($normalizedRoute.PSObject.Properties.Name -contains "accountId") { [string]$normalizedRoute.accountId } else { $defaultTelegramAccountId }
+                $targetAgentId = if ($normalizedRoute.PSObject.Properties.Name -contains "targetAgentId") { [string]$normalizedRoute.targetAgentId } else { "" }
+                $routeDescription = Get-ToolkitTelegramRouteDescription -RouteRecord $normalizedRoute -DefaultAccountId $defaultTelegramAccountId
+                if ([string]::IsNullOrWhiteSpace($targetAgentId)) {
+                    continue
+                }
 
-            $targetAgentId = if ($telegramRoute.PSObject.Properties.Name -contains "targetAgentId") { [string]$telegramRoute.targetAgentId } else { "" }
-            if ([string]::IsNullOrWhiteSpace($targetAgentId)) {
-                continue
-            }
+                $telegramTargetAgent = Get-ToolkitAgentById -Config $config -AgentId $targetAgentId
+                if ($null -eq $telegramTargetAgent) {
+                    $multiAgentVerification += "FAIL: Telegram account $accountId route $routeDescription points to missing agent $targetAgentId"
+                    continue
+                }
+                if (-not (Test-ToolkitAgentEnabled -AgentConfig $telegramTargetAgent)) {
+                    $multiAgentVerification += "FAIL: Telegram account $accountId route $routeDescription points to disabled agent $targetAgentId"
+                    continue
+                }
+                if (-not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $telegramTargetAgent)) {
+                    $multiAgentVerification += "FAIL: Telegram account $accountId route $routeDescription points to unassigned agent $targetAgentId"
+                    continue
+                }
 
-            $telegramTargetAgent = Get-ToolkitAgentById -Config $config -AgentId $targetAgentId
-            if ($null -eq $telegramTargetAgent) {
-                $multiAgentVerification += "FAIL: Telegram account $accountId routes to missing agent $targetAgentId"
-                continue
+                $validatedTelegramRoutes.Add($normalizedRoute)
             }
-            if (-not (Test-ToolkitAgentEnabled -AgentConfig $telegramTargetAgent)) {
-                $multiAgentVerification += "FAIL: Telegram account $accountId routes to disabled agent $targetAgentId"
-                continue
-            }
-            if (-not (Test-ToolkitAgentAssigned -Config $config -AgentConfig $telegramTargetAgent)) {
-                $multiAgentVerification += "FAIL: Telegram account $accountId routes to unassigned agent $targetAgentId"
-                continue
-            }
-
-            $validatedTelegramRoutes.Add([pscustomobject][ordered]@{
-                    accountId                  = $accountId
-                    targetAgentId              = $targetAgentId
-                    routeTrustedTelegramGroups = if ($telegramRoute.PSObject.Properties.Name -contains "routeTrustedTelegramGroups") { [bool]$telegramRoute.routeTrustedTelegramGroups } else { $false }
-                    routeTrustedTelegramDms    = if ($telegramRoute.PSObject.Properties.Name -contains "routeTrustedTelegramDms") { [bool]$telegramRoute.routeTrustedTelegramDms } else { $false }
-                    trustedGroupIds            = @(Get-ToolkitTelegramAccountTrustedGroupIds -Config $config -AccountId $accountId)
-                    trustedDirectIds           = @(Get-ToolkitTelegramAccountTrustedDirectIds -Config $config -AccountId $accountId)
-                })
         }
 
-        if (@($validatedTelegramRoutes.ToArray()).Count -gt 0) {
+        $validatedTelegramBindingSpecs = @(Get-ToolkitTelegramRouteBindingSpecs -Config $config -Routes @($validatedTelegramRoutes.ToArray()) -DefaultAccountId $defaultTelegramAccountId)
+        if (@($validatedTelegramBindingSpecs).Count -gt 0) {
             if (-not (Test-TelegramChannelEnabled -TelegramConfig $liveTelegramConfig)) {
                 $multiAgentVerification += "INFO: Telegram routing checks skipped because channels.telegram is not enabled in live config"
             }
             else {
-                foreach ($telegramRoute in @($validatedTelegramRoutes.ToArray())) {
-                    if ($telegramRoute.routeTrustedTelegramGroups) {
-                        foreach ($groupId in @($telegramRoute.trustedGroupIds)) {
-                            $match = @($actualBindings | Where-Object {
-                                    Test-BindingMatch -Binding $_ -AgentId ([string]$telegramRoute.targetAgentId) -Channel "telegram" -AccountId ([string]$telegramRoute.accountId) -DefaultAccountId $defaultTelegramAccountId -PeerKind "group" -PeerId ([string]$groupId)
-                                })
-                            if ($match.Count -gt 0) {
-                                $multiAgentVerification += "PASS: Telegram account $([string]$telegramRoute.accountId) group $groupId routes to $([string]$telegramRoute.targetAgentId)"
-                            }
-                            else {
-                                $multiAgentVerification += "FAIL: Telegram account $([string]$telegramRoute.accountId) group $groupId is not routed to $([string]$telegramRoute.targetAgentId)"
-                            }
-                        }
+                foreach ($bindingSpec in @($validatedTelegramBindingSpecs)) {
+                    $match = @($actualBindings | Where-Object {
+                            Test-BindingMatch -Binding $_ -AgentId ([string]$bindingSpec.targetAgentId) -Channel "telegram" -AccountId ([string]$bindingSpec.accountId) -DefaultAccountId $defaultTelegramAccountId -PeerKind ([string]$bindingSpec.peerKind) -PeerId ([string]$bindingSpec.peerId)
+                        })
+                    $routeLabel = switch ([string]$bindingSpec.peerKind) {
+                        "group" { "group $([string]$bindingSpec.peerId)" }
+                        "direct" { "DM $([string]$bindingSpec.peerId)" }
+                        default { "$([string]$bindingSpec.peerKind) $([string]$bindingSpec.peerId)" }
                     }
-
-                    if ($telegramRoute.routeTrustedTelegramDms) {
-                        foreach ($senderId in @($telegramRoute.trustedDirectIds)) {
-                            $senderIdText = [string]$senderId
-                            $match = @($actualBindings | Where-Object {
-                                    Test-BindingMatch -Binding $_ -AgentId ([string]$telegramRoute.targetAgentId) -Channel "telegram" -AccountId ([string]$telegramRoute.accountId) -DefaultAccountId $defaultTelegramAccountId -PeerKind "direct" -PeerId $senderIdText
-                                })
-                            if ($match.Count -gt 0) {
-                                $multiAgentVerification += "PASS: Telegram account $([string]$telegramRoute.accountId) DM $senderIdText routes to $([string]$telegramRoute.targetAgentId)"
-                            }
-                            else {
-                                $multiAgentVerification += "FAIL: Telegram account $([string]$telegramRoute.accountId) DM $senderIdText is not routed to $([string]$telegramRoute.targetAgentId)"
-                            }
-                        }
+                    if ($match.Count -gt 0) {
+                        $multiAgentVerification += "PASS: Telegram account $([string]$bindingSpec.accountId) $routeLabel routes to $([string]$bindingSpec.targetAgentId)"
+                    }
+                    else {
+                        $multiAgentVerification += "FAIL: Telegram account $([string]$bindingSpec.accountId) $routeLabel is not routed to $([string]$bindingSpec.targetAgentId)"
                     }
                 }
             }

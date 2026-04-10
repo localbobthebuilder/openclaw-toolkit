@@ -275,16 +275,79 @@ function Normalize-ToolkitTelegramRouteRecord {
         Add-Member -InputObject $RouteRecord -NotePropertyName "accountId" -NotePropertyValue $accountId -Force
     }
 
-    if ($RouteRecord.PSObject.Properties.Name -contains "targetAgentId") {
-        $RouteRecord.targetAgentId = [string]$RouteRecord.targetAgentId
+    $targetAgentId = if ($RouteRecord.PSObject.Properties.Name -contains "targetAgentId" -and -not [string]::IsNullOrWhiteSpace([string]$RouteRecord.targetAgentId)) {
+        ([string]$RouteRecord.targetAgentId).Trim()
     }
     else {
-        Add-Member -InputObject $RouteRecord -NotePropertyName "targetAgentId" -NotePropertyValue "" -Force
+        ""
     }
 
-    Set-ToolkitBooleanDefaultProperty -Object $RouteRecord -PropertyName "routeTrustedTelegramGroups" -DefaultValue $false
-    Set-ToolkitBooleanDefaultProperty -Object $RouteRecord -PropertyName "routeTrustedTelegramDms" -DefaultValue $false
-    return $RouteRecord
+    $matchType = if ($RouteRecord.PSObject.Properties.Name -contains "matchType" -and -not [string]::IsNullOrWhiteSpace([string]$RouteRecord.matchType)) {
+        ([string]$RouteRecord.matchType).Trim().ToLowerInvariant()
+    }
+    else {
+        ""
+    }
+
+    $peerId = if ($RouteRecord.PSObject.Properties.Name -contains "peerId" -and -not [string]::IsNullOrWhiteSpace([string]$RouteRecord.peerId)) {
+        ([string]$RouteRecord.peerId).Trim()
+    }
+    else {
+        ""
+    }
+
+    $normalizedRoutes = New-Object System.Collections.Generic.List[object]
+    if (-not [string]::IsNullOrWhiteSpace($matchType)) {
+        if ($matchType -notin @("trusted-dms", "trusted-groups", "direct", "group")) {
+            return @()
+        }
+
+        if ($matchType -in @("direct", "group") -and [string]::IsNullOrWhiteSpace($peerId)) {
+            return @()
+        }
+
+        $normalizedRoutes.Add([pscustomobject][ordered]@{
+                accountId     = $accountId
+                targetAgentId = $targetAgentId
+                matchType     = $matchType
+                peerId        = $peerId
+            })
+        return @($normalizedRoutes.ToArray())
+    }
+
+    $routeTrustedGroups = if ($RouteRecord.PSObject.Properties.Name -contains "routeTrustedTelegramGroups") {
+        ConvertTo-ToolkitBooleanValue -Value $RouteRecord.routeTrustedTelegramGroups -DefaultValue $false
+    }
+    else {
+        $false
+    }
+
+    $routeTrustedDms = if ($RouteRecord.PSObject.Properties.Name -contains "routeTrustedTelegramDms") {
+        ConvertTo-ToolkitBooleanValue -Value $RouteRecord.routeTrustedTelegramDms -DefaultValue $false
+    }
+    else {
+        $false
+    }
+
+    if ($routeTrustedGroups) {
+        $normalizedRoutes.Add([pscustomobject][ordered]@{
+                accountId     = $accountId
+                targetAgentId = $targetAgentId
+                matchType     = "trusted-groups"
+                peerId        = ""
+            })
+    }
+
+    if ($routeTrustedDms) {
+        $normalizedRoutes.Add([pscustomobject][ordered]@{
+                accountId     = $accountId
+                targetAgentId = $targetAgentId
+                matchType     = "trusted-dms"
+                peerId        = ""
+            })
+    }
+
+    return @($normalizedRoutes.ToArray())
 }
 
 function Get-ToolkitTelegramAccountList {
@@ -358,27 +421,32 @@ function Normalize-ToolkitTelegramRoutingConfig {
             })
     }
 
-    $routesByAccountId = [ordered]@{}
+    $normalizedRoutes = New-Object System.Collections.Generic.List[object]
+    $seenRouteKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($route in @($rawRoutes.ToArray())) {
-        $normalizedRoute = Normalize-ToolkitTelegramRouteRecord -RouteRecord $route -DefaultAccountId $defaultAccountId
-        if ($null -eq $normalizedRoute) {
-            continue
-        }
+        foreach ($normalizedRoute in @(Normalize-ToolkitTelegramRouteRecord -RouteRecord $route -DefaultAccountId $defaultAccountId)) {
+            if ($null -eq $normalizedRoute) {
+                continue
+            }
 
-        $accountId = [string]$normalizedRoute.accountId
-        if ([string]::IsNullOrWhiteSpace($accountId)) {
-            continue
-        }
+            $accountId = if ($normalizedRoute.PSObject.Properties.Name -contains "accountId") { [string]$normalizedRoute.accountId } else { "" }
+            $matchType = if ($normalizedRoute.PSObject.Properties.Name -contains "matchType") { [string]$normalizedRoute.matchType } else { "" }
+            $peerId = if ($normalizedRoute.PSObject.Properties.Name -contains "peerId") { [string]$normalizedRoute.peerId } else { "" }
+            if ([string]::IsNullOrWhiteSpace($accountId) -or [string]::IsNullOrWhiteSpace($matchType)) {
+                continue
+            }
 
-        $routesByAccountId[$accountId] = $normalizedRoute
+            $routeKey = ("{0}|{1}|{2}" -f $accountId, $matchType, $peerId)
+            if ($seenRouteKeys.Add($routeKey)) {
+                $normalizedRoutes.Add($normalizedRoute)
+            }
+        }
     }
-
-    $normalizedRoutes = @($routesByAccountId.Values)
     if ($telegramRouting.PSObject.Properties.Name -contains "routes") {
-        $telegramRouting.routes = $normalizedRoutes
+        $telegramRouting.routes = @($normalizedRoutes.ToArray())
     }
     else {
-        Add-Member -InputObject $telegramRouting -NotePropertyName "routes" -NotePropertyValue $normalizedRoutes -Force
+        Add-Member -InputObject $telegramRouting -NotePropertyName "routes" -NotePropertyValue @($normalizedRoutes.ToArray()) -Force
     }
 
     foreach ($legacyProperty in @("targetAgentId", "routeTrustedTelegramGroups", "routeTrustedTelegramDms")) {
@@ -459,6 +527,154 @@ function Get-ToolkitTelegramAccountTrustedGroupIds {
     }
 
     return @()
+}
+
+function Get-ToolkitTelegramRouteBindingSpecs {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [object[]]$Routes = @(),
+        [string]$DefaultAccountId = "default"
+    )
+
+    $normalizedRoutes = New-Object System.Collections.Generic.List[object]
+    foreach ($route in @($Routes)) {
+        foreach ($normalizedRoute in @(Normalize-ToolkitTelegramRouteRecord -RouteRecord $route -DefaultAccountId $DefaultAccountId)) {
+            if ($null -ne $normalizedRoute) {
+                $normalizedRoutes.Add($normalizedRoute)
+            }
+        }
+    }
+
+    $specificGroupKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $specificDirectKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($route in @($normalizedRoutes.ToArray())) {
+        $accountId = if ($route.PSObject.Properties.Name -contains "accountId" -and -not [string]::IsNullOrWhiteSpace([string]$route.accountId)) {
+            [string]$route.accountId
+        }
+        else {
+            $DefaultAccountId
+        }
+
+        $matchType = if ($route.PSObject.Properties.Name -contains "matchType") { ([string]$route.matchType).ToLowerInvariant() } else { "" }
+        $peerId = if ($route.PSObject.Properties.Name -contains "peerId") { [string]$route.peerId } else { "" }
+        switch ($matchType) {
+            "group" {
+                if (-not [string]::IsNullOrWhiteSpace($peerId)) {
+                    [void]$specificGroupKeys.Add(("{0}|group|{1}" -f $accountId, $peerId))
+                }
+            }
+            "direct" {
+                if (-not [string]::IsNullOrWhiteSpace($peerId)) {
+                    [void]$specificDirectKeys.Add(("{0}|direct|{1}" -f $accountId, $peerId))
+                }
+            }
+        }
+    }
+
+    $bindingSpecs = New-Object System.Collections.Generic.List[object]
+    $seenBindingKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($route in @($normalizedRoutes.ToArray())) {
+        $accountId = if ($route.PSObject.Properties.Name -contains "accountId" -and -not [string]::IsNullOrWhiteSpace([string]$route.accountId)) {
+            [string]$route.accountId
+        }
+        else {
+            $DefaultAccountId
+        }
+        $targetAgentId = if ($route.PSObject.Properties.Name -contains "targetAgentId") { [string]$route.targetAgentId } else { "" }
+        $matchType = if ($route.PSObject.Properties.Name -contains "matchType") { ([string]$route.matchType).ToLowerInvariant() } else { "" }
+        $peerId = if ($route.PSObject.Properties.Name -contains "peerId") { [string]$route.peerId } else { "" }
+
+        $candidateSpecs = @()
+        switch ($matchType) {
+            "trusted-groups" {
+                foreach ($groupId in @(Get-ToolkitTelegramAccountTrustedGroupIds -Config $Config -AccountId $accountId)) {
+                    $bindingKey = ("{0}|group|{1}" -f $accountId, [string]$groupId)
+                    if ($specificGroupKeys.Contains($bindingKey)) {
+                        continue
+                    }
+
+                    $candidateSpecs += [pscustomobject][ordered]@{
+                        accountId     = $accountId
+                        targetAgentId = $targetAgentId
+                        matchType     = $matchType
+                        peerKind      = "group"
+                        peerId        = [string]$groupId
+                    }
+                }
+            }
+            "trusted-dms" {
+                foreach ($directId in @(Get-ToolkitTelegramAccountTrustedDirectIds -Config $Config -AccountId $accountId)) {
+                    $bindingKey = ("{0}|direct|{1}" -f $accountId, [string]$directId)
+                    if ($specificDirectKeys.Contains($bindingKey)) {
+                        continue
+                    }
+
+                    $candidateSpecs += [pscustomobject][ordered]@{
+                        accountId     = $accountId
+                        targetAgentId = $targetAgentId
+                        matchType     = $matchType
+                        peerKind      = "direct"
+                        peerId        = [string]$directId
+                    }
+                }
+            }
+            "group" {
+                if (-not [string]::IsNullOrWhiteSpace($peerId)) {
+                    $candidateSpecs += [pscustomobject][ordered]@{
+                        accountId     = $accountId
+                        targetAgentId = $targetAgentId
+                        matchType     = $matchType
+                        peerKind      = "group"
+                        peerId        = $peerId
+                    }
+                }
+            }
+            "direct" {
+                if (-not [string]::IsNullOrWhiteSpace($peerId)) {
+                    $candidateSpecs += [pscustomobject][ordered]@{
+                        accountId     = $accountId
+                        targetAgentId = $targetAgentId
+                        matchType     = $matchType
+                        peerKind      = "direct"
+                        peerId        = $peerId
+                    }
+                }
+            }
+        }
+
+        foreach ($candidate in @($candidateSpecs)) {
+            $bindingKey = ("{0}|{1}|{2}" -f [string]$candidate.accountId, [string]$candidate.peerKind, [string]$candidate.peerId)
+            if ($seenBindingKeys.Add($bindingKey)) {
+                $bindingSpecs.Add($candidate)
+            }
+        }
+    }
+
+    return @($bindingSpecs.ToArray())
+}
+
+function Get-ToolkitTelegramRouteDescription {
+    param(
+        [Parameter(Mandatory = $true)]$RouteRecord,
+        [string]$DefaultAccountId = "default"
+    )
+
+    foreach ($normalizedRoute in @(Normalize-ToolkitTelegramRouteRecord -RouteRecord $RouteRecord -DefaultAccountId $DefaultAccountId)) {
+        if ($null -eq $normalizedRoute) {
+            continue
+        }
+
+        $matchType = if ($normalizedRoute.PSObject.Properties.Name -contains "matchType") { ([string]$normalizedRoute.matchType).ToLowerInvariant() } else { "" }
+        $peerId = if ($normalizedRoute.PSObject.Properties.Name -contains "peerId") { [string]$normalizedRoute.peerId } else { "" }
+        switch ($matchType) {
+            "trusted-dms" { return "trusted-dms" }
+            "trusted-groups" { return "trusted-groups" }
+            "direct" { return ("direct {0}" -f $peerId) }
+            "group" { return ("group {0}" -f $peerId) }
+        }
+    }
+
+    return "unknown"
 }
 
 function Ensure-ToolkitMarkdownTemplateKeysProperty {

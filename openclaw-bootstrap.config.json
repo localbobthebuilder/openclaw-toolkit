@@ -771,8 +771,14 @@
         {
           "accountId": "default",
           "targetAgentId": "chat-local",
-          "routeTrustedTelegramGroups": true,
-          "routeTrustedTelegramDms": true
+          "matchType": "trusted-groups",
+          "peerId": ""
+        },
+        {
+          "accountId": "default",
+          "targetAgentId": "chat-local",
+          "matchType": "trusted-dms",
+          "peerId": ""
         }
       ]
     },
@@ -809,7 +815,8 @@
           "anthropic/claude-sonnet-4-6",
           "google/gemini-3.1-flash-lite-preview"
         ],
-        "allowLocalFallback": true
+        "allowLocalFallback": true,
+        "toolsetKeys": []
       },
       {
         "key": "researchAgent",
@@ -847,9 +854,8 @@
           "allowAgents": []
         },
         "modelRef": "ollama/glm-4.7-flash:latest",
-        "routeTrustedTelegramGroups": true,
-        "routeTrustedTelegramDms": true,
-        "candidateModelRefs": []
+        "candidateModelRefs": [],
+        "toolsetKeys": []
       },
       {
         "key": "hostedTelegramAgent",
@@ -868,7 +874,8 @@
         "modelRef": "openai-codex/gpt-5.4",
         "candidateModelRefs": [
           "openai-codex/gpt-5.4"
-        ]
+        ],
+        "toolsetKeys": []
       },
       {
         "key": "localReviewAgent",

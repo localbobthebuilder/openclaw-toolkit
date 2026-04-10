@@ -1020,9 +1020,8 @@ else {
 
             $accountId = if ($route.PSObject.Properties.Name -contains "accountId" -and $route.accountId) { [string]$route.accountId } else { $defaultTelegramAccountId }
             $targetAgentId = if ($route.PSObject.Properties.Name -contains "targetAgentId" -and $route.targetAgentId) { [string]$route.targetAgentId } else { "(unset)" }
-            $dmState = if ($route.PSObject.Properties.Name -contains "routeTrustedTelegramDms" -and [bool]$route.routeTrustedTelegramDms) { "DM on" } else { "DM off" }
-            $groupState = if ($route.PSObject.Properties.Name -contains "routeTrustedTelegramGroups" -and [bool]$route.routeTrustedTelegramGroups) { "groups on" } else { "groups off" }
-            Write-Host ("- {0} -> {1} ({2}, {3})" -f $accountId, $targetAgentId, $dmState, $groupState)
+            $routeDescription = Get-ToolkitTelegramRouteDescription -RouteRecord $route -DefaultAccountId $defaultTelegramAccountId
+            Write-Host ("- {0} {1} -> {2}" -f $accountId, $routeDescription, $targetAgentId)
         }
     }
 

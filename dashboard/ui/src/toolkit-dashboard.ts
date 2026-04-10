@@ -129,6 +129,9 @@ export class ToolkitDashboard extends LitElement {
   private ws: WebSocket | null = null;
   private statusAbortController: AbortController | null = null;
   private seenServerStartTime: string | null = null;
+  private reconnectTimer: number | null = null;
+  private pendingSocketAction: string | null = null;
+  private pendingSocketRetryTimer: number | null = null;
 
   // Helper for API URL construction
   private getBaseUrl() {
@@ -316,23 +319,30 @@ export class ToolkitDashboard extends LitElement {
   }
 
   async fetchStatus() {
-    if (this.statusAbortController) {
-      this.statusAbortController.abort();
+    const previousController = this.statusAbortController;
+    if (previousController) {
+      previousController.abort();
     }
-    this.statusAbortController = new AbortController();
+    const controller = new AbortController();
+    this.statusAbortController = controller;
     this.statusLoaded = false;
 
     try {
       const res = await fetch(this.getBaseUrl() + '/api/status', {
-        signal: this.statusAbortController.signal
+        signal: controller.signal
       });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
+      if (this.statusAbortController !== controller) return;
       this.statusOutput = data.output;
       this.statusLoaded = true;
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
+      if (this.statusAbortController === controller && err.name !== 'AbortError') {
         console.error('Failed to fetch status', err);
+      }
+    } finally {
+      if (this.statusAbortController === controller) {
+        this.statusAbortController = null;
       }
     }
   }
@@ -461,10 +471,37 @@ export class ToolkitDashboard extends LitElement {
   }
 
   connectWS() {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      if (this.pendingSocketAction) {
+        this.schedulePendingSocketRetry();
+      }
+      return;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.port === '18791' ? '127.0.0.1:18791' : window.location.host;
     this.ws = new WebSocket(`${protocol}//${host}`);
     this.ws.onopen = () => {
+      if (this.reconnectTimer !== null) {
+        window.clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.clearPendingSocketRetry();
+      if (this.pendingSocketAction) {
+        const pendingAction = this.pendingSocketAction;
+        this.pendingSocketAction = null;
+        try {
+          this.ws?.send(pendingAction);
+          this.logs = [...this.logs, '\n[RESUME] Dashboard connection restored. Starting queued action...\n'];
+          return;
+        } catch (err) {
+          console.error('Failed to send queued WebSocket message', err);
+          this.pendingSocketAction = pendingAction;
+          this.logs = [...this.logs, '\n[WAIT] Dashboard connection is still not ready. Retrying queued action...\n'];
+          this.resetWebSocketConnection();
+          this.connectWS();
+          return;
+        }
+      }
       // If a command was running when the connection dropped (e.g. dashboard rebuild
       // killed the server), mark it finished so the UI is no longer locked.
       if (this.isRunning) {
@@ -509,34 +546,127 @@ export class ToolkitDashboard extends LitElement {
     };
     this.ws.onclose = () => {
       this.ws = null;
+      if (this.pendingSocketAction) {
+        this.schedulePendingSocketRetry();
+      }
       // Auto-reconnect after 3s (handles server restart / dashboard rebuild)
-      setTimeout(() => this.connectWS(), 3000);
+      if (this.reconnectTimer === null) {
+        this.reconnectTimer = window.setTimeout(() => {
+          this.reconnectTimer = null;
+          this.connectWS();
+        }, 3000);
+      }
     };
     this.ws.onerror = () => {
       this.ws?.close();
     };
   }
 
+  private clearPendingSocketRetry() {
+    if (this.pendingSocketRetryTimer !== null) {
+      window.clearTimeout(this.pendingSocketRetryTimer);
+      this.pendingSocketRetryTimer = null;
+    }
+  }
+
+  private resetWebSocketConnection() {
+    const staleSocket = this.ws;
+    this.ws = null;
+    if (!staleSocket) return;
+    staleSocket.onopen = null;
+    staleSocket.onmessage = null;
+    staleSocket.onclose = null;
+    staleSocket.onerror = null;
+    try {
+      staleSocket.close();
+    } catch (err) {
+      console.error('Failed to close stale WebSocket', err);
+    }
+  }
+
+  private schedulePendingSocketRetry() {
+    if (!this.pendingSocketAction || this.pendingSocketRetryTimer !== null) {
+      return;
+    }
+    this.pendingSocketRetryTimer = window.setTimeout(() => {
+      this.pendingSocketRetryTimer = null;
+      if (!this.pendingSocketAction) {
+        return;
+      }
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        return;
+      }
+      this.resetWebSocketConnection();
+      this.connectWS();
+    }, 1500);
+  }
+
+  private trySendWebSocketMessage(payload: any, reconnectMessage: string) {
+    const serialized = JSON.stringify(payload);
+    try {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(serialized);
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to send WebSocket message', err);
+      this.resetWebSocketConnection();
+    }
+
+    this.pendingSocketAction = serialized;
+    this.connectWS();
+    this.schedulePendingSocketRetry();
+    this.logs = [...this.logs, `\n[WAIT] ${reconnectMessage}`];
+    this.requestUpdate();
+    return false;
+  }
+
   runCommand(command: string, args: string[] = []) {
-    if (!this.ws || this.isRunning) return;
+    if (this.isRunning) return;
+    this.activeTab = 'logs';
     this.isRunning = true;
     this.logs = [`[START] Running: ${command} ${args.join(' ')}...\n`];
-    this.activeTab = 'logs';
-    this.ws.send(JSON.stringify({ type: 'run-command', command, args }));
+    if (!this.trySendWebSocketMessage(
+      { type: 'run-command', command, args },
+      'Dashboard connection is reconnecting. The action is queued and will start automatically.'
+    )) {
+      return;
+    }
   }
 
   cancelCommand() {
-    if (!this.ws || !this.isRunning) return;
-    this.ws.send(JSON.stringify({ type: 'cancel-command' }));
+    if (!this.isRunning) return;
+    if (this.pendingSocketAction) {
+      this.pendingSocketAction = null;
+      this.clearPendingSocketRetry();
+      this.isRunning = false;
+      this.logs = [...this.logs, '\n[CANCELLED] Queued action was cancelled before it started.\n'];
+      return;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ type: 'cancel-command' }));
+      } catch (err) {
+        console.error('Failed to send cancel command', err);
+        this.logs = [...this.logs, '\n[WAIT] Dashboard connection is reconnecting, so cancel could not be sent yet.\n'];
+      }
+      return;
+    }
+    this.logs = [...this.logs, '\n[WAIT] Dashboard connection is reconnecting, so cancel could not be sent yet.\n'];
   }
 
   rebootService(service: string) {
-    if (!this.ws || this.isRunning) return;
+    if (this.isRunning) return;
     if (!confirm(`Are you sure you want to reboot ${service}?`)) return;
+    this.activeTab = 'logs';
     this.isRunning = true;
     this.logs = [`[REBOOT] Restarting ${service}...\n`];
-    this.activeTab = 'logs';
-    this.ws.send(JSON.stringify({ type: 'reboot-service', service }));
+    if (!this.trySendWebSocketMessage(
+      { type: 'reboot-service', service },
+      'Dashboard connection is reconnecting. The reboot is queued and will start automatically.'
+    )) {
+      return;
+    }
   }
 
   async saveConfig() {
@@ -796,26 +926,102 @@ export class ToolkitDashboard extends LitElement {
       return normalized;
   }
 
-  normalizeTelegramRouteRecord(route: any, defaultAccountId: string) {
+  normalizeSingleTelegramRouteRule(route: any, defaultAccountId: string) {
       const normalized = JSON.parse(JSON.stringify(route || {}));
       normalized.accountId = typeof normalized.accountId === 'string' && normalized.accountId.trim()
         ? normalized.accountId.trim()
         : defaultAccountId;
       normalized.targetAgentId = typeof normalized.targetAgentId === 'string' ? normalized.targetAgentId.trim() : '';
-      normalized.routeTrustedTelegramGroups = this.normalizeBoolean(normalized.routeTrustedTelegramGroups, false);
-      normalized.routeTrustedTelegramDms = this.normalizeBoolean(normalized.routeTrustedTelegramDms, false);
+      normalized.matchType = typeof normalized.matchType === 'string' ? normalized.matchType.trim().toLowerCase() : '';
+      normalized.peerId = typeof normalized.peerId === 'string' ? normalized.peerId.trim() : '';
+      if (!['trusted-dms', 'trusted-groups', 'direct', 'group'].includes(normalized.matchType)) {
+        return null;
+      }
+      if (['direct', 'group'].includes(normalized.matchType) && !normalized.peerId) {
+        return null;
+      }
+      if (!normalized.targetAgentId) {
+        return null;
+      }
       return normalized;
+  }
+
+  expandTelegramRouteEntries(route: any, defaultAccountId: string) {
+      const source = JSON.parse(JSON.stringify(route || {}));
+      const accountId = typeof source.accountId === 'string' && source.accountId.trim()
+        ? source.accountId.trim()
+        : defaultAccountId;
+      const targetAgentId = typeof source.targetAgentId === 'string' ? source.targetAgentId.trim() : '';
+      const matchType = typeof source.matchType === 'string' ? source.matchType.trim().toLowerCase() : '';
+      const peerId = typeof source.peerId === 'string' ? source.peerId.trim() : '';
+
+      if (matchType) {
+        const normalized = this.normalizeSingleTelegramRouteRule({
+          accountId,
+          targetAgentId,
+          matchType,
+          peerId
+        }, defaultAccountId);
+        return normalized ? [normalized] : [];
+      }
+
+      const expanded: any[] = [];
+      if (this.normalizeBoolean(source.routeTrustedTelegramDms, false)) {
+        expanded.push(this.normalizeSingleTelegramRouteRule({
+          accountId,
+          targetAgentId,
+          matchType: 'trusted-dms'
+        }, defaultAccountId));
+      }
+      if (this.normalizeBoolean(source.routeTrustedTelegramGroups, false)) {
+        expanded.push(this.normalizeSingleTelegramRouteRule({
+          accountId,
+          targetAgentId,
+          matchType: 'trusted-groups'
+        }, defaultAccountId));
+      }
+      return expanded.filter(Boolean);
+  }
+
+  getTelegramRouteKey(route: any) {
+      const accountId = typeof route?.accountId === 'string' ? route.accountId.trim() : '';
+      const matchType = typeof route?.matchType === 'string' ? route.matchType.trim().toLowerCase() : '';
+      const peerId = typeof route?.peerId === 'string' ? route.peerId.trim() : '';
+      return `${accountId}|${matchType}|${peerId}`;
   }
 
   normalizeTelegramRouteList(routes: any[], defaultAccountId: string) {
       const normalizedRoutes = new Map<string, any>();
       for (const route of Array.isArray(routes) ? routes : []) {
-          const normalizedRoute = this.normalizeTelegramRouteRecord(route, defaultAccountId);
-          if (!normalizedRoute.accountId) continue;
-          if (!normalizedRoute.targetAgentId && !normalizedRoute.routeTrustedTelegramGroups && !normalizedRoute.routeTrustedTelegramDms) continue;
-          normalizedRoutes.set(normalizedRoute.accountId, normalizedRoute);
+          for (const normalizedRoute of this.expandTelegramRouteEntries(route, defaultAccountId)) {
+              if (!normalizedRoute?.accountId || !normalizedRoute?.matchType || !normalizedRoute?.targetAgentId) continue;
+              normalizedRoutes.set(this.getTelegramRouteKey(normalizedRoute), normalizedRoute);
+          }
       }
       return Array.from(normalizedRoutes.values());
+  }
+
+  getLegacyAgentTelegramRoutes(agentList: any[], defaultAccountId: string) {
+      const legacyRoutes: any[] = [];
+      for (const agent of Array.isArray(agentList) ? agentList : []) {
+        const targetAgentId = typeof agent?.id === 'string' ? agent.id.trim() : '';
+        if (!targetAgentId) continue;
+        if (this.normalizeBoolean(agent?.routeTrustedTelegramDms, false)) {
+          legacyRoutes.push({
+            accountId: defaultAccountId,
+            targetAgentId,
+            matchType: 'trusted-dms'
+          });
+        }
+        if (this.normalizeBoolean(agent?.routeTrustedTelegramGroups, false)) {
+          legacyRoutes.push({
+            accountId: defaultAccountId,
+            targetAgentId,
+            matchType: 'trusted-groups'
+          });
+        }
+      }
+      return this.normalizeTelegramRouteList(legacyRoutes, defaultAccountId);
   }
 
   ensureTelegramRoutingConfig() {
@@ -841,9 +1047,15 @@ export class ToolkitDashboard extends LitElement {
       return this.ensureTelegramRoutingConfig().routes;
   }
 
-  getTelegramRouteRecord(accountId: string) {
+  getTelegramRouteRecord(accountId: string, matchType: string, peerId = '') {
       const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : this.getDefaultTelegramAccountId();
-      return this.getTelegramRouteList().find((route: any) => String(route?.accountId || '') === normalizedAccountId) || null;
+      const normalizedMatchType = typeof matchType === 'string' ? matchType.trim().toLowerCase() : '';
+      const normalizedPeerId = typeof peerId === 'string' ? peerId.trim() : '';
+      return this.getTelegramRouteList().find((route: any) =>
+        String(route?.accountId || '') === normalizedAccountId
+        && String(route?.matchType || '').toLowerCase() === normalizedMatchType
+        && String(route?.peerId || '') === normalizedPeerId
+      ) || null;
   }
 
   getTelegramRoutesForAgent(agentId: string) {
@@ -852,15 +1064,72 @@ export class ToolkitDashboard extends LitElement {
       return this.getTelegramRouteList().filter((route: any) => String(route?.targetAgentId || '') === normalizedAgentId);
   }
 
-  ensureTelegramRouteRecord(accountId: string) {
+  getTelegramRouteListForAccount(accountId: string) {
       const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : this.getDefaultTelegramAccountId();
-      const routes = this.getTelegramRouteList();
-      let route = routes.find((candidate: any) => String(candidate?.accountId || '') === normalizedAccountId);
-      if (!route) {
-          route = this.normalizeTelegramRouteRecord({ accountId: normalizedAccountId }, this.getDefaultTelegramAccountId());
-          routes.push(route);
+      return this.getTelegramRouteList().filter((route: any) => String(route?.accountId || '') === normalizedAccountId);
+  }
+
+  upsertTelegramRouteRecord(route: any) {
+      const normalized = this.normalizeSingleTelegramRouteRule(route, this.getDefaultTelegramAccountId());
+      if (!normalized) return null;
+      const routeKey = this.getTelegramRouteKey(normalized);
+      const telegramRouting = this.ensureTelegramRoutingConfig();
+      const nextRoutes = this.getTelegramRouteList()
+        .filter((candidate: any) => this.getTelegramRouteKey(candidate) !== routeKey);
+      nextRoutes.push(normalized);
+      telegramRouting.routes = this.normalizeTelegramRouteList(nextRoutes, this.getDefaultTelegramAccountId());
+      return normalized;
+  }
+
+  setTelegramManagedRouteTarget(accountId: string, matchType: string, targetAgentId: string, peerId = '') {
+      const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : this.getDefaultTelegramAccountId();
+      const normalizedMatchType = typeof matchType === 'string' ? matchType.trim().toLowerCase() : '';
+      const normalizedPeerId = typeof peerId === 'string' ? peerId.trim() : '';
+      const normalizedTargetAgentId = typeof targetAgentId === 'string' ? targetAgentId.trim() : '';
+      if (!normalizedTargetAgentId) {
+        this.removeTelegramRouteRule(normalizedAccountId, normalizedMatchType, normalizedPeerId);
+        return null;
       }
-      return route;
+
+      return this.upsertTelegramRouteRecord({
+        accountId: normalizedAccountId,
+        targetAgentId: normalizedTargetAgentId,
+        matchType: normalizedMatchType,
+        peerId: normalizedPeerId
+      });
+  }
+
+  addTelegramSpecificRoute(accountId: string) {
+      const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : this.getDefaultTelegramAccountId();
+      const defaultTargetAgentId = String(this.getDefaultRoutingAgentEntry()?.agent?.id || '').trim();
+      if (!defaultTargetAgentId) return;
+      let route = {
+        accountId: normalizedAccountId,
+        targetAgentId: defaultTargetAgentId,
+        matchType: 'group',
+        peerId: ''
+      };
+      let suffix = 1;
+      let candidatePeerId = '-1000000000000';
+      while (this.getTelegramRouteRecord(normalizedAccountId, 'group', candidatePeerId)) {
+        suffix += 1;
+        candidatePeerId = `-100000000000${suffix}`;
+      }
+      route.peerId = candidatePeerId;
+      this.upsertTelegramRouteRecord(route);
+      this.requestUpdate();
+  }
+
+  removeTelegramRouteRule(accountId: string, matchType: string, peerId = '') {
+      const normalizedAccountId = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : '';
+      const normalizedMatchType = typeof matchType === 'string' ? matchType.trim().toLowerCase() : '';
+      const normalizedPeerId = typeof peerId === 'string' ? peerId.trim() : '';
+      if (!normalizedAccountId || !normalizedMatchType) return;
+      const telegramRouting = this.ensureTelegramRoutingConfig();
+      telegramRouting.routes = this.getTelegramRouteList().filter((route: any) =>
+        !(String(route?.accountId || '') === normalizedAccountId
+          && String(route?.matchType || '').toLowerCase() === normalizedMatchType
+          && String(route?.peerId || '') === normalizedPeerId));
   }
 
   removeTelegramRouteRecord(accountId: string) {
@@ -876,15 +1145,15 @@ export class ToolkitDashboard extends LitElement {
       if (!normalizedOldId || !normalizedNewId || normalizedOldId === normalizedNewId) return;
 
       const telegramRouting = this.ensureTelegramRoutingConfig();
-      const existingNewRoute = this.getTelegramRouteRecord(normalizedNewId);
       telegramRouting.routes = this.getTelegramRouteList()
         .filter((route: any) => {
           if (String(route?.accountId || '') !== normalizedOldId) return true;
-          if (existingNewRoute) return false;
           route.accountId = normalizedNewId;
           return true;
         })
-        .map((route: any) => this.normalizeTelegramRouteRecord(route, this.getDefaultTelegramAccountId()));
+        .map((route: any) => this.normalizeSingleTelegramRouteRule(route, this.getDefaultTelegramAccountId()))
+        .filter(Boolean);
+      telegramRouting.routes = this.normalizeTelegramRouteList(telegramRouting.routes, this.getDefaultTelegramAccountId());
   }
 
   normalizeTelegramAccountRecord(account: any) {
@@ -1070,13 +1339,20 @@ export class ToolkitDashboard extends LitElement {
   }) {
       const isDefault = options.isDefault === true;
       const accountId = typeof options.accountId === 'string' ? options.accountId.trim() : '';
-      const accountRoute = accountId ? this.getTelegramRouteRecord(accountId) : null;
+      const trustedDmRoute = accountId ? this.getTelegramRouteRecord(accountId, 'trusted-dms') : null;
+      const trustedGroupRoute = accountId ? this.getTelegramRouteRecord(accountId, 'trusted-groups') : null;
+      const specificRoutes = accountId
+        ? this.getTelegramRouteListForAccount(accountId).filter((route: any) => ['group', 'direct'].includes(String(route?.matchType || '').toLowerCase()))
+        : [];
       const accountExecApprovals = this.ensureTelegramExecApprovalsConfig(isDefault ? undefined : accountTarget);
       const accountExecApprovers = Array.isArray(accountExecApprovals.approvers) ? accountExecApprovals.approvers : [];
       const accountGroups = Array.isArray(accountTarget.groups) ? accountTarget.groups : [];
       const defaultRoutingAgentLabel = this.getAgentDisplayLabel(this.getDefaultRoutingAgentEntry()?.agent);
-      const selectedTargetAgentLabel = accountRoute?.targetAgentId
-        ? (options.telegramRouteAgentChoices.find((choice: any) => choice.id === accountRoute.targetAgentId)?.label || accountRoute.targetAgentId)
+      const trustedDmTargetLabel = trustedDmRoute?.targetAgentId
+        ? (options.telegramRouteAgentChoices.find((choice: any) => choice.id === trustedDmRoute.targetAgentId)?.label || trustedDmRoute.targetAgentId)
+        : '';
+      const trustedGroupTargetLabel = trustedGroupRoute?.targetAgentId
+        ? (options.telegramRouteAgentChoices.find((choice: any) => choice.id === trustedGroupRoute.targetAgentId)?.label || trustedGroupRoute.targetAgentId)
         : '';
       const setupStatus = this.getTelegramSetupStatusRecord(accountId, isDefault);
       const setupComplete = !!setupStatus?.configured;
@@ -1180,39 +1456,91 @@ export class ToolkitDashboard extends LitElement {
               <h3>Managed Routing</h3>
             </div>
             <div class="form-group">
-              <label>Target Agent</label>
-              <select ?disabled=${!accountId} .value=${accountRoute?.targetAgentId || ''} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).targetAgentId = e.target.value; this.requestUpdate(); }}>
-                <option value="">No managed route</option>
-                ${options.telegramRouteAgentChoices.map((choice: any) => html`<option value=${choice.id} ?selected=${accountRoute?.targetAgentId === choice.id}>${choice.label}</option>`)}
+              <label>Trusted DM Target Agent</label>
+              <select ?disabled=${!accountId} .value=${trustedDmRoute?.targetAgentId || ''} @change=${(e: any) => { if (!accountId) return; this.setTelegramManagedRouteTarget(accountId, 'trusted-dms', e.target.value); this.requestUpdate(); }}>
+                <option value="">Use default agent</option>
+                ${options.telegramRouteAgentChoices.map((choice: any) => html`<option value=${choice.id} ?selected=${trustedDmRoute?.targetAgentId === choice.id}>${choice.label}</option>`)}
               </select>
-              <span class="help-text">Selecting a Target Agent here does not change Telegram routing by itself. One or both route toggles below must also be enabled. If both toggles are off, allowed Telegram traffic for this account falls back to the current default agent <code>${defaultRoutingAgentLabel}</code>, unless some other explicit Telegram binding matches first.</span>
-              ${accountRoute?.targetAgentId ? html`
-                <span class="help-text">Current managed route: <code>${accountId}</code> -> <code>${accountRoute.targetAgentId}</code></span>
-              ` : ''}
+              <span class="help-text">Choosing an agent enables a managed trusted-DM route for this account, and leaving it empty disables that managed route so Telegram falls back to <code>${defaultRoutingAgentLabel}</code>.</span>
+              ${trustedDmRoute?.targetAgentId ? html`
+                <span class="help-text">Trusted Telegram direct messages are currently sent to <strong>${trustedDmTargetLabel}</strong>.</span>
+              ` : html`
+                <span class="help-text" style="color: #ff9800; font-weight: 600;">No managed DM target is set, so trusted Telegram direct messages for this account currently fall back to <strong>${defaultRoutingAgentLabel}</strong>.</span>
+              `}
             </div>
-            <div class="grid-2">
-              <div class="form-group">
-                <label class="toggle-switch">
-                  <input type="checkbox" ?disabled=${!accountId} ?checked=${!!accountRoute?.routeTrustedTelegramDms} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).routeTrustedTelegramDms = e.target.checked; this.requestUpdate(); }}>
-                  Route trusted DMs
-                </label>
-                ${accountRoute?.routeTrustedTelegramDms ? html`
-                  <span class="help-text">Trusted Telegram direct messages for this account are currently sent to <strong>Target Agent above (${selectedTargetAgentLabel || 'no target selected'})</strong>.</span>
-                ` : html`
-                  <span class="help-text" style="color: #ff9800; font-weight: 600;">Disabled: trusted Telegram direct messages for this account will currently fall back to <strong>${defaultRoutingAgentLabel}</strong>, unless another explicit Telegram binding matches first.</span>
-                `}
+            <div class="form-group">
+              <label>Allowed Groups Default Target Agent</label>
+              <select ?disabled=${!accountId} .value=${trustedGroupRoute?.targetAgentId || ''} @change=${(e: any) => { if (!accountId) return; this.setTelegramManagedRouteTarget(accountId, 'trusted-groups', e.target.value); this.requestUpdate(); }}>
+                <option value="">Use default agent</option>
+                ${options.telegramRouteAgentChoices.map((choice: any) => html`<option value=${choice.id} ?selected=${trustedGroupRoute?.targetAgentId === choice.id}>${choice.label}</option>`)}
+              </select>
+              <span class="help-text">Choosing an agent enables the managed default route for allowed groups on this account, and leaving it empty disables that managed group route. Individual groups below can still override it.</span>
+              ${trustedGroupRoute?.targetAgentId ? html`
+                <span class="help-text">Allowed Telegram groups without a group-specific override are currently sent to <strong>${trustedGroupTargetLabel}</strong>.</span>
+              ` : html`
+                <span class="help-text" style="color: #ff9800; font-weight: 600;">No managed default group target is set, so allowed Telegram groups currently fall back to <strong>${defaultRoutingAgentLabel}</strong> unless a group-specific override is set below.</span>
+              `}
+            </div>
+            <div class="card" style="padding: 14px; margin-top: 16px;">
+              <div class="card-header" style="margin-bottom: 12px;">
+                <h3>Specific Telegram Routes</h3>
+                <button class="btn btn-ghost" ?disabled=${!accountId} @click=${() => this.addTelegramSpecificRoute(accountId)}>+ Add Specific Route</button>
               </div>
-              <div class="form-group">
-                <label class="toggle-switch">
-                  <input type="checkbox" ?disabled=${!accountId} ?checked=${!!accountRoute?.routeTrustedTelegramGroups} @change=${(e: any) => { if (!accountId) return; this.ensureTelegramRouteRecord(accountId).routeTrustedTelegramGroups = e.target.checked; this.requestUpdate(); }}>
-                  Route trusted groups
-                </label>
-                ${accountRoute?.routeTrustedTelegramGroups ? html`
-                  <span class="help-text">Allowed Telegram group messages for this account are currently sent to <strong>Target Agent above (${selectedTargetAgentLabel || 'no target selected'})</strong>.</span>
-                ` : html`
-                  <span class="help-text" style="color: #ff9800; font-weight: 600;">Disabled: allowed Telegram group messages for this account will currently fall back to <strong>${defaultRoutingAgentLabel}</strong>, unless another explicit Telegram binding matches first.</span>
-                `}
-              </div>
+              <span class="help-text" style="margin-top: 0; margin-bottom: 12px;">Use specific routes when the same Telegram bot should send one group to one agent and another group or DM source to a different agent.</span>
+              ${specificRoutes.length === 0 ? html`
+                <span class="help-text">No specific Telegram routes configured for this account yet.</span>
+              ` : specificRoutes.map((route: any) => html`
+                <div class="card" style="padding: 14px; margin-bottom: 12px;">
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>Route Type</label>
+                      <select .value=${route.matchType || 'group'} @change=${(e: any) => {
+                        const nextMatchType = e.target.value;
+                        this.removeTelegramRouteRule(accountId, route.matchType, route.peerId || '');
+                        const defaultPeerId = nextMatchType === 'direct' ? '123456789' : '-1000000000000';
+                        this.upsertTelegramRouteRecord({
+                          accountId,
+                          matchType: nextMatchType,
+                          peerId: defaultPeerId,
+                          targetAgentId: route.targetAgentId || String(this.getDefaultRoutingAgentEntry()?.agent?.id || '')
+                        });
+                        this.requestUpdate();
+                      }}>
+                        <option value="group">Specific group</option>
+                        <option value="direct">Specific DM sender</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Target Agent</label>
+                      <select .value=${route.targetAgentId || ''} @change=${(e: any) => { this.setTelegramManagedRouteTarget(accountId, route.matchType, e.target.value, route.peerId || ''); this.requestUpdate(); }}>
+                        <option value="">Remove specific route</option>
+                        ${options.telegramRouteAgentChoices.map((choice: any) => html`<option value=${choice.id} ?selected=${route.targetAgentId === choice.id}>${choice.label}</option>`)}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>${route.matchType === 'direct' ? 'Telegram User ID' : 'Telegram Group ID'}</label>
+                    <input
+                      type="text"
+                      .value=${route.peerId || ''}
+                      @input=${(e: any) => {
+                        const nextPeerId = e.target.value;
+                        this.removeTelegramRouteRule(accountId, route.matchType, route.peerId || '');
+                        this.upsertTelegramRouteRecord({
+                          accountId,
+                          matchType: route.matchType,
+                          peerId: nextPeerId,
+                          targetAgentId: route.targetAgentId || String(this.getDefaultRoutingAgentEntry()?.agent?.id || '')
+                        });
+                        this.requestUpdate();
+                      }}>
+                    <span class="help-text">${route.matchType === 'direct'
+                      ? 'Numeric Telegram user ID that should always route to the selected agent on this account.'
+                      : 'Negative Telegram group or supergroup chat ID that should always route to the selected agent on this account.'}</span>
+                  </div>
+                  <button class="btn btn-danger" @click=${() => { this.removeTelegramRouteRule(accountId, route.matchType, route.peerId || ''); this.requestUpdate(); }}>Remove Route</button>
+                </div>
+              `)}
             </div>
           </div>
           <div class="form-group" style="margin-bottom: 0;">
@@ -3650,12 +3978,15 @@ export class ToolkitDashboard extends LitElement {
     if (typeof clone.modelRef !== 'string') {
       clone.modelRef = '';
     }
+    delete clone.routeTrustedTelegramGroups;
+    delete clone.routeTrustedTelegramDms;
     clone.modelSource = this.inferModelSourceFromAgent(clone);
     return clone;
   }
 
   buildPersistedConfig(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
+    const defaultTelegramAccountId = (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default';
     clone.agents = clone.agents || { telegramRouting: {}, list: [] };
     clone.agents.telegramRouting = clone.agents.telegramRouting || {};
     clone.agents.telegramRouting.routes = this.normalizeTelegramRouteList(
@@ -3663,13 +3994,13 @@ export class ToolkitDashboard extends LitElement {
         ? clone.agents.telegramRouting.routes
         : ((clone.agents.telegramRouting.targetAgentId || clone.agents.telegramRouting.routeTrustedTelegramGroups || clone.agents.telegramRouting.routeTrustedTelegramDms)
           ? [{
-              accountId: (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default',
+              accountId: defaultTelegramAccountId,
               targetAgentId: clone.agents.telegramRouting.targetAgentId || '',
               routeTrustedTelegramGroups: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramGroups, false),
               routeTrustedTelegramDms: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramDms, false)
             }]
-          : []),
-      (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default'
+          : this.getLegacyAgentTelegramRoutes(clone.agents?.list, defaultTelegramAccountId)),
+      defaultTelegramAccountId
     );
     delete clone.agents.telegramRouting.targetAgentId;
     delete clone.agents.telegramRouting.routeTrustedTelegramGroups;
@@ -3719,6 +4050,7 @@ export class ToolkitDashboard extends LitElement {
   sanitizeConfigModelNames(config: any) {
     const clone = JSON.parse(JSON.stringify(config));
     if (!clone) return clone;
+    const defaultTelegramAccountId = (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default';
     if (!clone.agents || typeof clone.agents !== 'object') {
       clone.agents = { telegramRouting: {}, list: [] };
     }
@@ -3728,13 +4060,13 @@ export class ToolkitDashboard extends LitElement {
         ? clone.agents.telegramRouting.routes
         : ((clone.agents.telegramRouting.targetAgentId || clone.agents.telegramRouting.routeTrustedTelegramGroups || clone.agents.telegramRouting.routeTrustedTelegramDms)
           ? [{
-              accountId: (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default',
+              accountId: defaultTelegramAccountId,
               targetAgentId: clone.agents.telegramRouting.targetAgentId || '',
               routeTrustedTelegramGroups: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramGroups, false),
               routeTrustedTelegramDms: this.normalizeBoolean(clone.agents.telegramRouting.routeTrustedTelegramDms, false)
             }]
-          : []),
-      (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default'
+          : this.getLegacyAgentTelegramRoutes(clone.agents?.list, defaultTelegramAccountId)),
+      defaultTelegramAccountId
     );
     delete clone.agents.telegramRouting.targetAgentId;
     delete clone.agents.telegramRouting.routeTrustedTelegramGroups;
@@ -4959,15 +5291,17 @@ export class ToolkitDashboard extends LitElement {
                       <span class="badge">Telegram</span>
                     </div>
                     <div class="toolset-preview-rows">
-                      <div class="toolset-preview-row">
-                        <div class="toolset-preview-label">Route</div>
-                        <div class="toolset-preview-tags">
-                          ${route?.routeTrustedTelegramDms ? html`<div class="tag">Trusted DMs</div>` : ''}
-                          ${route?.routeTrustedTelegramGroups ? html`<div class="tag">Trusted Groups</div>` : ''}
-                          ${!route?.routeTrustedTelegramDms && !route?.routeTrustedTelegramGroups ? html`<div class="toolset-preview-empty">No trusted inbound Telegram routing enabled.</div>` : ''}
+                        <div class="toolset-preview-row">
+                          <div class="toolset-preview-label">Route</div>
+                          <div class="toolset-preview-tags">
+                          ${String(route?.matchType || '').toLowerCase() === 'trusted-dms' ? html`<div class="tag">Trusted DMs</div>` : ''}
+                          ${String(route?.matchType || '').toLowerCase() === 'trusted-groups' ? html`<div class="tag">Trusted Groups</div>` : ''}
+                          ${String(route?.matchType || '').toLowerCase() === 'group' ? html`<div class="tag">Group ${route?.peerId || '(missing id)'}</div>` : ''}
+                          ${String(route?.matchType || '').toLowerCase() === 'direct' ? html`<div class="tag">DM ${route?.peerId || '(missing id)'}</div>` : ''}
+                          ${!route?.matchType ? html`<div class="toolset-preview-empty">No inbound Telegram route details available.</div>` : ''}
+                          </div>
                         </div>
                       </div>
-                    </div>
                   </div>
                 `)}
                 <div class="help-text" style="margin-top: 8px;">Change these routes on <strong>Configuration -> Features -> Telegram</strong>.</div>
