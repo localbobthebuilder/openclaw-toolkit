@@ -4763,6 +4763,113 @@ export class ToolkitDashboard extends LitElement {
     return this.config.modelCatalog;
   }
 
+  getRemainingLocalModelIds(excludedModelId: string) {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const model of this.getKnownLocalModelCatalog()) {
+      const modelId = typeof model?.id === 'string' ? model.id.trim() : '';
+      if (!modelId || modelId === excludedModelId || seen.has(modelId)) {
+        continue;
+      }
+      seen.add(modelId);
+      ids.push(modelId);
+    }
+    return ids;
+  }
+
+  getMutableManagedAgentsForModelEdits() {
+    const agents: any[] = Array.isArray(this.config?.agents?.list) ? [...this.config.agents.list] : [];
+    if (this.editingAgentDraft) {
+      agents.push(this.editingAgentDraft);
+    }
+    return agents;
+  }
+
+  applyLocalModelRemovalToAgent(agent: any, removedModelRef: string, fallbackReplacementRef: string) {
+    if (!agent || typeof agent !== 'object') {
+      return { changed: false, becameModelLess: false };
+    }
+
+    const currentCandidates = Array.isArray(agent.candidateModelRefs)
+      ? agent.candidateModelRefs.filter((ref: any) => typeof ref === 'string' && ref.length > 0)
+      : [];
+    const nextCandidates = currentCandidates.filter((ref: string) => ref !== removedModelRef);
+    const nextModelRef = nextCandidates.find((ref: string) => typeof ref === 'string' && ref.length > 0) || fallbackReplacementRef;
+
+    let changed = false;
+    let becameModelLess = false;
+    if (typeof agent.modelRef === 'string' && agent.modelRef === removedModelRef) {
+      if (!nextModelRef) {
+        agent.modelRef = '';
+        changed = true;
+        becameModelLess = true;
+      } else {
+        agent.modelRef = nextModelRef;
+        changed = true;
+      }
+    }
+
+    if (Array.isArray(agent.candidateModelRefs) && nextCandidates.length !== currentCandidates.length) {
+      agent.candidateModelRefs = nextCandidates;
+      changed = true;
+    }
+
+    if (changed) {
+      this.syncAgentModelSource(agent);
+    }
+
+    return { changed, becameModelLess };
+  }
+
+  removeLocalCatalogModelFromConfig(idx: number, model: any) {
+    const models = this.ensureSharedModelCatalog();
+    const modelId = typeof model?.id === 'string' ? model.id.trim() : '';
+    if (!modelId) {
+      return false;
+    }
+
+    const removedModelRef = `ollama/${modelId}`;
+    const remainingLocalIds = this.getRemainingLocalModelIds(modelId);
+    const fallbackReplacementRef = remainingLocalIds.length > 0 ? `ollama/${remainingLocalIds[0]}` : '';
+    const modelLessAgents = new Set<string>();
+
+    for (const agent of this.getMutableManagedAgentsForModelEdits()) {
+      const previewAgent = this.cloneValue(agent);
+      const result = this.applyLocalModelRemovalToAgent(previewAgent, removedModelRef, fallbackReplacementRef);
+      if (result.becameModelLess) {
+        modelLessAgents.add(this.getAgentDisplayLabel(agent));
+      }
+    }
+
+    if (modelLessAgents.size > 0) {
+      const proceed = confirm(
+        `Remove local model "${modelId}" even though it is the last local option for some agents?\n\nThese agents will become model-less: ${[...modelLessAgents].join(', ')}.\n\nYou can still save this change and assign new models later.`
+      );
+      if (!proceed) {
+        return false;
+      }
+    }
+
+    for (const agent of this.getMutableManagedAgentsForModelEdits()) {
+      this.applyLocalModelRemovalToAgent(agent, removedModelRef, fallbackReplacementRef);
+    }
+
+    this.config.modelCatalog = models.filter((_: any, modelIdx: number) => modelIdx !== idx);
+    if (Array.isArray(this.config?.ollama?.models)) {
+      this.config.ollama.models = this.config.ollama.models.filter((entry: any) => String(entry?.id || '') !== modelId);
+    }
+
+    for (const endpoint of this.getConfigEndpoints()) {
+      const runtime = this.getEndpointOllama(endpoint);
+      if (runtime && Array.isArray(runtime.models)) {
+        runtime.models = runtime.models.filter((entry: any) => String(entry?.id || '') !== modelId);
+      }
+    }
+
+    this.requestUpdate();
+    return true;
+  }
+
   getOllamaModelCatalog() {
     return this.getKnownLocalModelCatalog();
   }
@@ -5586,7 +5693,7 @@ export class ToolkitDashboard extends LitElement {
             ${hasSharedCatalog && idx >= 0 ? html`
               <div style="display: flex; gap: 8px;">
                 <button class="btn btn-ghost" @click=${() => this.removeModel(idx, { keepOllamaModel: true })}>Remove from Config</button>
-                <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove + Delete</button>
+                <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Delete from Ollama Too</button>
               </div>
             ` : ''}
           </div>
@@ -6709,35 +6816,34 @@ export class ToolkitDashboard extends LitElement {
       const keepOllamaModel = !!options.keepOllamaModel;
 
       if (this.isLocalCatalogModel(model)) {
-          if (this.hasUnsavedChanges) {
+          if (!keepOllamaModel && this.hasUnsavedChanges) {
               alert('Save or discard pending config edits before removing a local catalog model. This action runs toolkit cleanup and then reloads config from disk.');
               return;
           }
 
           const message = keepOllamaModel
               ? assignedEndpoints.length > 0
-                  ? `Remove local model "${model.id}" from the shared catalog only?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe toolkit will remove it from the bootstrap config, remove it from those managed endpoints, and update managed agent refs if needed.\n\nInstalled Ollama copies will be kept on disk, and live OpenClaw config will not be reapplied until you explicitly apply later.`
-                  : `Remove local model "${model.id}" from the shared catalog only?\n\nThe toolkit will remove it from the bootstrap config and keep any installed Ollama copy on disk.\n\nLive OpenClaw config will not be reapplied until you explicitly apply later.`
+                  ? `Remove local model "${model.id}" from the shared catalog only?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe dashboard will remove it from the bootstrap config, remove it from those managed endpoints, and update managed agent refs if needed.\n\nInstalled Ollama copies will be kept on disk, and the change will stay unsaved until you press Save Only or Save & Apply.`
+                  : `Remove local model "${model.id}" from the shared catalog only?\n\nThe dashboard will remove it from the bootstrap config, keep any installed Ollama copy on disk, and leave the change unsaved until you press Save Only or Save & Apply.`
               : assignedEndpoints.length > 0
                   ? `Remove local model "${model.id}" from the shared catalog?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe toolkit will remove it from those endpoints, update managed agent refs, attempt to delete installed copies from those endpoints, and compact Docker Desktop storage on this machine.`
                   : `Remove local model "${model.id}" from the shared catalog?\n\nThe toolkit will remove it from the bootstrap config, attempt to delete any installed local copy, and compact Docker Desktop storage on this machine.`;
           if (!confirm(message)) return;
 
-          const args = ['-Model', model.id];
           if (keepOllamaModel) {
-              args.push('-KeepOllamaModel');
-              args.push('-SkipBootstrap');
+              this.removeLocalCatalogModelFromConfig(idx, model);
           } else {
+              const args = ['-Model', model.id];
               args.push('-CompactDockerData');
+              this.runCommand('remove-local-model', args);
           }
-          this.runCommand('remove-local-model', args);
           return;
       }
 
       if (this.isHostedCatalogModel(model)) {
           const message = assignedEndpoints.length > 0
-              ? `Remove hosted model "${model.modelRef}" from the shared catalog?\n\nIt is currently assigned to: ${assignedLabels}.\n\nRemoving it here will also remove it from those endpoints.`
-              : `Remove hosted model "${model.modelRef}" from the shared catalog?`;
+              ? `Remove hosted model "${model.modelRef}" from the shared catalog?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe dashboard will remove it from the shared catalog and from those endpoint assignments. The change will stay unsaved until you press Save Only or Save & Apply.`
+              : `Remove hosted model "${model.modelRef}" from the shared catalog?\n\nThe change will stay unsaved until you press Save Only or Save & Apply.`;
           if (!confirm(message)) return;
 
           this.config.modelCatalog = models.filter((_: any, modelIdx: number) => modelIdx !== idx);
@@ -6747,7 +6853,7 @@ export class ToolkitDashboard extends LitElement {
               );
           }
 
-          await this.saveConfig();
+          this.requestUpdate();
           return;
       }
 
