@@ -135,6 +135,8 @@ Useful extras:
 - Endpoints can also pre-provision local models during `bootstrap` by listing them under endpoint `ollama.models`; bootstrap will pull what fits and warn on oversized models.
 - Remove a local model:
   `run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b`
+- Remove a local model from managed config but keep the Ollama files:
+  `run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -KeepOllamaModel -SkipBootstrap`
 - Sandbox smoke test:
   `run-openclaw.cmd sandbox-test`
 - One watchdog check:

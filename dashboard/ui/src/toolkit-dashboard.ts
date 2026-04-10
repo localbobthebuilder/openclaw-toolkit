@@ -5585,7 +5585,8 @@ export class ToolkitDashboard extends LitElement {
             </div>
             ${hasSharedCatalog && idx >= 0 ? html`
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove</button>
+                <button class="btn btn-ghost" @click=${() => this.removeModel(idx, { keepOllamaModel: true })}>Remove from Config</button>
+                <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Remove + Delete</button>
               </div>
             ` : ''}
           </div>
@@ -6698,13 +6699,14 @@ export class ToolkitDashboard extends LitElement {
       }
   }
 
-  async removeModel(idx: number) {
+  async removeModel(idx: number, options: { keepOllamaModel?: boolean } = {}) {
       const models = this.ensureSharedModelCatalog();
       const model = models[idx];
       if (!model) return;
 
       const assignedEndpoints = this.getCatalogModelAssignments(model);
       const assignedLabels = assignedEndpoints.map((endpoint: any) => this.getEndpointLabel(endpoint)).join(', ');
+      const keepOllamaModel = !!options.keepOllamaModel;
 
       if (this.isLocalCatalogModel(model)) {
           if (this.hasUnsavedChanges) {
@@ -6712,12 +6714,23 @@ export class ToolkitDashboard extends LitElement {
               return;
           }
 
-          const message = assignedEndpoints.length > 0
-              ? `Remove local model "${model.id}" from the shared catalog?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe toolkit will remove it from those endpoints, update managed agent refs, attempt to delete installed copies from those endpoints, and compact Docker Desktop storage on this machine.`
-              : `Remove local model "${model.id}" from the shared catalog?\n\nThe toolkit will remove it from the bootstrap config, attempt to delete any installed local copy, and compact Docker Desktop storage on this machine.`;
+          const message = keepOllamaModel
+              ? assignedEndpoints.length > 0
+                  ? `Remove local model "${model.id}" from the shared catalog only?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe toolkit will remove it from the bootstrap config, remove it from those managed endpoints, and update managed agent refs if needed.\n\nInstalled Ollama copies will be kept on disk, and live OpenClaw config will not be reapplied until you explicitly apply later.`
+                  : `Remove local model "${model.id}" from the shared catalog only?\n\nThe toolkit will remove it from the bootstrap config and keep any installed Ollama copy on disk.\n\nLive OpenClaw config will not be reapplied until you explicitly apply later.`
+              : assignedEndpoints.length > 0
+                  ? `Remove local model "${model.id}" from the shared catalog?\n\nIt is currently assigned to: ${assignedLabels}.\n\nThe toolkit will remove it from those endpoints, update managed agent refs, attempt to delete installed copies from those endpoints, and compact Docker Desktop storage on this machine.`
+                  : `Remove local model "${model.id}" from the shared catalog?\n\nThe toolkit will remove it from the bootstrap config, attempt to delete any installed local copy, and compact Docker Desktop storage on this machine.`;
           if (!confirm(message)) return;
 
-          this.runCommand('remove-local-model', ['-Model', model.id, '-CompactDockerData']);
+          const args = ['-Model', model.id];
+          if (keepOllamaModel) {
+              args.push('-KeepOllamaModel');
+              args.push('-SkipBootstrap');
+          } else {
+              args.push('-CompactDockerData');
+          }
+          this.runCommand('remove-local-model', args);
           return;
       }
 

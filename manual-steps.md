@@ -581,6 +581,17 @@ Or combine it with model removal:
 .\run-openclaw.cmd remove-local-model -Model qwen3.5:35b-a3b -CompactDockerData
 ```
 
+If you only want to drop a local model from managed config and keep the actual
+Ollama files on disk, use:
+
+```powershell
+.\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -KeepOllamaModel -SkipBootstrap
+```
+
+That is the pure config-only path: it rewrites the managed bootstrap config and
+leaves both Ollama storage and the currently applied live OpenClaw config alone
+until you explicitly apply later.
+
 Safe preview examples:
 
 ```powershell
