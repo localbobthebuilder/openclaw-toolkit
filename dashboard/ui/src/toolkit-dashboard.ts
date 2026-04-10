@@ -260,7 +260,7 @@ export class ToolkitDashboard extends LitElement {
     .topology-slot-heading strong { color: #fff; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .topology-slot-heading span { color: #777; font-size: 0.76rem; }
     .topology-slot-badge { color: #00bcd4; font-size: 0.74rem; border: 1px solid #24434a; border-radius: 999px; padding: 4px 8px; background: rgba(0,188,212,0.08); }
-    .topology-slot-body { position: relative; display: grid; align-content: start; gap: 16px; padding: 16px; }
+    .topology-slot-body { position: relative; display: grid; align-content: start; row-gap: 16px; column-gap: 16px; padding: 16px; }
     .topology-slot-empty { position: static; min-height: 150px; display: flex; align-items: center; justify-content: center; padding: 14px; border: 1px dashed #333; border-radius: 12px; color: #777; font-size: 0.82rem; text-align: center; background: rgba(255,255,255,0.01); }
     .topology-agent { position: relative; left: auto; right: auto; top: auto; min-height: 170px; border: 1px solid #353535; border-radius: 14px; background: #202020; padding: 12px 12px 10px; cursor: pointer; user-select: none; box-shadow: 0 8px 18px rgba(0,0,0,0.2); display: flex; flex-direction: column; z-index: 2; min-width: 0; }
     .topology-agent:hover { border-color: #4a4a4a; }
@@ -373,7 +373,7 @@ export class ToolkitDashboard extends LitElement {
       }
     }
 
-    const nextEdges: any[] = [];
+    const routeSpecs: any[] = [];
     for (const sourceEntry of this.getTopologyAgentEntries()) {
       const sourceElement = agentElements.get(sourceEntry.id);
       if (!sourceElement) continue;
@@ -390,10 +390,9 @@ export class ToolkitDashboard extends LitElement {
         const targetCenterX = targetRect.left - boardRect.left + (targetRect.width / 2);
         const targetCenterY = targetRect.top - boardRect.top + (targetRect.height / 2);
         const deltaX = targetCenterX - sourceCenterX;
-        let debugPoints: any[] = [];
         if (Math.abs(deltaX) < 80) {
           const preferRightLane = Math.max(sourceRect.right, targetRect.right) - boardRect.left + 24 <= width;
-          const laneX = preferRightLane
+          const baseLaneX = preferRightLane
             ? Math.max(sourceRect.right, targetRect.right) - boardRect.left + 18
             : Math.min(sourceRect.left, targetRect.left) - boardRect.left - 18;
           const fromX = preferRightLane
@@ -404,12 +403,19 @@ export class ToolkitDashboard extends LitElement {
             : (targetRect.left - boardRect.left);
           const fromY = sourceCenterY;
           const toY = targetCenterY;
-          debugPoints = [
-            { x: fromX, y: fromY, kind: 'start' },
-            { x: laneX, y: fromY, kind: 'lane' },
-            { x: laneX, y: toY, kind: 'lane' },
-            { x: toX, y: toY, kind: 'end' }
-          ];
+          routeSpecs.push({
+            key: `${sourceEntry.id}->${targetId}`,
+            sourceId: sourceEntry.id,
+            targetId,
+            active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
+            main: sourceEntry.isMain,
+            fromX,
+            fromY,
+            toX,
+            toY,
+            baseLaneX,
+            groupKey: `same:${preferRightLane ? 'right' : 'left'}:${Math.round(baseLaneX / 32)}`
+          });
         } else {
           const direction = deltaX >= 0 ? 1 : -1;
           const fromX = direction > 0
@@ -420,14 +426,56 @@ export class ToolkitDashboard extends LitElement {
             ? (targetRect.left - boardRect.left)
             : (targetRect.right - boardRect.left);
           const toY = targetCenterY;
-          const laneX = fromX + ((toX - fromX) / 2);
-          debugPoints = [
-            { x: fromX, y: fromY, kind: 'start' },
-            { x: laneX, y: fromY, kind: 'lane' },
-            { x: laneX, y: toY, kind: 'lane' },
-            { x: toX, y: toY, kind: 'end' }
-          ];
+          const baseLaneX = fromX + ((toX - fromX) / 2);
+          routeSpecs.push({
+            key: `${sourceEntry.id}->${targetId}`,
+            sourceId: sourceEntry.id,
+            targetId,
+            active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
+            main: sourceEntry.isMain,
+            fromX,
+            fromY,
+            toX,
+            toY,
+            baseLaneX,
+            groupKey: `cross:${direction > 0 ? 'right' : 'left'}:${Math.round(baseLaneX / 40)}`
+          });
         }
+      }
+    }
+
+    const nextEdges: any[] = [];
+    const laneGroups = new Map<string, any[]>();
+    for (const spec of routeSpecs) {
+      if (!laneGroups.has(spec.groupKey)) {
+        laneGroups.set(spec.groupKey, []);
+      }
+      laneGroups.get(spec.groupKey)?.push(spec);
+    }
+
+    for (const groupSpecs of laneGroups.values()) {
+      groupSpecs.sort((left: any, right: any) => {
+        const topDelta = Math.min(left.fromY, left.toY) - Math.min(right.fromY, right.toY);
+        if (Math.abs(topDelta) > 0.5) {
+          return topDelta;
+        }
+        const bottomDelta = Math.max(left.fromY, left.toY) - Math.max(right.fromY, right.toY);
+        if (Math.abs(bottomDelta) > 0.5) {
+          return bottomDelta;
+        }
+        return String(left.key).localeCompare(String(right.key));
+      });
+
+      const middleIndex = (groupSpecs.length - 1) / 2;
+      groupSpecs.forEach((spec: any, index: number) => {
+        const laneOffset = (index - middleIndex) * 12;
+        const laneX = Math.max(12, Math.min(width - 12, spec.baseLaneX + laneOffset));
+        const debugPoints = [
+          { x: spec.fromX, y: spec.fromY, kind: 'start' },
+          { x: laneX, y: spec.fromY, kind: 'lane' },
+          { x: laneX, y: spec.toY, kind: 'lane' },
+          { x: spec.toX, y: spec.toY, kind: 'end' }
+        ];
 
         const renderSegments = debugPoints.slice(0, -1).map((point: any, index: number) => {
           const nextPoint = debugPoints[index + 1];
@@ -467,16 +515,16 @@ export class ToolkitDashboard extends LitElement {
           : null;
 
         nextEdges.push({
-          key: `${sourceEntry.id}->${targetId}`,
-          sourceId: sourceEntry.id,
-          targetId,
-          active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
-          main: sourceEntry.isMain,
+          key: spec.key,
+          sourceId: spec.sourceId,
+          targetId: spec.targetId,
+          active: spec.active,
+          main: spec.main,
           debugPoints,
           renderSegments,
           arrowHead
         });
-      }
+      });
     }
 
     const nextSignature = JSON.stringify({
@@ -3404,12 +3452,13 @@ export class ToolkitDashboard extends LitElement {
     const slots = this.getTopologySlots().map((slot: any) => {
       const columnCount = slot.agents.length >= 4 ? 2 : 1;
       const cardMinWidth = 304;
-      const innerGap = 16;
+      const columnGap = this.getTopologySlotColumnGap(slot, columnCount);
       const innerPadding = 32;
-      const slotWidth = innerPadding + (columnCount * cardMinWidth) + ((columnCount - 1) * innerGap);
+      const slotWidth = innerPadding + (columnCount * cardMinWidth) + ((columnCount - 1) * columnGap);
       return {
         ...slot,
         columnCount,
+        columnGap,
         slotWidth
       };
     });
@@ -3503,7 +3552,7 @@ export class ToolkitDashboard extends LitElement {
                       </div>
                       <span class="topology-slot-badge">${slot.agents.length} agent${slot.agents.length === 1 ? '' : 's'}</span>
                     </div>
-                    <div class="topology-slot-body" style=${`grid-template-columns: repeat(${slot.columnCount}, minmax(0, 1fr));`}>
+                    <div class="topology-slot-body" style=${`grid-template-columns: repeat(${slot.columnCount}, minmax(0, 1fr)); column-gap: ${slot.columnGap}px;`}>
                       ${slot.agents.length === 0 ? html`
                         <div class="topology-slot-empty">
                           ${slot.endpointKey ? 'Drop an agent here to assign this endpoint.' : 'Agents without a resolved endpoint appear here.'}
@@ -4617,6 +4666,26 @@ export class ToolkitDashboard extends LitElement {
       return [];
     }
     return this.topologyEdges.filter((edge: any) => edge.sourceId === previewSourceAgentId);
+  }
+
+  getTopologySlotColumnGap(slot: any, columnCount: number) {
+    if (columnCount < 2) {
+      return 16;
+    }
+
+    const slotAgentIds = new Set((Array.isArray(slot?.agents) ? slot.agents : []).map((entry: any) => String(entry?.id || '')));
+    let internalLaneCount = 0;
+    for (const entry of Array.isArray(slot?.agents) ? slot.agents : []) {
+      for (const targetId of this.getAgentDelegationTargets(entry.agent)) {
+        if (slotAgentIds.has(String(targetId || ''))) {
+          internalLaneCount += 1;
+        }
+      }
+    }
+
+    const rowCount = Math.max(1, Math.ceil(((Array.isArray(slot?.agents) ? slot.agents.length : 0) || 0) / columnCount));
+    const widenedGap = 44 + Math.max(0, rowCount - 1) * 18 + internalLaneCount * 16;
+    return Math.min(184, Math.max(80, widenedGap));
   }
 
   hasDelegationEdge(sourceAgentId: string, targetAgentId: string) {
