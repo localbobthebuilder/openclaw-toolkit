@@ -799,9 +799,8 @@
           "allowAgents": [
             "research",
             "review-local",
-            "review-remote",
-            "coder-local",
-            "coder-remote"
+            "chat-local",
+            "coder-local"
           ]
         },
         "modelRef": "ollama/gemma4:latest",
