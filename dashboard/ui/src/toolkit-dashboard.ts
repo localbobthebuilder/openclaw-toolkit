@@ -365,30 +365,87 @@ export class ToolkitDashboard extends LitElement {
     const boardRect = board.getBoundingClientRect();
     const width = Math.ceil(Math.max(board.scrollWidth, boardRect.width));
     const height = Math.ceil(Math.max(board.scrollHeight, boardRect.height));
-    const agentElements = new Map<string, HTMLElement>();
+    const { laneSpacing: protectedLaneSpacing, leftPadding: protectedLeftLanePadding, rightPadding: protectedRightLanePadding } = this.getTopologyProtectedLaneMetrics();
+    const agentLayouts = new Map<string, any>();
+    const slotColumns = new Map<string, { leftRects: DOMRect[]; rightRects: DOMRect[] }>();
     for (const element of Array.from(board.querySelectorAll<HTMLElement>('[data-topology-agent-id]'))) {
       const agentId = element.dataset.topologyAgentId;
-      if (agentId) {
-        agentElements.set(agentId, element);
+      if (!agentId) {
+        continue;
       }
+      const slotKey = String(element.dataset.topologySlotKey || '');
+      const columnIndex = Number(element.dataset.topologyColumn ?? '0');
+      const rect = element.getBoundingClientRect();
+      agentLayouts.set(agentId, {
+        rect,
+        slotKey,
+        columnIndex
+      });
+      if (slotKey) {
+        const current = slotColumns.get(slotKey) || { leftRects: [], rightRects: [] };
+        if (columnIndex === 0) {
+          current.leftRects.push(rect);
+        } else if (columnIndex === 1) {
+          current.rightRects.push(rect);
+        }
+        slotColumns.set(slotKey, current);
+      }
+    }
+
+    const slotLaneAnchors = new Map<string, { leftAnchor: number; rightAnchor: number }>();
+    for (const [slotKey, columns] of slotColumns.entries()) {
+      if (columns.leftRects.length === 0 || columns.rightRects.length === 0) {
+        continue;
+      }
+      const leftBoundary = Math.max(...columns.leftRects.map((rect: DOMRect) => rect.right - boardRect.left));
+      const rightBoundary = Math.min(...columns.rightRects.map((rect: DOMRect) => rect.left - boardRect.left));
+      slotLaneAnchors.set(slotKey, {
+        leftAnchor: leftBoundary + protectedLeftLanePadding,
+        rightAnchor: rightBoundary - protectedRightLanePadding
+      });
     }
 
     const routeSpecs: any[] = [];
     for (const sourceEntry of this.getTopologyAgentEntries()) {
-      const sourceElement = agentElements.get(sourceEntry.id);
-      if (!sourceElement) continue;
-      const sourceRect = sourceElement.getBoundingClientRect();
+      const sourceLayout = agentLayouts.get(sourceEntry.id);
+      if (!sourceLayout) continue;
+      const sourceRect = sourceLayout.rect as DOMRect;
       const sourceCenterX = sourceRect.left - boardRect.left + (sourceRect.width / 2);
       const sourceCenterY = sourceRect.top - boardRect.top + (sourceRect.height / 2);
       for (const targetId of this.getAgentDelegationTargets(sourceEntry.agent)) {
-        const targetElement = agentElements.get(targetId);
+        const targetLayout = agentLayouts.get(targetId);
         const targetEntry = this.getTopologyAgentEntryById(targetId);
-        if (!targetElement || !targetEntry) {
+        if (!targetLayout || !targetEntry) {
           continue;
         }
-        const targetRect = targetElement.getBoundingClientRect();
+        const targetRect = targetLayout.rect as DOMRect;
         const targetCenterX = targetRect.left - boardRect.left + (targetRect.width / 2);
         const targetCenterY = targetRect.top - boardRect.top + (targetRect.height / 2);
+        const sharedSlotKey = sourceLayout.slotKey && sourceLayout.slotKey === targetLayout.slotKey
+          ? sourceLayout.slotKey
+          : '';
+        if (sharedSlotKey && slotLaneAnchors.has(sharedSlotKey)) {
+          routeSpecs.push({
+            key: `${sourceEntry.id}->${targetId}`,
+            sourceId: sourceEntry.id,
+            targetId,
+            active: this.topologyLinkSourceAgentId === sourceEntry.id || this.topologyLinkSourceAgentId === targetId,
+            main: sourceEntry.isMain,
+            fromX: sourceLayout.columnIndex === 0
+              ? (sourceRect.right - boardRect.left)
+              : (sourceRect.left - boardRect.left),
+            fromY: sourceCenterY,
+            toX: targetLayout.columnIndex === 0
+              ? (targetRect.right - boardRect.left)
+              : (targetRect.left - boardRect.left),
+            toY: targetCenterY,
+            slotKey: sharedSlotKey,
+            laneSide: targetLayout.columnIndex === 0 ? 'left' : 'right',
+            protectedLaneKey: `${sharedSlotKey}:${targetLayout.columnIndex === 0 ? 'left' : 'right'}`
+          });
+          continue;
+        }
+
         const deltaX = targetCenterX - sourceCenterX;
         if (Math.abs(deltaX) < 80) {
           const preferRightLane = Math.max(sourceRect.right, targetRect.right) - boardRect.left + 24 <= width;
@@ -445,12 +502,105 @@ export class ToolkitDashboard extends LitElement {
     }
 
     const nextEdges: any[] = [];
+    const buildEdge = (spec: any, laneX: number) => {
+      const debugPoints = [
+        { x: spec.fromX, y: spec.fromY, kind: 'start' },
+        { x: laneX, y: spec.fromY, kind: 'lane' },
+        { x: laneX, y: spec.toY, kind: 'lane' },
+        { x: spec.toX, y: spec.toY, kind: 'end' }
+      ];
+
+      const renderSegments = debugPoints.slice(0, -1).map((point: any, index: number) => {
+        const nextPoint = debugPoints[index + 1];
+        const horizontal = Math.abs(point.y - nextPoint.y) < 1;
+        return horizontal
+          ? {
+              left: Math.min(point.x, nextPoint.x),
+              top: point.y - 2,
+              width: Math.max(2, Math.abs(nextPoint.x - point.x)),
+              height: 4,
+              orientation: 'h',
+              direction: nextPoint.x >= point.x ? 'right' : 'left'
+            }
+          : {
+              left: point.x - 2,
+              top: Math.min(point.y, nextPoint.y),
+              width: 4,
+              height: Math.max(2, Math.abs(nextPoint.y - point.y)),
+              orientation: 'v',
+              direction: nextPoint.y >= point.y ? 'down' : 'up'
+            };
+      });
+
+      const finalSegment = renderSegments.length > 0 ? renderSegments[renderSegments.length - 1] : null;
+      const arrowHead = finalSegment
+        ? {
+            x: debugPoints[debugPoints.length - 1].x,
+            y: debugPoints[debugPoints.length - 1].y,
+            rotation: finalSegment.direction === 'right'
+              ? 0
+              : finalSegment.direction === 'down'
+                ? 90
+                : finalSegment.direction === 'left'
+                  ? 180
+                  : -90
+          }
+        : null;
+
+      nextEdges.push({
+        key: spec.key,
+        sourceId: spec.sourceId,
+        targetId: spec.targetId,
+        active: spec.active,
+        main: spec.main,
+        debugPoints,
+        renderSegments,
+        arrowHead
+      });
+    };
+
+    const protectedLaneGroups = new Map<string, any[]>();
     const laneGroups = new Map<string, any[]>();
     for (const spec of routeSpecs) {
+      if (spec.protectedLaneKey) {
+        if (!protectedLaneGroups.has(spec.protectedLaneKey)) {
+          protectedLaneGroups.set(spec.protectedLaneKey, []);
+        }
+        protectedLaneGroups.get(spec.protectedLaneKey)?.push(spec);
+        continue;
+      }
       if (!laneGroups.has(spec.groupKey)) {
         laneGroups.set(spec.groupKey, []);
       }
       laneGroups.get(spec.groupKey)?.push(spec);
+    }
+
+    for (const groupSpecs of protectedLaneGroups.values()) {
+      groupSpecs.sort((left: any, right: any) => {
+        const topDelta = Math.min(left.fromY, left.toY) - Math.min(right.fromY, right.toY);
+        if (Math.abs(topDelta) > 0.5) {
+          return topDelta;
+        }
+        const bottomDelta = Math.max(left.fromY, left.toY) - Math.max(right.fromY, right.toY);
+        if (Math.abs(bottomDelta) > 0.5) {
+          return bottomDelta;
+        }
+        return String(left.key).localeCompare(String(right.key));
+      });
+
+      const groupSlotKey = String(groupSpecs[0]?.slotKey || '');
+      const groupSide = String(groupSpecs[0]?.laneSide || 'left');
+      const anchors = slotLaneAnchors.get(groupSlotKey);
+      if (!anchors) {
+        continue;
+      }
+
+      groupSpecs.forEach((spec: any, index: number) => {
+        const laneX = groupSide === 'left'
+          ? anchors.leftAnchor + (index * protectedLaneSpacing)
+          : anchors.rightAnchor - (index * protectedLaneSpacing);
+        buildEdge(spec, laneX);
+      });
     }
 
     for (const groupSpecs of laneGroups.values()) {
@@ -470,60 +620,7 @@ export class ToolkitDashboard extends LitElement {
       groupSpecs.forEach((spec: any, index: number) => {
         const laneOffset = (index - middleIndex) * 12;
         const laneX = Math.max(12, Math.min(width - 12, spec.baseLaneX + laneOffset));
-        const debugPoints = [
-          { x: spec.fromX, y: spec.fromY, kind: 'start' },
-          { x: laneX, y: spec.fromY, kind: 'lane' },
-          { x: laneX, y: spec.toY, kind: 'lane' },
-          { x: spec.toX, y: spec.toY, kind: 'end' }
-        ];
-
-        const renderSegments = debugPoints.slice(0, -1).map((point: any, index: number) => {
-          const nextPoint = debugPoints[index + 1];
-          const horizontal = Math.abs(point.y - nextPoint.y) < 1;
-          return horizontal
-            ? {
-                left: Math.min(point.x, nextPoint.x),
-                top: point.y - 2,
-                width: Math.max(2, Math.abs(nextPoint.x - point.x)),
-                height: 4,
-                orientation: 'h',
-                direction: nextPoint.x >= point.x ? 'right' : 'left'
-              }
-            : {
-                left: point.x - 2,
-                top: Math.min(point.y, nextPoint.y),
-                width: 4,
-                height: Math.max(2, Math.abs(nextPoint.y - point.y)),
-                orientation: 'v',
-                direction: nextPoint.y >= point.y ? 'down' : 'up'
-              };
-        });
-
-        const finalSegment = renderSegments.length > 0 ? renderSegments[renderSegments.length - 1] : null;
-        const arrowHead = finalSegment
-          ? {
-              x: debugPoints[debugPoints.length - 1].x,
-              y: debugPoints[debugPoints.length - 1].y,
-              rotation: finalSegment.direction === 'right'
-                ? 0
-                : finalSegment.direction === 'down'
-                  ? 90
-                  : finalSegment.direction === 'left'
-                    ? 180
-                    : -90
-            }
-          : null;
-
-        nextEdges.push({
-          key: spec.key,
-          sourceId: spec.sourceId,
-          targetId: spec.targetId,
-          active: spec.active,
-          main: spec.main,
-          debugPoints,
-          renderSegments,
-          arrowHead
-        });
+        buildEdge(spec, laneX);
       });
     }
 
@@ -3558,15 +3655,18 @@ export class ToolkitDashboard extends LitElement {
                           ${slot.endpointKey ? 'Drop an agent here to assign this endpoint.' : 'Agents without a resolved endpoint appear here.'}
                         </div>
                       ` : ''}
-                      ${slot.agents.map((entry: any) => {
+                      ${slot.agents.map((entry: any, index: number) => {
                         const delegateCount = this.getAgentDelegationTargets(entry.agent).length;
                         const isLinkSource = this.topologyLinkSourceAgentId === entry.id;
                         const isHoverPreview = !this.topologyShowAllArrows && !isLinkSource && previewSourceAgentId === entry.id && delegateCount > 0;
                         const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
+                        const columnIndex = slot.columnCount > 1 ? (index % slot.columnCount) : 0;
                         return html`
                           <div
                             class="topology-agent ${entry.enabled ? '' : 'disabled'} ${entry.isMain ? 'main-agent' : ''} ${isLinkSource ? 'link-source' : ''} ${isHoverPreview ? 'topology-hover-preview' : ''} ${this.topologyDraggedAgentKey === entry.key ? 'dragging' : ''}"
                             data-topology-agent-id=${entry.id}
+                            data-topology-slot-key=${slot.key}
+                            data-topology-column=${String(columnIndex)}
                             draggable="true"
                             @mouseenter=${() => { this.topologyHoverAgentId = entry.id; }}
                             @mouseleave=${() => {
@@ -4668,24 +4768,53 @@ export class ToolkitDashboard extends LitElement {
     return this.topologyEdges.filter((edge: any) => edge.sourceId === previewSourceAgentId);
   }
 
+  getTopologyProtectedLaneMetrics() {
+    return {
+      laneSpacing: 12,
+      leftPadding: 18,
+      rightPadding: 12,
+      centerGap: 24
+    };
+  }
+
+  getTopologySlotLaneCounts(slot: any, columnCount: number) {
+    if (columnCount < 2) {
+      return { leftLaneCount: 0, rightLaneCount: 0 };
+    }
+
+    const slotEntries = Array.isArray(slot?.agents) ? slot.agents : [];
+    const columnByAgentId = new Map<string, number>();
+    slotEntries.forEach((entry: any, index: number) => {
+      columnByAgentId.set(String(entry?.id || ''), index % columnCount);
+    });
+
+    let leftLaneCount = 0;
+    let rightLaneCount = 0;
+    for (const entry of slotEntries) {
+      for (const targetId of this.getAgentDelegationTargets(entry.agent)) {
+        const targetColumn = columnByAgentId.get(String(targetId || ''));
+        if (targetColumn === 0) {
+          leftLaneCount += 1;
+        } else if (targetColumn === 1) {
+          rightLaneCount += 1;
+        }
+      }
+    }
+
+    return { leftLaneCount, rightLaneCount };
+  }
+
   getTopologySlotColumnGap(slot: any, columnCount: number) {
     if (columnCount < 2) {
       return 16;
     }
 
-    const slotAgentIds = new Set((Array.isArray(slot?.agents) ? slot.agents : []).map((entry: any) => String(entry?.id || '')));
-    let internalLaneCount = 0;
-    for (const entry of Array.isArray(slot?.agents) ? slot.agents : []) {
-      for (const targetId of this.getAgentDelegationTargets(entry.agent)) {
-        if (slotAgentIds.has(String(targetId || ''))) {
-          internalLaneCount += 1;
-        }
-      }
-    }
-
-    const rowCount = Math.max(1, Math.ceil(((Array.isArray(slot?.agents) ? slot.agents.length : 0) || 0) / columnCount));
-    const widenedGap = 44 + Math.max(0, rowCount - 1) * 18 + internalLaneCount * 16;
-    return Math.min(184, Math.max(80, widenedGap));
+    const { laneSpacing, leftPadding, rightPadding, centerGap } = this.getTopologyProtectedLaneMetrics();
+    const { leftLaneCount, rightLaneCount } = this.getTopologySlotLaneCounts(slot, columnCount);
+    const leftSpread = Math.max(0, leftLaneCount - 1) * laneSpacing;
+    const rightSpread = Math.max(0, rightLaneCount - 1) * laneSpacing;
+    const requiredGap = leftPadding + rightPadding + centerGap + leftSpread + rightSpread;
+    return Math.min(220, Math.max(92, requiredGap));
   }
 
   hasDelegationEdge(sourceAgentId: string, targetAgentId: string) {
