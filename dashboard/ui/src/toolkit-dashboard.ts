@@ -122,6 +122,7 @@ export class ToolkitDashboard extends LitElement {
   @state() private editingWorkspaceId: string | null = null;
   @state() private topologyLinkSourceAgentId: string | null = null;
   @state() private topologyHoverAgentId: string | null = null;
+  @state() private topologyHoverEdgeKey: string | null = null;
   @state() private topologyDraggedAgentKey: string | null = null;
   @state() private topologyHoverEndpointKey: string | null = null;
   @state() private topologyNotice: string = '';
@@ -250,7 +251,9 @@ export class ToolkitDashboard extends LitElement {
     .topology-edge-segment { position: absolute; border-radius: 999px; box-shadow: 0 0 0 1px rgba(0,0,0,0.42), 0 0 10px color-mix(in srgb, var(--edge-color) 30%, transparent); opacity: 0.96; }
     .topology-edge-segment.h { background-image: repeating-linear-gradient(90deg, var(--edge-color) 0 10px, transparent 10px 16px); }
     .topology-edge-segment.v { background-image: repeating-linear-gradient(180deg, var(--edge-color) 0 10px, transparent 10px 16px); }
+    .topology-edge-hit { position: absolute; background: transparent; border-radius: 999px; pointer-events: auto; }
     .topology-edge-arrowhead { position: absolute; width: 0; height: 0; border-style: solid; border-width: 7px 0 7px 12px; border-color: transparent transparent transparent var(--edge-color); transform-origin: center; filter: drop-shadow(0 0 2px rgba(0,0,0,0.6)); }
+    .topology-edge-arrowhead-hit { position: absolute; width: 22px; height: 22px; transform-origin: center; pointer-events: auto; }
     .topology-slot { position: relative; top: auto; border: 1px solid #333; border-radius: 16px; background: linear-gradient(180deg, #191919 0%, #111 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); flex: 0 0 auto; min-height: 100%; }
     .topology-slot.drop-target { border-color: #00bcd4; box-shadow: 0 0 0 2px rgba(0, 188, 212, 0.2); }
     .topology-slot-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid #2e2e2e; }
@@ -3564,6 +3567,11 @@ export class ToolkitDashboard extends LitElement {
     const boardHeight = this.topologyBoardHeight || 560;
     const previewSourceAgentId = this.getTopologyPreviewSourceAgentId();
     const visibleEdges = this.getVisibleTopologyEdges();
+    const orderedVisibleEdges = [...visibleEdges].sort((left: any, right: any) => {
+      const leftHovered = this.topologyHoverEdgeKey === left.key ? 1 : 0;
+      const rightHovered = this.topologyHoverEdgeKey === right.key ? 1 : 0;
+      return leftHovered - rightHovered;
+    });
 
     return html`
       <header>
@@ -3739,21 +3747,43 @@ export class ToolkitDashboard extends LitElement {
               })}
               </div>
               <div class="topology-edge-overlay" aria-hidden="true">
-                ${visibleEdges.flatMap((edge: any) => {
+                ${orderedVisibleEdges.flatMap((edge: any) => {
                   const edgeColor = this.getTopologyEdgeColor(edge);
                   return (Array.isArray(edge.renderSegments) ? edge.renderSegments : []).map((segment: any) => html`
+                  <div
+                    class="topology-edge-hit ${segment.orientation}"
+                    style=${segment.orientation === 'h'
+                      ? `left:${segment.left}px; top:${segment.top - 5}px; width:${segment.width}px; height:${segment.height + 10}px;`
+                      : `left:${segment.left - 5}px; top:${segment.top}px; width:${segment.width + 10}px; height:${segment.height}px;`}
+                    @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
+                    @mouseleave=${() => {
+                      if (this.topologyHoverEdgeKey === edge.key) {
+                        this.topologyHoverEdgeKey = null;
+                      }
+                    }}>
+                  </div>
                   <div
                     class="topology-edge-segment ${segment.orientation}"
                     style=${`left:${segment.left}px; top:${segment.top}px; width:${segment.width}px; height:${segment.height}px; --edge-color:${edgeColor};`}>
                   </div>
                 `);
                 })}
-                ${visibleEdges.map((edge: any) => {
+                ${orderedVisibleEdges.map((edge: any) => {
                   if (!edge.arrowHead) {
                     return '';
                   }
                   const edgeColor = this.getTopologyEdgeColor(edge);
                   return html`
+                  <div
+                    class="topology-edge-arrowhead-hit"
+                    style=${`left:${edge.arrowHead.x}px; top:${edge.arrowHead.y}px; transform: translate(-50%, -50%) rotate(${edge.arrowHead.rotation}deg);`}
+                    @mouseenter=${() => { this.topologyHoverEdgeKey = edge.key; }}
+                    @mouseleave=${() => {
+                      if (this.topologyHoverEdgeKey === edge.key) {
+                        this.topologyHoverEdgeKey = null;
+                      }
+                    }}>
+                  </div>
                   <div
                     class="topology-edge-arrowhead"
                     style=${`left:${edge.arrowHead.x}px; top:${edge.arrowHead.y}px; --edge-color:${edgeColor}; transform: translate(-50%, -50%) rotate(${edge.arrowHead.rotation}deg);`}>
@@ -4703,6 +4733,9 @@ export class ToolkitDashboard extends LitElement {
     if (this.topologyHoverAgentId === agentId) {
       this.topologyHoverAgentId = null;
     }
+    if (this.topologyHoverEdgeKey && this.topologyHoverEdgeKey.startsWith(`${agentId}->`)) {
+      this.topologyHoverEdgeKey = null;
+    }
   }
 
   getAllowedAgentChoices(currentAgentId?: string) {
@@ -4767,6 +4800,9 @@ export class ToolkitDashboard extends LitElement {
   }
 
   getTopologyEdgeColor(edge: any) {
+    if (this.topologyHoverEdgeKey === edge.key) {
+      return '#ff4fc3';
+    }
     const isHoveredSource = this.topologyHoverAgentId === edge.sourceId;
     if (edge.active) {
       return '#00bcd4';
