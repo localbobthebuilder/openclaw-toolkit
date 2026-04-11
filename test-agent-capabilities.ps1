@@ -456,15 +456,17 @@ $chatAgentId = if ($localChatAgentConfig -and $localChatAgentConfig.id) { [strin
 $reviewAgentId = if ($localReviewAgentConfig -and $localReviewAgentConfig.id) { [string]$localReviewAgentConfig.id } else { "review-local" }
 $coderAgentId = if ($localCoderAgentConfig -and $localCoderAgentConfig.id) { [string]$localCoderAgentConfig.id } else { "coder-local" }
 $researchAgentId = if ($researchAgentConfig -and $researchAgentConfig.id) { [string]$researchAgentConfig.id } else { "research" }
+$toolingAgentId = $coderAgentId
 
 $chatAgentEnabled = [bool]($localChatAgentConfig -and $localChatAgentConfig.enabled)
 $reviewAgentEnabled = [bool]($localReviewAgentConfig -and $localReviewAgentConfig.enabled)
 $coderAgentEnabled = [bool]($localCoderAgentConfig -and $localCoderAgentConfig.enabled)
 $researchAgentEnabled = [bool]($researchAgentConfig -and $researchAgentConfig.enabled)
+$toolingAgentEnabled = $coderAgentEnabled
 
 $suffix = [guid]::NewGuid().ToString("N").Substring(0, 8)
-$chatRepoName = "telegram-smoke-$suffix"
-$chatRepoPath = Join-Path $WorkspaceHostPath $chatRepoName
+$toolingRepoName = "tooling-smoke-$suffix"
+$toolingRepoPath = Join-Path $WorkspaceHostPath $toolingRepoName
 $coderProbeName = "coder-smoke-$suffix.txt"
 $coderProbePath = Join-Path $WorkspaceHostPath $coderProbeName
 $reviewProbeName = "review-smoke-$suffix.txt"
@@ -476,11 +478,11 @@ $failures = New-Object System.Collections.Generic.List[string]
 $checkResults = New-Object System.Collections.Generic.List[object]
 
 Write-ProgressLine "Workspace host path: $WorkspaceHostPath" Cyan
-Write-ProgressLine "Telegram-routed agent: $chatAgentId" Cyan
+Write-ProgressLine "Tooling agent: $toolingAgentId" Cyan
 
 try {
-    if (Test-Path $chatRepoPath) {
-        Remove-Item -LiteralPath $chatRepoPath -Recurse -Force
+    if (Test-Path $toolingRepoPath) {
+        Remove-Item -LiteralPath $toolingRepoPath -Recurse -Force
     }
     if (Test-Path $coderProbePath) {
         Remove-Item -LiteralPath $coderProbePath -Force
@@ -489,110 +491,110 @@ try {
         Remove-Item -LiteralPath $reviewProbePath -Force
     }
 
-    if ($chatAgentEnabled) {
-        $chatModelRef = Get-AgentPrimaryModelRef -LiveConfig $liveConfig -AgentId $chatAgentId
-        if ($chatModelRef) {
-            $modelsToStop.Add($chatModelRef)
+    if ($toolingAgentEnabled) {
+        $toolingModelRef = Get-AgentPrimaryModelRef -LiveConfig $liveConfig -AgentId $toolingAgentId
+        if ($toolingModelRef) {
+            $modelsToStop.Add($toolingModelRef)
         }
-        $chatModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $chatAgentId
-        $chatTargetModelRef = Resolve-AgentSmokeTargetModelRef -PrimaryModelRef $chatModelRef -ModelPlan $chatModelPlan
-        if ($chatTargetModelRef) {
-            Write-ProgressLine "[$chatAgentId] Configured model: $chatTargetModelRef" Cyan
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatTargetModelRef | Out-Null
+        $toolingModelPlan = Get-AgentSmokeModelPlan -BootstrapConfig $config -LiveConfig $liveConfig -AgentId $toolingAgentId
+        $toolingTargetModelRef = Resolve-AgentSmokeTargetModelRef -PrimaryModelRef $toolingModelRef -ModelPlan $toolingModelPlan
+        if ($toolingTargetModelRef) {
+            Write-ProgressLine "[$toolingAgentId] Configured model: $toolingTargetModelRef" Cyan
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingTargetModelRef | Out-Null
         }
-        if ($chatModelPlan.status -eq "skip") {
-            $outputLines.Add("SKIP: $chatAgentId smoke skipped because no endpoint-defined local model currently fits.")
-            if ($chatTargetModelRef) {
-                $outputLines.Add("Target model: $chatTargetModelRef")
+        if ($toolingModelPlan.status -eq "skip") {
+            $outputLines.Add("SKIP: $toolingAgentId tooling smoke skipped because no endpoint-defined local model currently fits.")
+            if ($toolingTargetModelRef) {
+                $outputLines.Add("Target model: $toolingTargetModelRef")
             }
-            $outputLines.Add($chatModelPlan.detail)
-            $checkResults.Add((New-CheckResult -Name "chat" -Status "skip" -AgentId $chatAgentId -TargetModel $chatTargetModelRef -Category "fit" -Detail $chatModelPlan.detail))
+            $outputLines.Add($toolingModelPlan.detail)
+            $checkResults.Add((New-CheckResult -Name "tooling" -Status "skip" -AgentId $toolingAgentId -TargetModel $toolingTargetModelRef -Category "fit" -Detail $toolingModelPlan.detail))
         }
         else {
-        $chatRuntime = ""
+        $toolingRuntime = ""
         try {
-            if ($chatModelPlan.modelOverrideRef) {
-                $modelsToStop.Add([string]$chatModelPlan.modelOverrideRef)
-                $outputLines.Add("INFO: $($chatModelPlan.detail)")
-                Write-ProgressLine "[$chatAgentId] Switching smoke session to $($chatModelPlan.modelOverrideRef)" Gray
+            if ($toolingModelPlan.modelOverrideRef) {
+                $modelsToStop.Add([string]$toolingModelPlan.modelOverrideRef)
+                $outputLines.Add("INFO: $($toolingModelPlan.detail)")
+                Write-ProgressLine "[$toolingAgentId] Switching smoke session to $($toolingModelPlan.modelOverrideRef)" Gray
             }
-            Write-ProgressLine "[$chatAgentId] Initializing a real git repo in the shared workspace" Gray
-            $chatInit = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $chatRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
-            $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatInit
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
-            $chatInitReply = (Get-AgentReplyText -AgentJson $chatInit).Trim()
-            if (-not (Test-Path (Join-Path $chatRepoPath ".git"))) {
-                throw "Expected git repo at $chatRepoPath, but .git directory was not created. Agent reply: $chatInitReply"
+            Write-ProgressLine "[$toolingAgentId] Initializing a real git repo in the shared workspace" Gray
+            $toolingInit = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $toolingRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingInit
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
+            $toolingInitReply = (Get-AgentReplyText -AgentJson $toolingInit).Trim()
+            if (-not (Test-Path (Join-Path $toolingRepoPath ".git"))) {
+                throw "Expected git repo at $toolingRepoPath, but .git directory was not created. Agent reply: $toolingInitReply"
             }
-            $outputLines.Add("PASS: $chatAgentId initialized git repo $chatRepoName")
-            if ($chatTargetModelRef) {
-                $outputLines.Add("Configured model for ${chatAgentId}: $chatTargetModelRef")
+            $outputLines.Add("PASS: $toolingAgentId initialized git repo $toolingRepoName")
+            if ($toolingTargetModelRef) {
+                $outputLines.Add("Configured model for ${toolingAgentId}: $toolingTargetModelRef")
             }
-            $outputLines.Add("Observed model for ${chatAgentId}: $chatRuntime")
+            $outputLines.Add("Observed model for ${toolingAgentId}: $toolingRuntime")
 
-            Write-ProgressLine "[$chatAgentId] Writing a README inside that repo" Gray
-            $chatWrite = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$chatRepoName/README.md with exactly this content: telegram smoke test. Then reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
-            $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatWrite
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
-            $chatWriteReply = (Get-AgentReplyText -AgentJson $chatWrite).Trim()
-            if ($chatWriteReply -ne "WRITE_OK" -and $chatWriteReply -ne "telegram smoke test") {
-                throw "Expected WRITE_OK from $chatAgentId after README write, but got: $chatWriteReply"
+            Write-ProgressLine "[$toolingAgentId] Writing a README inside that repo" Gray
+            $toolingWrite = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$toolingRepoName/README.md with exactly this content: tooling smoke test. Then reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingWrite
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
+            $toolingWriteReply = (Get-AgentReplyText -AgentJson $toolingWrite).Trim()
+            if ($toolingWriteReply -ne "WRITE_OK" -and $toolingWriteReply -ne "tooling smoke test") {
+                throw "Expected WRITE_OK from $toolingAgentId after README write, but got: $toolingWriteReply"
             }
-            $readmePath = Join-Path $chatRepoPath "README.md"
+            $readmePath = Join-Path $toolingRepoPath "README.md"
             if (-not (Test-Path $readmePath)) {
                 throw "Expected README at $readmePath, but it was not created."
             }
             $readmeText = (Get-Content -Raw $readmePath).Trim()
-            if ((Normalize-SmokeSentence -Text $readmeText) -ne "telegram smoke test") {
-                throw "Expected README content 'telegram smoke test', but found '$readmeText'."
+            if ((Normalize-SmokeSentence -Text $readmeText) -ne "tooling smoke test") {
+                throw "Expected README content 'tooling smoke test', but found '$readmeText'."
             }
-            $outputLines.Add("PASS: $chatAgentId wrote README.md in shared workspace")
+            $outputLines.Add("PASS: $toolingAgentId wrote README.md in shared workspace")
 
-            Write-ProgressLine "[$chatAgentId] Reading the README back through OpenClaw" Gray
-            $chatRead = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-read-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$chatRepoName/README.md. Reply with exactly the file contents and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
-            $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatRead
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
-            $chatReadReply = (Get-AgentReplyText -AgentJson $chatRead).Trim()
-            if ((Normalize-SmokeSentence -Text $chatReadReply) -ne "telegram smoke test") {
-                throw "Expected README readback 'telegram smoke test', but got: $chatReadReply"
+            Write-ProgressLine "[$toolingAgentId] Reading the README back through OpenClaw" Gray
+            $toolingRead = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-read-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$toolingRepoName/README.md. Reply with exactly the file contents and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingRead
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
+            $toolingReadReply = (Get-AgentReplyText -AgentJson $toolingRead).Trim()
+            if ((Normalize-SmokeSentence -Text $toolingReadReply) -ne "tooling smoke test") {
+                throw "Expected README readback 'tooling smoke test', but got: $toolingReadReply"
             }
-            $outputLines.Add("PASS: $chatAgentId read back README.md content")
+            $outputLines.Add("PASS: $toolingAgentId read back README.md content")
 
-            Write-ProgressLine "[$chatAgentId] Running git status inside the repo" Gray
-            $chatStatus = Invoke-AgentTurn -AgentId $chatAgentId -SessionId "smoke-chat-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${chatRepoName}: git status --short --branch. Reply with the exact git output and nothing else." -ModelOverrideRef $chatModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
-            $chatRuntime = Get-AgentRuntimeRef -AgentJson $chatStatus
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $chatRuntime | Out-Null
-            $chatStatusReply = (Get-AgentReplyText -AgentJson $chatStatus).Trim()
-            $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $chatRepoPath, "status", "--short", "--branch")).Output.Trim()
-            if ($hostStatus -ne $chatStatusReply) {
-                throw "Expected $chatAgentId git status to match host status.`nHost: $hostStatus`nAgent: $chatStatusReply"
+            Write-ProgressLine "[$toolingAgentId] Running git status inside the repo" Gray
+            $toolingStatus = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${toolingRepoName}: git status --short --branch. Reply with the exact git output and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingStatus
+            Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
+            $toolingStatusReply = (Get-AgentReplyText -AgentJson $toolingStatus).Trim()
+            $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $toolingRepoPath, "status", "--short", "--branch")).Output.Trim()
+            if ($hostStatus -ne $toolingStatusReply) {
+                throw "Expected $toolingAgentId git status to match host status.`nHost: $hostStatus`nAgent: $toolingStatusReply"
             }
             if ($hostStatus -notmatch '^## ') {
-                throw "Unexpected git status output from ${chatAgentId}: $hostStatus"
+                throw "Unexpected git status output from ${toolingAgentId}: $hostStatus"
             }
-            $outputLines.Add("PASS: $chatAgentId ran git status in the repo")
+            $outputLines.Add("PASS: $toolingAgentId ran git status in the repo")
             $outputLines.Add("Git status: $hostStatus")
-            $checkResults.Add((New-CheckResult -Name "chat" -Status "pass" -AgentId $chatAgentId -TargetModel $chatTargetModelRef -Runtime $chatRuntime -Detail "Completed git/file workflow in shared workspace."))
+            $checkResults.Add((New-CheckResult -Name "tooling" -Status "pass" -AgentId $toolingAgentId -TargetModel $toolingTargetModelRef -Runtime $toolingRuntime -Detail "Completed git/file workflow in shared workspace."))
         }
         catch {
             $message = Get-ErrorMessage -ErrorRecord $_
             $category = Get-ErrorCategory -Message $message
-            $failures.Add("${chatAgentId}: [$category] $message")
-            $outputLines.Add("FAIL: $chatAgentId useful git/file workflow failed [$category]")
-            if ($chatTargetModelRef) {
-                $outputLines.Add("Configured model for ${chatAgentId}: $chatTargetModelRef")
+            $failures.Add("${toolingAgentId}: [$category] $message")
+            $outputLines.Add("FAIL: $toolingAgentId useful git/file workflow failed [$category]")
+            if ($toolingTargetModelRef) {
+                $outputLines.Add("Configured model for ${toolingAgentId}: $toolingTargetModelRef")
             }
-            if ($chatRuntime) {
-                $outputLines.Add("Observed model for ${chatAgentId}: $chatRuntime")
+            if ($toolingRuntime) {
+                $outputLines.Add("Observed model for ${toolingAgentId}: $toolingRuntime")
             }
             $outputLines.Add("Reason: $message")
-            $checkResults.Add((New-CheckResult -Name "chat" -Status "fail" -AgentId $chatAgentId -TargetModel $chatTargetModelRef -Runtime $chatRuntime -Category $category -Detail $message))
+            $checkResults.Add((New-CheckResult -Name "tooling" -Status "fail" -AgentId $toolingAgentId -TargetModel $toolingTargetModelRef -Runtime $toolingRuntime -Category $category -Detail $message))
         }
         }
     }
     else {
-        $outputLines.Add("SKIP: Telegram-routed chat agent is disabled in bootstrap config.")
-        $checkResults.Add((New-CheckResult -Name "chat" -Status "skip" -AgentId $chatAgentId -Category "disabled" -Detail "Telegram-routed chat agent is disabled in bootstrap config."))
+        $outputLines.Add("SKIP: coder-local agent is disabled in bootstrap config, so tooling git/file smoke was skipped.")
+        $checkResults.Add((New-CheckResult -Name "tooling" -Status "skip" -AgentId $toolingAgentId -Category "disabled" -Detail "coder-local agent is disabled in bootstrap config."))
     }
 
     Set-Content -Path $reviewProbePath -Value "review smoke ok" -Encoding UTF8
@@ -776,7 +778,7 @@ try {
     }
 }
 finally {
-    foreach ($path in @($chatRepoPath, $coderProbePath, $reviewProbePath)) {
+    foreach ($path in @($toolingRepoPath, $coderProbePath, $reviewProbePath)) {
         if ([string]::IsNullOrWhiteSpace($path)) {
             continue
         }
@@ -810,7 +812,7 @@ if ($failures.Count -gt 0) {
     $outputLines.Insert(0, "Agent capability smoke test failed.")
     $outputLines.Add("Workspace: $WorkspaceHostPath")
     $outputLines.Add("Failed checks: $($failures.Count)")
-    $outputLines.Add("Telegram-routed agent exercised useful file + git workflows in shared workspace, but at least one managed agent could not complete its expected tool path.")
+    $outputLines.Add("coder-local exercised useful file + git workflows in shared workspace, but at least one managed agent could not complete its expected tool path.")
     $outputLines.Add("__SMOKE_JSON__: $(ConvertTo-Json $structuredResult -Depth 8 -Compress)")
     $outputLines | Write-Output
     throw ("Agent capability smoke test failed: " + ($failures -join " | "))
@@ -818,6 +820,6 @@ if ($failures.Count -gt 0) {
 
 $outputLines.Insert(0, "Agent capability smoke test passed.")
 $outputLines.Add("Workspace: $WorkspaceHostPath")
-$outputLines.Add("Telegram-routed agent exercised useful file + git workflows in shared workspace.")
+$outputLines.Add("coder-local exercised useful file + git workflows in shared workspace.")
 $outputLines.Add("__SMOKE_JSON__: $(ConvertTo-Json $structuredResult -Depth 8 -Compress)")
 $outputLines | Write-Output

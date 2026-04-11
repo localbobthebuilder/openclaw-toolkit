@@ -297,7 +297,7 @@ export class ToolkitDashboard extends LitElement {
     let ready = false;
     for (let i = 0; i < 5; i++) {
         try {
-            await fetch(this.getBaseUrl() + '/api/config');
+            await fetch(this.getBaseUrl() + '/api/config', { cache: 'no-store' });
             ready = true;
             break;
         } catch (e) {
@@ -655,7 +655,7 @@ export class ToolkitDashboard extends LitElement {
 
   async fetchConfig() {
     try {
-      const res = await fetch(this.getBaseUrl() + '/api/config');
+      const res = await fetch(this.getBaseUrl() + '/api/config', { cache: 'no-store' });
       const data = await res.json();
       this.config = this.sanitizeConfigModelNames(data?.config ?? data);
       this.templateFiles = this.cloneTemplateState(data?.templates);
@@ -678,7 +678,8 @@ export class ToolkitDashboard extends LitElement {
 
     try {
       const res = await fetch(this.getBaseUrl() + '/api/status', {
-        signal: controller.signal
+        signal: controller.signal,
+        cache: 'no-store'
       });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
@@ -698,7 +699,7 @@ export class ToolkitDashboard extends LitElement {
 
   async fetchTelegramSetupStatus() {
     try {
-      const res = await fetch(this.getBaseUrl() + '/api/telegram-setup-status');
+      const res = await fetch(this.getBaseUrl() + '/api/telegram-setup-status', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
       this.telegramSetupStatus = data && typeof data === 'object'
@@ -712,7 +713,7 @@ export class ToolkitDashboard extends LitElement {
 
   async fetchVoiceModels() {
     try {
-      const res = await fetch(this.getBaseUrl() + '/api/voice-models');
+      const res = await fetch(this.getBaseUrl() + '/api/voice-models', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data.models)) {
@@ -2986,13 +2987,12 @@ export class ToolkitDashboard extends LitElement {
 
   startNewAgentDraft() {
     const draftKey = `draft:agent:${Date.now()}`;
-    const defaultToolsetKey = this.getToolsetByKey('codingDelegate') ? 'codingDelegate' : '';
     const newAgent = {
       enabled: true,
       id: 'new-agent-' + Date.now(),
       name: 'New Agent',
-      toolsetKeys: defaultToolsetKey ? [defaultToolsetKey] : [],
-      markdownTemplateKeys: this.getMarkdownTemplateContent('agents', 'AGENTS.md', 'codingDelegate') ? { 'AGENTS.md': 'codingDelegate' } : {},
+      toolsetKeys: [],
+      markdownTemplateKeys: {},
       sandboxMode: 'off',
       modelRef: 'ollama/qwen2.5-coder:3b',
       candidateModelRefs: [],

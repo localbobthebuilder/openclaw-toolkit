@@ -13,7 +13,7 @@ if (-not $ConfigPath) {
 function Resolve-RequestedChecks {
     param([string[]]$Values)
 
-    $validChecks = @("all", "health", "docker", "tailscale", "models", "telegram", "voice", "local-model", "agent", "sandbox", "chat-write", "audit", "git", "multi-agent", "context")
+    $validChecks = @("all", "health", "docker", "tailscale", "models", "telegram", "voice", "local-model", "agent", "sandbox", "chat-write", "tooling-write", "audit", "git", "multi-agent", "context")
 
     if ($null -eq $Values -or $Values.Count -eq 0) {
         return @("all")
@@ -35,6 +35,7 @@ function Resolve-RequestedChecks {
                 '^agents?$' { "agent"; break }
                 '^sandbox(-test)?$' { "sandbox"; break }
                 '^chat(-|_)?write$' { "chat-write"; break }
+                '^tooling(-|_)?write$' { "chat-write"; break }
                 '^audit$' { "audit"; break }
                 '^git$' { "git"; break }
                 '^multi(-|_)?agent$' { "multi-agent"; break }
@@ -1747,19 +1748,19 @@ if ((Test-CheckRequested -Names @("sandbox")) -and $config.sandbox.enabled) {
     $sandboxScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-sandbox-smoke.ps1"
     $sandboxSmokeTestOutput = Invoke-LoggedScript -Label "Sandbox smoke test" -ScriptPath $sandboxScript -SkipMessage "Sandbox smoke test skipped: script not found."
 }
-$chatWorkspaceWriteSmokeTestOutput = "Chat workspace write smoke test skipped."
-if ((Test-CheckRequested -Names @("chat-write")) -and $localChatAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $localChatAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localChatAgentConfig)) {
+$chatWorkspaceWriteSmokeTestOutput = "Tooling workspace write smoke test skipped."
+if ((Test-CheckRequested -Names @("chat-write")) -and $localCoderAgentConfig -and (Test-ToolkitAgentEnabled -AgentConfig $localCoderAgentConfig) -and (Test-ToolkitAgentAssigned -Config $config -AgentConfig $localCoderAgentConfig)) {
     $chatWorkspaceScript = Join-Path (Split-Path -Parent $PSCommandPath) "test-chat-workspace-write.ps1"
     $chatWorkspaceParams = @{}
-    if ($localChatAgentConfig.id) {
-        $chatWorkspaceParams.AgentId = [string]$localChatAgentConfig.id
+    if ($localCoderAgentConfig.id) {
+        $chatWorkspaceParams.AgentId = [string]$localCoderAgentConfig.id
     }
-    $chatWorkspacePath = Get-ToolkitAgentWorkspacePath -Config $config -AgentConfig $localChatAgentConfig
+    $chatWorkspacePath = Get-ToolkitAgentWorkspacePath -Config $config -AgentConfig $localCoderAgentConfig
     if ($chatWorkspacePath) {
         $chatWorkspaceHostPath = Resolve-HostWorkspacePath -Config $config -WorkspacePath $chatWorkspacePath
         $chatWorkspaceParams.WorkspaceHostPath = $chatWorkspaceHostPath
     }
-    $chatWorkspaceWriteSmokeTestOutput = Invoke-LoggedScript -Label "Chat workspace write smoke test" -ScriptPath $chatWorkspaceScript -ScriptParameters $chatWorkspaceParams -SkipMessage "Chat workspace write smoke test skipped: script not found."
+    $chatWorkspaceWriteSmokeTestOutput = Invoke-LoggedScript -Label "Tooling workspace write smoke test" -ScriptPath $chatWorkspaceScript -ScriptParameters $chatWorkspaceParams -SkipMessage "Tooling workspace write smoke test skipped: script not found."
 }
 $localModelSmokeStructured = Get-SmokeStructuredResult -Output $localModelSmokeTestOutput
 $agentCapabilitiesSmokeStructured = Get-SmokeStructuredResult -Output $agentCapabilitiesSmokeTestOutput
@@ -2461,7 +2462,7 @@ if (Test-CheckRequested -Names @("voice")) {
 }
 if (Test-CheckRequested -Names @("local-model")) { Add-ReportSection -Lines $reportLines -Title "Local Model Smoke Test" -Content $localModelSmokeTestOutput }
 if (Test-CheckRequested -Names @("agent")) { Add-ReportSection -Lines $reportLines -Title "Agent Capability Smoke Test" -Content $agentCapabilitiesSmokeTestOutput }
-if (Test-CheckRequested -Names @("chat-write")) { Add-ReportSection -Lines $reportLines -Title "Chat Workspace Write Smoke Test" -Content $chatWorkspaceWriteSmokeTestOutput }
+if (Test-CheckRequested -Names @("chat-write")) { Add-ReportSection -Lines $reportLines -Title "Tooling Workspace Write Smoke Test" -Content $chatWorkspaceWriteSmokeTestOutput }
 if (Test-CheckRequested -Names @("multi-agent")) { Add-ReportSection -Lines $reportLines -Title "Multi-Agent Verification" -Content (@($multiAgentVerification) -join [Environment]::NewLine) }
 if (Test-CheckRequested -Names @("context")) { Add-ReportSection -Lines $reportLines -Title "Context Management Verification" -Content (@($contextManagementVerification) -join [Environment]::NewLine) }
 if (Test-CheckRequested -Names @("sandbox")) {
@@ -2527,7 +2528,7 @@ if (Test-CheckRequested -Names @("agent")) {
     }
 }
 if (Test-CheckRequested -Names @("sandbox")) { Write-SummaryStatusDetail -Label "Sandbox smoke test" -Status $(if ($sandboxSmokeTestOutput -match 'passed') { 'PASS' } elseif ($sandboxSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' }) }
-if (Test-CheckRequested -Names @("chat-write")) { Write-SummaryStatusDetail -Label "Chat workspace write smoke test" -Status $(if ($chatWorkspaceWriteSmokeTestOutput -match 'passed') { 'PASS' } elseif ($chatWorkspaceWriteSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' }) }
+if (Test-CheckRequested -Names @("chat-write")) { Write-SummaryStatusDetail -Label "Tooling workspace write smoke test" -Status $(if ($chatWorkspaceWriteSmokeTestOutput -match 'passed') { 'PASS' } elseif ($chatWorkspaceWriteSmokeTestOutput -match 'failed') { 'FAIL' } else { 'SKIP/INFO' }) }
 if (Test-CheckRequested -Names @("multi-agent")) { Write-SummaryStatusDetail -Label "Multi-agent verification" -Status $(if ((@($multiAgentVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($multiAgentVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' }) }
 if (Test-CheckRequested -Names @("context")) { Write-SummaryStatusDetail -Label "Context management verification" -Status $(if ((@($contextManagementVerification) -join ' ') -match 'FAIL:') { 'FAIL' } elseif ((@($contextManagementVerification) -join ' ') -match 'PASS:') { 'PASS' } else { 'INFO' }) }
 

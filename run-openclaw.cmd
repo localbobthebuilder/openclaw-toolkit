@@ -323,7 +323,7 @@ echo   run-openclaw.cmd local-model-test
 echo     Smoke-test OpenClaw through the configured Ollama local model path.
 echo.
 echo   run-openclaw.cmd agent-smoke
-echo     Smoke-test the shared-workspace agent roles, especially the Telegram-routed agent's file and git workflows.
+echo     Smoke-test the shared-workspace agent roles, especially coder-local's file and git workflows.
 echo.
 echo   run-openclaw.cmd remote-review-smoke
 echo     Smoke-test main spawning coder-remote for a code task and review-local for a path-aware review pass.

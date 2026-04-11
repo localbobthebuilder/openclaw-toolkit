@@ -62,7 +62,7 @@ Most important commands:
   `run-openclaw.cmd verify -Checks voice`
 - Multiple targeted verifications in one run:
   `run-openclaw.cmd verify -Checks "local-model agent"`
-- `agent` smoke covers `chat-local`, `research`, `review-local`, and `coder-local`, and now reports categorized failure reasons.
+- `agent` smoke covers `coder-local` tooling, `research`, `review-local`, and `coder-local` bounded writes, and now reports categorized failure reasons.
 - Focused remote/local orchestration smoke:
   `run-openclaw.cmd remote-review-smoke`
 - Apply the configured starter multi-agent layout:

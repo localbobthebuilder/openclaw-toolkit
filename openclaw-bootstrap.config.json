@@ -433,7 +433,8 @@
         "chat-local",
         "review-local",
         "coder-local",
-        "research"
+        "research",
+        "hosted-coder"
       ],
       "hostedModels": [
         {
@@ -928,11 +929,8 @@
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "openai-codex/gpt-5.4",
+        "modelRef": "ollama/glm-4.7-flash:latest",
         "candidateModelRefs": [
-          "openai-codex/gpt-5.4",
-          "anthropic/claude-sonnet-4-6",
-          "google/gemini-3.1-flash-lite-preview",
           "ollama/qwen3-coder:30b",
           "ollama/qwen3.5:35b-a3b"
         ],
@@ -1010,6 +1008,29 @@
         "candidateModelRefs": [
           "google/gemini-3.1-flash-lite-preview"
         ]
+      },
+      {
+        "enabled": true,
+        "id": "hosted-coder",
+        "name": "Hosted Coder",
+        "toolsetKeys": [
+          "codingDelegate"
+        ],
+        "markdownTemplateKeys": {
+          "AGENTS.md": "codingDelegate"
+        },
+        "sandboxMode": "off",
+        "modelRef": "openai-codex/gpt-5.4",
+        "candidateModelRefs": [
+          "openai-codex/gpt-5.4",
+          "anthropic/claude-sonnet-4-6",
+          "google/gemini-3.1-flash-lite-preview"
+        ],
+        "subagents": {
+          "enabled": true,
+          "requireAgentId": true,
+          "allowAgents": []
+        }
       }
     ]
   },
@@ -1032,7 +1053,8 @@
         "review-local",
         "coder-local",
         "review-remote",
-        "coder-remote"
+        "coder-remote",
+        "hosted-coder"
       ],
       "sharedWorkspaceIds": []
     },

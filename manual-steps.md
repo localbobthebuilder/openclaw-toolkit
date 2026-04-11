@@ -82,7 +82,7 @@ Main operator wrapper:
 - `.\run-openclaw.cmd local-model-test`
   Smoke-test OpenClaw through the configured Ollama model path.
 - `.\run-openclaw.cmd agent-smoke`
-  Smoke-test the shared-workspace agent roles, especially the Telegram-routed agent's real file and git workflows.
+  Smoke-test the shared-workspace agent roles, especially `coder-local`'s real file and git workflows.
 - `.\run-openclaw.cmd remote-review-smoke`
   Smoke-test `main -> coder-remote -> review-local` on the shared workspace and verify that the review task uses exact full file paths.
 - `.\run-openclaw.cmd temp-agent-probe`
@@ -1142,7 +1142,7 @@ Targeted verification examples:
 
 The `agent` smoke test now exercises all configured collaboration roles that matter in day-to-day use:
 
-- `chat-local` for useful git/file work in the shared workspace
+- `coder-local` for useful git/file work in the shared workspace
 - `research` for a real web-backed research task
 - `review-local` for read/verification behavior
 - `coder-local` for bounded write behavior
@@ -1168,7 +1168,7 @@ Valid check names are:
 - `local-model`
 - `agent`
 - `sandbox`
-- `chat-write`
+- `chat-write` (compatibility alias for the tooling workspace write smoke)
 - `audit`
 - `git`
 - `multi-agent`
@@ -1188,14 +1188,14 @@ It writes a fresh status report to:
 - voice-note transcription smoke test
 - local Ollama model smoke test
 - shared-workspace agent capability smoke test
-- chat workspace write smoke test
+- tooling workspace write smoke test
 - starter multi-agent verification
 - harmless sandbox exec smoke test
 
 The agent capability smoke test is the useful-behavior check for your current
 multi-agent layout. It exercises:
 
-- `chat-local` by creating a real temporary git repo in the shared workspace,
+- `coder-local` by creating a real temporary git repo in the shared workspace,
   writing and reading a README through OpenClaw, and running `git status`
 - `review-local` by reading and validating a shared-workspace file
 - `coder-local` by creating a bounded artifact in the shared workspace

@@ -2,8 +2,8 @@
 param(
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
     [string]$ConfigPath,
-    [string]$AgentId = "chat-local",
-    [string]$WorkspaceHostPath = (Join-Path $env:USERPROFILE ".openclaw\\workspace-chat-local"),
+    [string]$AgentId = "coder-local",
+    [string]$WorkspaceHostPath = (Join-Path $env:USERPROFILE ".openclaw\\workspace"),
     [int]$TimeoutSeconds = 180
 )
 
@@ -22,7 +22,7 @@ function Write-ProgressLine {
         [ConsoleColor]$Color = [ConsoleColor]::DarkGray
     )
 
-    Write-Host "[chat-write] $Message" -ForegroundColor $Color
+    Write-Host "[tooling-write] $Message" -ForegroundColor $Color
 }
 
 function Invoke-External {
@@ -239,7 +239,7 @@ function Get-AgentSmokeModelPlan {
 }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "Docker is required for the chat workspace write smoke test."
+    throw "Docker is required for the tooling workspace write smoke test."
 }
 
 if (-not (Test-ContainerRunning -Name $ContainerName)) {
@@ -259,7 +259,7 @@ if (-not (Test-Path $WorkspaceHostPath)) {
     throw "Workspace host path does not exist: $WorkspaceHostPath"
 }
 
-$probeId = "verify-chat-write-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+$probeId = "verify-tooling-write-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 $sessionId = "smoke-$probeId"
 $probeFileName = "$probeId.txt"
 $probePath = Join-Path $WorkspaceHostPath $probeFileName
@@ -282,7 +282,7 @@ if (Test-Path $probePath) {
 
 if ($modelPlan.status -eq "skip") {
     @(
-        "Chat workspace write smoke test skipped."
+        "Tooling workspace write smoke test skipped."
         "Agent: $AgentId"
         $modelPlan.detail
         "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='skip';agentId=$AgentId;runtime='';category='fit';detail=$modelPlan.detail}) -Compress)"
@@ -340,7 +340,7 @@ try {
     Add-ToolkitVerificationCleanupModelRef -ModelRef $runtimeModelRef | Out-Null
 
     if ($sandboxed) {
-        throw "Expected $AgentId to run unsandboxed for writable Telegram workspace access."
+        throw "Expected $AgentId to run unsandboxed for writable shared workspace access."
     }
 
     if (-not (Test-Path $probePath)) {
@@ -355,20 +355,20 @@ try {
     Remove-Item -LiteralPath $probePath -Force
 
     @(
-        "Chat workspace write smoke test passed."
+        "Tooling workspace write smoke test passed."
         "Agent: $AgentId"
         "Configured model for ${AgentId}: $targetModelRef"
         "Observed model for ${AgentId}: $runtimeModelRef"
         "Sandboxed: $sandboxed"
         "Created and removed: $probePath"
         "Reply: $payloadText"
-        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='pass';agentId=$AgentId;runtime=$runtimeModelRef;category='';detail='Chat workspace write smoke test passed.'}) -Compress)"
+        "__SMOKE_JSON__: $(ConvertTo-Json ([pscustomobject]@{status='pass';agentId=$AgentId;runtime=$runtimeModelRef;category='';detail='Tooling workspace write smoke test passed.'}) -Compress)"
     ) | Write-Output
 }
 catch {
     $message = Get-ErrorMessage -ErrorRecord $_
     @(
-        "Chat workspace write smoke test failed."
+        "Tooling workspace write smoke test failed."
         "Agent: $AgentId"
         "Configured model for ${AgentId}: $targetModelRef"
         "Observed model for ${AgentId}: $runtimeModelRef"
