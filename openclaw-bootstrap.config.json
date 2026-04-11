@@ -272,7 +272,7 @@
         "cacheWrite": 0
       },
       "minimumContextWindow": 24576,
-      "contextWindow": 100000,
+      "contextWindow": 90000,
       "maxTokens": 8192,
       "vramEstimateMiB": 18432
     },
@@ -289,7 +289,7 @@
         "cacheWrite": 0
       },
       "minimumContextWindow": 24576,
-      "contextWindow": 85000,
+      "contextWindow": 80000,
       "maxTokens": 8192,
       "vramEstimateMiB": 19456
     },
