@@ -256,6 +256,10 @@ export class ToolkitDashboard extends LitElement {
     .topology-agent-title strong { color: #fff; font-size: 0.92rem; white-space: normal; overflow: visible; text-overflow: unset; overflow-wrap: anywhere; }
     .topology-agent-avatar { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #2c2c2c; font-size: 0.95rem; flex-shrink: 0; }
     .topology-agent-main { color: #ffc107; font-size: 1rem; }
+    .topology-agent-header-actions { display: flex; align-items: center; gap: 8px; }
+    .topology-agent-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #3a3a3a; border-radius: 999px; background: #171717; color: #bfc9cf; font-size: 0.72rem; cursor: pointer; }
+    .topology-agent-toggle input { width: auto; margin: 0; }
+    .topology-agent-toggle.disabled { border-color: #6a2a2a; color: #ffb4ad; }
     .topology-agent-badges { display: flex; flex-wrap: wrap; gap: 6px; }
     .topology-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; border: 1px solid #3a3a3a; color: #bbb; background: #191919; }
     .topology-pill.main { border-color: #7a6210; color: #ffd54f; }
@@ -3808,7 +3812,23 @@ export class ToolkitDashboard extends LitElement {
                                       <div style="color: #777; font-size: 0.72rem;">${entry.id}</div>
                                     </div>
                                   </div>
-                                  ${entry.isMain ? html`<span class="topology-agent-main">👑</span>` : ''}
+                                  <div class="topology-agent-header-actions">
+                                    <label
+                                      class="topology-agent-toggle ${entry.enabled ? '' : 'disabled'}"
+                                      @click=${(event: Event) => event.stopPropagation()}
+                                      @pointerdown=${(event: Event) => event.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        .checked=${!!entry.enabled}
+                                        @click=${(event: Event) => event.stopPropagation()}
+                                        @change=${(event: any) => {
+                                          event.stopPropagation();
+                                          this.setTopologyAgentEnabled(entry.id, !!event.target.checked);
+                                        }}>
+                                      <span>${entry.enabled ? 'Enabled' : 'Disabled'}</span>
+                                    </label>
+                                    ${entry.isMain ? html`<span class="topology-agent-main">👑</span>` : ''}
+                                  </div>
                                 </div>
 
                                 <div class="topology-agent-badges">
@@ -3960,7 +3980,15 @@ export class ToolkitDashboard extends LitElement {
 
         <div class="topology-inspector-section">
           <label class="toggle-switch" style="font-size: 0.95rem; font-weight: 700; color: #fff;">
-            <input type="checkbox" ?checked=${!!subagents.enabled} @change=${(event: any) => this.setTopologyAgentDelegationEnabled(selectedEntry.id, !!event.target.checked)}>
+            <input type="checkbox" .checked=${!!selectedEntry.enabled} @change=${(event: any) => this.setTopologyAgentEnabled(selectedEntry.id, !!event.target.checked)}>
+            Agent enabled for toolkit-managed config
+          </label>
+          <div class="help-text" style="margin-top: 8px;">Disabled agents remain in toolkit config for later use, but bootstrap stops propagating them into live OpenClaw config.</div>
+        </div>
+
+        <div class="topology-inspector-section">
+          <label class="toggle-switch" style="font-size: 0.95rem; font-weight: 700; color: #fff;">
+            <input type="checkbox" .checked=${!!subagents.enabled} @change=${(event: any) => this.setTopologyAgentDelegationEnabled(selectedEntry.id, !!event.target.checked)}>
             Delegation enabled for this agent
           </label>
           <div class="help-text" style="margin-top: 8px;">Turning delegation off pauses this agent's ability to spawn or delegate, but it keeps the configured allowed agents in place.</div>
@@ -5326,6 +5354,22 @@ export class ToolkitDashboard extends LitElement {
 
   selectTopologyAgent(agentId: string) {
     this.topologySelectedAgentId = agentId;
+  }
+
+  setTopologyAgentEnabled(agentId: string, enabled: boolean) {
+    const entry = this.getTopologyAgentEntryById(agentId);
+    if (!entry) {
+      return;
+    }
+    entry.agent.enabled = enabled;
+    if (!enabled && this.topologyLinkSourceAgentId === agentId) {
+      this.topologyLinkSourceAgentId = null;
+    }
+    this.topologySelectedAgentId = agentId;
+    this.setTopologyNotice(enabled
+      ? `${entry.name} is enabled again and will be included in toolkit-managed OpenClaw config.`
+      : `${entry.name} is now disabled and will stay in toolkit config only until re-enabled.`);
+    this.requestUpdate();
   }
 
   setTopologyAgentDelegationEnabled(agentId: string, enabled: boolean) {
