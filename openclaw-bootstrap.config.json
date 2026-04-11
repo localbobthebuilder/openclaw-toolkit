@@ -819,6 +819,7 @@
           ]
         },
         "modelRef": "ollama/gemma4:latest",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "ollama/gemma4:latest",
           "ollama/gemma4:26b",
@@ -850,6 +851,7 @@
           "allowAgents": []
         },
         "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "google/gemini-3.1-flash-lite-preview"
         ]
@@ -869,6 +871,7 @@
           "allowAgents": []
         },
         "modelRef": "ollama/glm-4.7-flash:latest",
+        "thinkingDefault": "high",
         "candidateModelRefs": [],
         "toolsetKeys": []
       },
@@ -887,6 +890,7 @@
           "allowAgents": []
         },
         "modelRef": "openai-codex/gpt-5.4",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "openai-codex/gpt-5.4"
         ],
@@ -910,6 +914,7 @@
           "allowAgents": []
         },
         "modelRef": "ollama/qwen3.5:35b-a3b",
+        "thinkingDefault": "high",
         "candidateModelRefs": []
       },
       {
@@ -930,6 +935,7 @@
           "allowAgents": []
         },
         "modelRef": "ollama/qwen3.5:35b-a3b",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "ollama/qwen3-coder:30b",
           "ollama/qwen3.5:35b-a3b",
@@ -955,6 +961,7 @@
           "allowAgents": []
         },
         "modelRef": "ollama/qwen2.5-coder:3b",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "ollama/qwen2.5-coder:3b",
           "ollama/qwen2.5-coder:1.5b",
@@ -981,6 +988,7 @@
           "allowAgents": []
         },
         "modelRef": "ollama/qwen2.5-coder:3b",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "ollama/qwen2.5-coder:3b",
           "ollama/qwen2.5-coder:1.5b",
@@ -1006,6 +1014,7 @@
           "allowAgents": []
         },
         "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "google/gemini-3.1-flash-lite-preview"
         ]
@@ -1022,6 +1031,7 @@
         },
         "sandboxMode": "off",
         "modelRef": "openai-codex/gpt-5.4",
+        "thinkingDefault": "high",
         "candidateModelRefs": [
           "openai-codex/gpt-5.4",
           "anthropic/claude-sonnet-4-6",

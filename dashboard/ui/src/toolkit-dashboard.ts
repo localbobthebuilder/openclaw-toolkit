@@ -63,6 +63,7 @@ const MINIMAL_CHAT_ONLY_ALLOW = ['message'];
 const MINIMAL_CHAT_ONLY_DENY = AVAILABLE_TOOL_OPTIONS
   .map((tool) => tool.id)
   .filter((toolId) => !MINIMAL_CHAT_ONLY_ALLOW.includes(toolId));
+const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive'] as const;
 
 @customElement('toolkit-dashboard')
 export class ToolkitDashboard extends LitElement {
@@ -1190,6 +1191,44 @@ export class ToolkitDashboard extends LitElement {
       return sections;
   }
 
+  getTelegramLiveCheckState() {
+      if (!this.statusLoaded) {
+          return { available: false, reason: 'loading' as const };
+      }
+
+      const sections = this.parseStatusOutput(this.statusOutput);
+      if (sections.length === 0) {
+          return { available: false, reason: 'unknown' as const };
+      }
+
+      const dockerSection = sections.find(s => s.title === 'Docker');
+      const gatewaySection = sections.find(s => s.title === 'Gateway');
+      const wsl2Section = sections.find(s => s.title === 'WSL2');
+      const virtSection = sections.find(s => s.title === 'Virtualization');
+      const bootstrapSection = sections.find(s => s.title === 'Bootstrap');
+      const managedImagesSection = sections.find(s => s.title === 'Managed Images');
+      const scriptFailed = sections.length === 0 && !!this.statusOutput;
+      const managedImageCounts = managedImagesSection?.content.match(/(\d+)\s*\/\s*(\d+)\s*present/i);
+      const managedImagesPresentCount = managedImageCounts ? Number(managedImageCounts[1]) : 0;
+      const managedImagesExpectedCount = managedImageCounts ? Number(managedImageCounts[2]) : 0;
+      const bootstrapAssetsIncomplete = !scriptFailed && managedImagesExpectedCount > 0 && managedImagesPresentCount < managedImagesExpectedCount;
+      const dockerNotInstalled = scriptFailed || dockerSection?.status === 'not-installed';
+      const wsl2NotInstalled = !scriptFailed && (wsl2Section?.status === 'not-installed' || wsl2Section?.status === 'offline');
+      const virtNotReady = !scriptFailed && virtSection?.status === 'not-installed';
+      const dockerNotReady = !scriptFailed && dockerSection?.status === 'offline';
+      const repoNotCloned = !scriptFailed && (!bootstrapSection || bootstrapSection.status === 'not-installed');
+      const gatewayDown = !scriptFailed && (!gatewaySection || gatewaySection.status === 'offline');
+      const bootstrapProvisioning = bootstrapAssetsIncomplete && gatewayDown;
+      const isNewInstall = dockerNotInstalled || wsl2NotInstalled || virtNotReady || repoNotCloned || bootstrapProvisioning;
+      const isServicesDown = !isNewInstall && (dockerNotReady || gatewayDown);
+
+      if (isServicesDown) {
+          return { available: false, reason: 'services-down' as const };
+      }
+
+      return { available: true, reason: 'ready' as const };
+  }
+
   ensureTelegramConfig() {
       if (!this.config.telegram || typeof this.config.telegram !== 'object') {
           this.config.telegram = {};
@@ -1662,15 +1701,48 @@ export class ToolkitDashboard extends LitElement {
         : '';
       const setupStatus = this.getTelegramSetupStatusRecord(accountId, isDefault);
       const setupComplete = !!setupStatus?.configured;
-      const setupBadgeStyle = setupComplete
+      const telegramLiveCheckState = this.getTelegramLiveCheckState();
+      const canTrustSetupStatus = setupComplete && setupStatus?.credentialSource === 'env';
+      const setupState = (!telegramLiveCheckState.available && !canTrustSetupStatus)
+        ? telegramLiveCheckState.reason
+        : (setupComplete ? 'complete' : 'needed');
+      const setupBadgeStyle = setupState === 'complete'
         ? 'background: #4caf50; color: #000;'
-        : 'background: #ff9800; color: #000;';
-      const setupButtonLabel = setupComplete ? 'Re-run Setup' : 'Setup Account';
-      const setupStatusText = setupComplete
+        : setupState === 'needed'
+          ? 'background: #ff9800; color: #000;'
+          : 'background: #607d8b; color: #fff;';
+      const setupBadgeLabel = setupState === 'complete'
+        ? 'Setup Complete'
+        : setupState === 'needed'
+          ? 'Setup Needed'
+          : setupState === 'loading'
+            ? 'Checking Status'
+            : 'Status Unavailable';
+      const setupButtonLabel = setupState === 'complete'
+        ? 'Re-run Setup'
+        : setupState === 'needed'
+          ? 'Setup Account'
+          : setupState === 'services-down'
+            ? 'Start Services First'
+            : 'Checking Status';
+      const setupButtonDisabled = this.isRunning
+        || (setupState === 'complete' || setupState === 'needed' ? !accountId : setupState !== 'services-down');
+      const setupStatusText = setupState === 'complete'
         ? (setupStatus?.credentialSource === 'env'
           ? 'Live Telegram credentials were detected from TELEGRAM_BOT_TOKEN for this default account.'
           : 'Live Telegram credentials were detected for this account. You do not need to run setup again unless you want to reconnect or replace the bot.')
-        : 'Live Telegram credentials were not detected for this account yet. Save & Apply first, then run Setup Account to connect the real bot.';
+        : setupState === 'needed'
+          ? 'Live Telegram credentials were not detected for this account yet. Save & Apply first, then run Setup Account to connect the real bot.'
+          : setupState === 'services-down'
+            ? 'Live Telegram credentials could not be checked because Docker or the gateway is not running. Start services first, then refresh or reopen the dashboard to verify the account state.'
+            : setupState === 'loading'
+              ? 'Waiting for system status so the dashboard can determine whether live Telegram credentials are available.'
+              : 'Live Telegram credentials could not be checked yet because the system status is unavailable right now.';
+      const setupStatusColor = setupState === 'complete'
+        ? '#81c784'
+        : setupState === 'needed'
+          ? '#ff9800'
+          : '#90a4ae';
 
       return html`
         <div class="card" style="padding: 14px; margin-bottom: 12px; border-color: ${isDefault ? '#5c6bc0' : '#333'};">
@@ -1678,17 +1750,26 @@ export class ToolkitDashboard extends LitElement {
             <h3>
               ${options.title}
               ${isDefault ? html`<span class="badge" style="background: #ffc107;">Default</span>` : ''}
-              <span class="badge" style=${setupBadgeStyle}>${setupComplete ? 'Setup Complete' : 'Setup Needed'}</span>
+              <span class="badge" style=${setupBadgeStyle}>${setupBadgeLabel}</span>
             </h3>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-ghost" ?disabled=${this.isRunning || !accountId} @click=${() => this.runCommand('telegram-setup', ['-AccountId', accountId])}>${setupButtonLabel}</button>
+              <button
+                class="btn btn-ghost"
+                ?disabled=${setupButtonDisabled}
+                @click=${() => {
+                  if (setupState === 'services-down') {
+                    this.runCommand('start');
+                    return;
+                  }
+                  this.runCommand('telegram-setup', ['-AccountId', accountId]);
+                }}>${setupButtonLabel}</button>
               ${typeof options.removableIndex === 'number'
                 ? html`<button class="btn btn-danger" @click=${() => this.removeTelegramAccount(options.removableIndex!)}>Remove Account</button>`
                 : ''}
             </div>
           </div>
           ${options.subtitle ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 12px;">${options.subtitle}</div>` : ''}
-          <div class="help-text" style="margin-top: 0; margin-bottom: 12px; color: ${setupComplete ? '#81c784' : '#ff9800'};">${setupStatusText}</div>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 12px; color: ${setupStatusColor};">${setupStatusText}</div>
           <div class="form-group">
             <label>Account ID</label>
             <input
@@ -1976,6 +2057,29 @@ export class ToolkitDashboard extends LitElement {
       return defaultValue;
     }
     return Boolean(value);
+  }
+
+  normalizeThinkingDefault(value: any) {
+    let normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    switch (normalized) {
+      case 'x-high':
+      case 'x_high':
+      case 'extra-high':
+      case 'extra high':
+      case 'extra_high':
+        normalized = 'xhigh';
+        break;
+      case 'highest':
+      case 'max':
+        normalized = 'high';
+        break;
+      default:
+        break;
+    }
+
+    return THINKING_LEVEL_OPTIONS.includes(normalized as typeof THINKING_LEVEL_OPTIONS[number])
+      ? normalized
+      : 'high';
   }
 
   ensureSubagentsConfig(agent: any) {
@@ -2991,6 +3095,7 @@ export class ToolkitDashboard extends LitElement {
       enabled: true,
       id: 'new-agent-' + Date.now(),
       name: 'New Agent',
+      thinkingDefault: 'high',
       toolsetKeys: [],
       markdownTemplateKeys: {},
       sandboxMode: 'off',
@@ -4440,6 +4545,7 @@ export class ToolkitDashboard extends LitElement {
     if (key) clone.key = key;
     delete clone.modelSource;
     clone.enabled = this.normalizeBoolean(clone.enabled, true);
+    clone.thinkingDefault = this.normalizeThinkingDefault(clone.thinkingDefault);
     delete clone.endpointKey;
     clone.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(clone, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
     delete clone.rolePolicyKey;
@@ -5944,6 +6050,7 @@ export class ToolkitDashboard extends LitElement {
     const availableDirectAllowOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directAllowedTools.includes(option.id));
     const availableDirectDenyOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directDeniedTools.includes(option.id));
     const sandboxModeOverride = typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '';
+    const thinkingDefault = this.normalizeThinkingDefault(agent.thinkingDefault);
     const forceSandboxOff = sandboxModeOverride === 'off';
     const telegramRoutesForAgent = this.getTelegramRoutesForAgent(String(agent.id || ''));
 
@@ -6064,20 +6171,34 @@ export class ToolkitDashboard extends LitElement {
                 </div>
             </div>
 
-            <div class="form-group">
-                <label>Primary Model</label>
-                <select ?disabled=${!selectedEndpoint || endpointModelOptions.length === 0} @change=${(e: any) => {
-                    agent.modelRef = e.target.value;
-                    this.syncAgentModelSource(agent);
-                    this.requestUpdate();
-                }}>
-                    <option value="">${selectedEndpoint ? 'Select Endpoint Model' : 'Choose an endpoint first'}</option>
-                    ${endpointModelOptions.map((option: any) => html`
-                        <option value=${option.ref} ?selected=${agent.modelRef === option.ref}>${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}</option>
-                    `)}
-                </select>
-                ${selectedEndpoint && endpointModelOptions.length === 0 ? html`<p style="color: #f44336; font-size: 0.7rem; margin-top: 4px;">This endpoint has no models configured yet. Add local or hosted models on the Endpoints tab first.</p>` : ''}
-                ${selectedEndpoint && endpointModelOptions.length > 0 ? html`<p style="color: #888; font-size: 0.75rem; margin-top: 4px;">Primary and candidate models are limited to the currently selected endpoint.</p>` : ''}
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Primary Model</label>
+                    <select ?disabled=${!selectedEndpoint || endpointModelOptions.length === 0} @change=${(e: any) => {
+                        agent.modelRef = e.target.value;
+                        this.syncAgentModelSource(agent);
+                        this.requestUpdate();
+                    }}>
+                        <option value="">${selectedEndpoint ? 'Select Endpoint Model' : 'Choose an endpoint first'}</option>
+                        ${endpointModelOptions.map((option: any) => html`
+                            <option value=${option.ref} ?selected=${agent.modelRef === option.ref}>${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}</option>
+                        `)}
+                    </select>
+                    ${selectedEndpoint && endpointModelOptions.length === 0 ? html`<p style="color: #f44336; font-size: 0.7rem; margin-top: 4px;">This endpoint has no models configured yet. Add local or hosted models on the Endpoints tab first.</p>` : ''}
+                    ${selectedEndpoint && endpointModelOptions.length > 0 ? html`<p style="color: #888; font-size: 0.75rem; margin-top: 4px;">Primary and candidate models are limited to the currently selected endpoint.</p>` : ''}
+                </div>
+                <div class="form-group">
+                    <label>Default Thinking</label>
+                    <select @change=${(e: any) => {
+                        agent.thinkingDefault = this.normalizeThinkingDefault(e.target.value);
+                        this.requestUpdate();
+                    }}>
+                        ${THINKING_LEVEL_OPTIONS.map((level) => html`
+                            <option value=${level} ?selected=${thinkingDefault === level}>${level}</option>
+                        `)}
+                    </select>
+                    <div class="help-text">Managed toolkit agents default to <code>high</code> instead of OpenClaw's normal <code>low</code>. Use <code>adaptive</code> for providers that support provider-managed thinking.</div>
+                </div>
             </div>
 
             <div class="card" style="margin-top: 20px; margin-bottom: 20px;">

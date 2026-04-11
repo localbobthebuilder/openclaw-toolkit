@@ -667,6 +667,9 @@ Agent config note:
 
 - model resolution is now driven by each agent's own `modelRef` plus
   `candidateModelRefs`
+- use `thinkingDefault` on each agent to choose its default OpenClaw thinking
+  level; toolkit-managed agents now default to `high` unless you set something
+  else like `adaptive` or `off`
 - use `markdownTemplateKeys.AGENTS.md` on the agent config to choose which
   reusable AGENTS template is written into managed `AGENTS.md`
 - AGENTS template keys are reusable, so multiple agents can intentionally share
@@ -751,6 +754,7 @@ Example extra agent:
         "AGENTS.md": "research"
       },
       "modelRef": "google/gemini-3.1-flash-lite-preview",
+      "thinkingDefault": "high",
       "candidateModelRefs": [
         "google/gemini-3.1-flash-lite-preview"
       ],
@@ -781,6 +785,7 @@ Notes for extra agents in `agents.list`:
 - private extra agents can still collaborate through `sharedWorkspaceIds`
 - `markdownTemplateKeys.AGENTS.md` controls which managed `AGENTS.md` template
   is written
+- `thinkingDefault` controls the agent's default OpenClaw thinking level
 - `toolsetKeys` can stack reusable toolsets defined in `toolsets.list`, such as
   `research`, `review`, or `codingDelegate`
 - or you can provide an explicit `tools` object directly on the agent
@@ -801,7 +806,8 @@ Example mixed layout:
       "markdownTemplateKeys": {
         "AGENTS.md": "research"
       },
-      "modelRef": "google/gemini-3.1-flash-lite-preview"
+      "modelRef": "google/gemini-3.1-flash-lite-preview",
+      "thinkingDefault": "high"
     }
   }
 },

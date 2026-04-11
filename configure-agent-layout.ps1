@@ -842,6 +842,7 @@ function New-AgentEntry {
         [string]$ModelRef,
         [string[]]$FallbackRefs = @(),
         [bool]$IsDefault = $false,
+        [string]$ThinkingDefault,
         $Tools,
         $Sandbox,
         $Subagents,
@@ -870,6 +871,9 @@ function New-AgentEntry {
     }
     if ($IsDefault) {
         $entry.default = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ThinkingDefault)) {
+        $entry.thinkingDefault = $ThinkingDefault
     }
     if ($null -ne $Tools) {
         $entry.tools = $Tools
@@ -937,6 +941,37 @@ function Get-AgentSkillsOverride {
     }
 
     return $null
+}
+
+function Get-AgentThinkingDefault {
+    param($AgentConfig)
+
+    $normalized = ""
+    if ($null -ne $AgentConfig -and ($AgentConfig.PSObject.Properties.Name -contains "thinkingDefault") -and $null -ne $AgentConfig.thinkingDefault) {
+        $normalized = ([string]$AgentConfig.thinkingDefault).Trim().ToLowerInvariant()
+    }
+
+    switch ($normalized) {
+        "x-high" { $normalized = "xhigh" }
+        "x_high" { $normalized = "xhigh" }
+        "extra-high" { $normalized = "xhigh" }
+        "extra high" { $normalized = "xhigh" }
+        "extra_high" { $normalized = "xhigh" }
+        "highest" { $normalized = "high" }
+        "max" { $normalized = "high" }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return "high"
+    }
+
+    $allowedLevels = @("off", "minimal", "low", "medium", "high", "xhigh", "adaptive")
+    if ($allowedLevels -contains $normalized) {
+        return $normalized
+    }
+
+    Write-Warning "Agent '$([string]$AgentConfig.id)' has unsupported thinkingDefault '$([string]$AgentConfig.thinkingDefault)'; defaulting to 'high'."
+    return "high"
 }
 
 function Get-SharedWorkspacePath {
@@ -1363,8 +1398,9 @@ function Add-DesiredAgentFromConfig {
     $sandboxOverride = Get-AgentSandboxOverride -AgentConfig $AgentConfig
     $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
     $skillsOverride = Get-AgentSkillsOverride -Config $Config
+    $thinkingDefault = Get-AgentThinkingDefault -AgentConfig $AgentConfig
 
-    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy -Skills $skillsOverride
+    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -ThinkingDefault $thinkingDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy -Skills $skillsOverride
     return @(@($DesiredAgents) + $entry)
 }
 
@@ -1388,6 +1424,7 @@ function Merge-AgentEntry {
     # This lets config toggles like subagents.enabled=false clear stale live state.
     $managedOptionalProps = @(
         "model",
+        "thinkingDefault",
         "tools",
         "sandbox",
         "subagents",
