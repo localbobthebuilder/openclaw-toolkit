@@ -650,7 +650,7 @@
             "vramEstimateMiB": 19968
           }
         ],
-        "vramHeadroomMiB": 1536
+        "vramHeadroomMiB": 3072
       }
     },
     {

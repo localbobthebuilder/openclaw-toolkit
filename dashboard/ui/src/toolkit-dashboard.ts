@@ -4580,6 +4580,31 @@ export class ToolkitDashboard extends LitElement {
     this.ensureToolsetsConfig(clone);
     const normalizedEndpoints = this.getConfigEndpointsFrom(clone).map((endpoint: any) => this.normalizeEndpointRecord(endpoint));
     if (Array.isArray(clone.endpoints)) {
+      // Canonicalize any flat endpoint.vramHeadroomMiB into endpoint.ollama.vramHeadroomMiB
+      for (const ep of normalizedEndpoints) {
+        if (ep && typeof ep === 'object') {
+          if (typeof ep.vramHeadroomMiB !== 'undefined' && ep.vramHeadroomMiB !== null) {
+            if (!ep.ollama || typeof ep.ollama !== 'object') {
+              ep.ollama = {};
+            }
+            if (typeof ep.ollama.vramHeadroomMiB === 'undefined' || ep.ollama.vramHeadroomMiB === null) {
+              const parsed = Number(ep.vramHeadroomMiB);
+              if (Number.isFinite(parsed) && parsed >= 0) {
+                ep.ollama.vramHeadroomMiB = Math.round(parsed);
+              }
+            }
+            delete ep.vramHeadroomMiB;
+          }
+          if (ep.ollama && typeof ep.ollama === 'object' && typeof ep.ollama.vramHeadroomMiB !== 'undefined' && ep.ollama.vramHeadroomMiB !== null) {
+            const parsedRuntime = Number(ep.ollama.vramHeadroomMiB);
+            if (Number.isFinite(parsedRuntime) && parsedRuntime >= 0) {
+              ep.ollama.vramHeadroomMiB = Math.round(parsedRuntime);
+            } else {
+              delete ep.ollama.vramHeadroomMiB;
+            }
+          }
+        }
+      }
       clone.endpoints = normalizedEndpoints;
     }
     this.normalizeEndpointAgentAssignments(clone);
@@ -4724,7 +4749,8 @@ export class ToolkitDashboard extends LitElement {
         !!endpoint?.baseUrl ||
         !!endpoint?.hostBaseUrl ||
         !!endpoint?.providerId ||
-        Array.isArray(endpoint?.models);
+        Array.isArray(endpoint?.models) ||
+        (typeof rawRuntime?.vramHeadroomMiB !== 'undefined' && rawRuntime.vramHeadroomMiB !== null);
 
       if (hasRuntime) {
         const runtime: any = {};
