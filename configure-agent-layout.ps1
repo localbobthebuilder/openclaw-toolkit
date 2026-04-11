@@ -210,11 +210,11 @@ function Get-AgentCandidateModelRefs {
     param([Parameter(Mandatory = $true)]$AgentConfig)
 
     $candidateRefs = @()
-    foreach ($candidateRef in @($AgentConfig.candidateModelRefs)) {
-        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidateRef)
-    }
     if ($AgentConfig.modelRef) {
         $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$AgentConfig.modelRef)
+    }
+    foreach ($candidateRef in @($AgentConfig.candidateModelRefs)) {
+        $candidateRefs = Add-UniqueString -List $candidateRefs -Value ([string]$candidateRef)
     }
 
     return @($candidateRefs)

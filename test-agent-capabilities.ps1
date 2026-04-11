@@ -358,11 +358,38 @@ function Get-ErrorCategory {
     if ($normalized -match 'model.+not found|unknown model|no configured ollama models|could not resolve any ollama model') {
         return "model-missing"
     }
+    if ($normalized -match 'does not support thinking|thinking.+not support|unsupported thinking') {
+        return "model-thinking"
+    }
     if ($normalized -match 'tool|exec|write|read|web_search|web_fetch') {
         return "tooling"
     }
 
     return "task"
+}
+
+function Get-FriendlyModelCapabilityFailureMessage {
+    param(
+        [string]$AgentId,
+        [string]$TargetModelRef,
+        [string]$Message
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return $Message
+    }
+
+    $normalized = $Message.ToLowerInvariant()
+    if ($normalized -match 'could not complete its smoke step because .+ was asked to use thinking') {
+        return $Message
+    }
+    if ($normalized -notmatch 'does not support thinking|thinking.+not support|unsupported thinking') {
+        return $Message
+    }
+
+    $agentLabel = if ([string]::IsNullOrWhiteSpace($AgentId)) { "This agent" } else { $AgentId }
+    $modelLabel = if ([string]::IsNullOrWhiteSpace($TargetModelRef)) { "the configured model" } else { $TargetModelRef }
+    return "$agentLabel could not complete its smoke step because $modelLabel was asked to use thinking, but that runtime rejected it. Choose a model that supports thinking for this role or clear the stale reasoning metadata for that model in the live OpenClaw config. Raw reply: $Message"
 }
 
 function Get-ErrorMessage {
@@ -677,6 +704,10 @@ try {
             Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewRuntime | Out-Null
             $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
             if ($reviewReply -ne "REVIEW_OK") {
+                $friendlyReviewFailure = Get-FriendlyModelCapabilityFailureMessage -AgentId $reviewAgentId -TargetModelRef $reviewTargetModelRef -Message $reviewReply
+                if ($friendlyReviewFailure -ne $reviewReply) {
+                    throw $friendlyReviewFailure
+                }
                 throw "Expected REVIEW_OK from $reviewAgentId, but got: $reviewReply"
             }
             $outputLines.Add("PASS: $reviewAgentId can read and verify shared workspace files")
@@ -688,6 +719,7 @@ try {
         }
         catch {
             $message = Get-ErrorMessage -ErrorRecord $_
+            $message = Get-FriendlyModelCapabilityFailureMessage -AgentId $reviewAgentId -TargetModelRef $reviewTargetModelRef -Message $message
             $category = Get-ErrorCategory -Message $message
             $failures.Add("${reviewAgentId}: [$category] $message")
             $outputLines.Add("FAIL: $reviewAgentId review-read workflow failed [$category]")

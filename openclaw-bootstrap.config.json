@@ -909,7 +909,7 @@
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "ollama/qwen3-coder:30b",
+        "modelRef": "ollama/qwen3.5:35b-a3b",
         "candidateModelRefs": []
       },
       {
@@ -929,10 +929,11 @@
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "ollama/glm-4.7-flash:latest",
+        "modelRef": "ollama/qwen3.5:35b-a3b",
         "candidateModelRefs": [
           "ollama/qwen3-coder:30b",
-          "ollama/qwen3.5:35b-a3b"
+          "ollama/qwen3.5:35b-a3b",
+          "ollama/glm-4.7-flash:latest"
         ],
         "allowLocalFallback": true
       },

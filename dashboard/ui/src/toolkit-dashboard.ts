@@ -3971,6 +3971,7 @@ export class ToolkitDashboard extends LitElement {
       { id: 'bootstrap', name: 'Bootstrap', desc: 'Full installation/hardening' },
       { id: 'update', name: 'Update', desc: 'Update OpenClaw repo and rebuild' },
       { id: 'verify', name: 'Verify', desc: 'Run smoke tests and health checks' },
+      { id: 'agent-smoke', name: 'Agent Smoke Test', desc: 'Run the managed agent behavior smoke for shared-workspace file/git, research, review, and coder flows' },
       { id: 'start', name: 'Start', desc: 'Start all services and OpenClaw' },
       { id: 'onboard', name: 'Interactive Onboarding', desc: 'Launch openclaw onboard in a separate PowerShell window so you can answer prompts and make onboarding choices' },
       { id: 'telegram-setup', name: 'Telegram Setup', desc: 'Launch the interactive Telegram channel setup wizard in a separate PowerShell window without storing any token in toolkit config' },
