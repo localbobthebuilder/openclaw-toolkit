@@ -228,9 +228,18 @@
       "name": "local-subagent-tool-safe-prompts",
       "path": ".\\upstream-patches\\openclaw-local-subagent-tool-safe-prompts.patch",
       "managedPaths": [
-        "src/agents/subagent-announce.ts",
+        "src/agents/subagent-system-prompt.ts",
         "src/agents/subagent-spawn.ts",
-        "src/agents/subagent-announce.prompt.test.ts"
+        "src/agents/system-prompt.test.ts"
+      ]
+    },
+    {
+      "enabled": true,
+      "name": "explicit-agent-session-id",
+      "path": ".\\upstream-patches\\openclaw-explicit-agent-session-id.patch",
+      "managedPaths": [
+        "src/agents/command/session.ts",
+        "src/agents/command/session.resolve-session-key.test.ts"
       ]
     }
   ],

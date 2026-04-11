@@ -1,8 +1,20 @@
-diff --git a/src/agents/subagent-announce.ts b/src/agents/subagent-announce.ts
-index d1a49bc8f..5025c99da 100644
---- a/src/agents/subagent-announce.ts
-+++ b/src/agents/subagent-announce.ts
-@@ -67,6 +67,8 @@ export function buildSubagentSystemPrompt(params: {
+diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
+index f7ca83329..295ce231f 100644
+--- a/src/agents/subagent-spawn.ts
++++ b/src/agents/subagent-spawn.ts
+@@ -605,6 +605,7 @@ export async function spawnSubagentDirect(
+     childSessionKey,
+     label: label || undefined,
+     task,
++    modelRef: resolvedModel,
+     acpEnabled: cfg.acp?.enabled !== false && !childRuntime.sandboxed,
+     childDepth,
+     maxSpawnDepth,
+diff --git a/src/agents/subagent-system-prompt.ts b/src/agents/subagent-system-prompt.ts
+index 0a75a9272..9f6817e7c 100644
+--- a/src/agents/subagent-system-prompt.ts
++++ b/src/agents/subagent-system-prompt.ts
+@@ -7,6 +7,8 @@ export function buildSubagentSystemPrompt(params: {
    childSessionKey: string;
    label?: string;
    task?: string;
@@ -11,7 +23,7 @@ index d1a49bc8f..5025c99da 100644
    /** Whether ACP-specific routing guidance should be included. Defaults to true. */
    acpEnabled?: boolean;
    /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
-@@ -86,6 +88,40 @@ export function buildSubagentSystemPrompt(params: {
+@@ -26,6 +28,40 @@ export function buildSubagentSystemPrompt(params: {
    const acpEnabled = params.acpEnabled !== false;
    const canSpawn = childDepth < maxSpawnDepth;
    const parentLabel = childDepth >= 2 ? "parent orchestrator" : "main agent";
@@ -52,23 +64,11 @@ index d1a49bc8f..5025c99da 100644
  
    const lines = [
      "# Subagent Context",
-diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index 2a20fa791..207860c62 100644
---- a/src/agents/subagent-spawn.ts
-+++ b/src/agents/subagent-spawn.ts
-@@ -606,6 +606,7 @@ export async function spawnSubagentDirect(
-     childSessionKey,
-     label: label || undefined,
-     task,
-+    modelRef: resolvedModel,
-     acpEnabled: cfg.acp?.enabled !== false && !childRuntime.sandboxed,
-     childDepth,
-     maxSpawnDepth,
 diff --git a/src/agents/system-prompt.test.ts b/src/agents/system-prompt.test.ts
-index aa1dadb6b..040a17b51 100644
+index 9e1bd7630..3cbc8bd90 100644
 --- a/src/agents/system-prompt.test.ts
 +++ b/src/agents/system-prompt.test.ts
-@@ -1059,4 +1059,31 @@ describe("buildSubagentSystemPrompt", () => {
+@@ -1099,4 +1099,31 @@ describe("buildSubagentSystemPrompt", () => {
        }
      }
    });

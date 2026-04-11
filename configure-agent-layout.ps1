@@ -2241,7 +2241,7 @@ foreach ($desiredAgent in @($desiredAgents)) {
     }
     $agentSharedWorkspacePaths = @(Get-AgentAccessibleSharedWorkspacePaths -Config $config -AgentConfig $agentConfig)
     $agentCanAccessSharedWorkspace = Test-AgentCanAccessSharedWorkspace -Config $config -AgentConfig $agentConfig
-    $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentConfig $desiredAgent -AgentId ([string]$desiredAgent.id) -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePaths $agentSharedWorkspacePaths -IncludeSharedWorkspaceAccess:$agentCanAccessSharedWorkspace
+    $agentTemplateMap = Get-AgentBootstrapTemplateMap -AgentConfig $agentConfig -AgentId ([string]$desiredAgent.id) -WorkspacePath $effectiveWorkspacePath -SharedWorkspacePaths $agentSharedWorkspacePaths -IncludeSharedWorkspaceAccess:$agentCanAccessSharedWorkspace
     $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir (Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$desiredAgent.id) -OverlayDirName $overlayDirName) -TemplateMap $agentTemplateMap -AllowedFileNames $script:ManagedAgentBootstrapOverlayFiles)
 }
 

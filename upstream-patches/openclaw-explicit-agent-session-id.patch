@@ -1,0 +1,56 @@
+diff --git a/src/agents/command/session.resolve-session-key.test.ts b/src/agents/command/session.resolve-session-key.test.ts
+index 0065ef4..e18a73c 100644
+--- a/src/agents/command/session.resolve-session-key.test.ts
++++ b/src/agents/command/session.resolve-session-key.test.ts
+@@ -124,4 +124,30 @@ describe("resolveSessionKeyForRequest", () => {
+     expect(result.storePath).toBe("/stores/embedded-agent.json");
+     expect(hoisted.loadSessionStoreMock).toHaveBeenCalledTimes(1);
+   });
++
++  it("does not collapse explicit agent session ids into the agent main session", () => {
++    const embeddedAgentStore = {
++      "agent:embedded-agent:main": { sessionId: "other-session", updatedAt: 2 },
++    } satisfies Record<string, SessionEntry>;
++    hoisted.loadSessionStoreMock.mockImplementation((storePath) => {
++      if (storePath === "/stores/embedded-agent.json") {
++        return embeddedAgentStore;
++      }
++      return {};
++    });
++
++    const result = resolveSessionKeyForRequest({
++      cfg: {
++        session: {
++          store: "/stores/{agentId}.json",
++        },
++      } satisfies OpenClawConfig,
++      agentId: "embedded-agent",
++      sessionId: "fresh-session-1",
++    });
++
++    expect(result.sessionKey).toBe("agent:embedded-agent:explicit:fresh-session-1");
++    expect(result.sessionStore).toBe(embeddedAgentStore);
++    expect(result.storePath).toBe("/stores/embedded-agent.json");
++  });
+ });
+diff --git a/src/agents/command/session.ts b/src/agents/command/session.ts
+index 0f0c700..5e868b4 100644
+--- a/src/agents/command/session.ts
++++ b/src/agents/command/session.ts
+@@ -138,10 +138,12 @@ export function resolveSessionKeyForRequest(opts: {
+   const mainKey = normalizeMainKey(sessionCfg?.mainKey);
+   const explicitSessionKey =
+     opts.sessionKey?.trim() ||
+-    resolveExplicitAgentSessionKey({
+-      cfg: opts.cfg,
+-      agentId: opts.agentId,
+-    });
++    (opts.sessionId
++      ? undefined
++      : resolveExplicitAgentSessionKey({
++          cfg: opts.cfg,
++          agentId: opts.agentId,
++        }));
+   const storeAgentId = resolveAgentIdFromSessionKey(explicitSessionKey);
+   const storePath = resolveStorePath(sessionCfg?.store, {
+     agentId: storeAgentId,

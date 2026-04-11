@@ -99,39 +99,68 @@ function Stop-OllamaModelFromRef {
     $null = Invoke-External -FilePath $ollamaCommand.Source -Arguments @("stop", $modelId) -AllowFailure
 }
 
-function Get-CoderSessionFiles {
-    $_hostDir = if ($_hostConfigDir) { $_hostConfigDir } else { Join-Path $env:USERPROFILE ".openclaw" }
-    $sessionDir = Join-Path $_hostDir (Join-Path "agents" (Join-Path $TargetAgentId "sessions"))
+function Get-HostOpenClawDir {
+    if ($_hostConfigDir) {
+        return $_hostConfigDir
+    }
+
+    return (Join-Path $env:USERPROFILE ".openclaw")
+}
+
+function Get-AgentSessionFiles {
+    param([Parameter(Mandatory = $true)][string]$AgentId)
+
+    $sessionDir = Join-Path (Get-HostOpenClawDir) (Join-Path "agents" (Join-Path $AgentId "sessions"))
     if (-not (Test-Path $sessionDir)) {
         return @()
     }
 
-    return @(Get-ChildItem -LiteralPath $sessionDir -File | Where-Object { $_.Name -like "*.jsonl*" } | Select-Object -ExpandProperty FullName)
+    return @(Get-ChildItem -LiteralPath $sessionDir -File | Where-Object { $_.Name -like "*.jsonl" } | Select-Object -ExpandProperty FullName)
 }
 
-function Get-FinalizedTranscriptPath {
+function Get-CoderSessionFiles {
+    return @(Get-AgentSessionFiles -AgentId $TargetAgentId)
+}
+
+function Get-TranscriptPathContainingText {
     param(
-        [Parameter(Mandatory = $true)][string[]]$BeforeFiles,
-        [int]$WaitSeconds = 12
+        [Parameter(Mandatory = $true)][string]$AgentId,
+        [Parameter(Mandatory = $true)][string]$Needle,
+        [int]$WaitSeconds = 20
     )
 
     for ($i = 0; $i -lt $WaitSeconds; $i++) {
+        foreach ($candidate in @((Get-AgentSessionFiles -AgentId $AgentId) | Sort-Object { (Get-Item $_).LastWriteTime } -Descending)) {
+            if (Select-String -LiteralPath $candidate -Pattern $Needle -Quiet -SimpleMatch) {
+                return $candidate
+            }
+        }
         Start-Sleep -Seconds 1
-        $afterFiles = @(Get-CoderSessionFiles)
-        $newFiles = @($afterFiles | Where-Object { $_ -notin $BeforeFiles })
-        $finalized = @($newFiles | Where-Object { $_ -notlike "*.lock" })
-        if ($finalized.Count -gt 0) {
-            return ($finalized | Sort-Object { (Get-Item $_).LastWriteTime } -Descending | Select-Object -First 1)
+    }
+
+    foreach ($candidate in @((Get-AgentSessionFiles -AgentId $AgentId) | Sort-Object { (Get-Item $_).LastWriteTime } -Descending)) {
+        if (Select-String -LiteralPath $candidate -Pattern $Needle -Quiet -SimpleMatch) {
+            return $candidate
         }
     }
 
-    $afterFiles = @(Get-CoderSessionFiles)
-    $newFiles = @($afterFiles | Where-Object { $_ -notin $BeforeFiles })
-    if ($newFiles.Count -gt 0) {
-        return ($newFiles | Sort-Object { (Get-Item $_).LastWriteTime } -Descending | Select-Object -First 1)
+    return $null
+}
+
+function Get-AgentReplyText {
+    param([Parameter(Mandatory = $true)]$AgentJson)
+
+    $payloads = @($AgentJson.result.payloads)
+    if ($payloads.Count -gt 0 -and $null -ne $payloads[0] -and $payloads[0].PSObject.Properties.Name -contains "text") {
+        return [string]$payloads[0].text
     }
 
-    return $null
+    $finalVisibleText = [string]$AgentJson.result.meta.finalAssistantVisibleText
+    if (-not [string]::IsNullOrWhiteSpace($finalVisibleText)) {
+        return $finalVisibleText
+    }
+
+    return ""
 }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -147,13 +176,12 @@ $probeFileName = "local-delegate-$suffix.txt"
 $probeFilePath = Join-Path $WorkspaceHostPath $probeFileName
 $mainSessionId = "smoke-main-localdelegate-$suffix"
 $childExpectedText = "LOCAL_DELEGATE_OK"
-$beforeFiles = @(Get-CoderSessionFiles)
 
 if (Test-Path $probeFilePath) {
     Remove-Item -LiteralPath $probeFilePath -Force
 }
 
-$taskMessage = "Spawn coder-local as a subagent with model $LocalModelRef. Do not use research. Task: Use the write tool to create /home/node/.openclaw/workspace/$probeFileName containing exactly $childExpectedText and then stop. After the child finishes, reply with exactly MAIN_DONE and nothing else."
+$taskMessage = "Call sessions_spawn exactly once with runtime 'subagent', agentId '$TargetAgentId', model '$LocalModelRef', and a task that uses the write tool to create /home/node/.openclaw/workspace/$probeFileName containing exactly $childExpectedText. Wait for the spawned child to finish. If and only if the child completes successfully, reply with exactly MAIN_DONE and nothing else. Do not write the file yourself."
 
 try {
     Write-ProgressLine "Requester agent: $RequesterAgentId" Cyan
@@ -172,24 +200,37 @@ try {
     )
 
     $mainJson = $mainResult.Output | ConvertFrom-Json -Depth 50
-    $mainReply = ""
-    if ($mainJson.result -and $mainJson.result.payloads -and $mainJson.result.payloads.Count -gt 0) {
-        $mainReply = [string]$mainJson.result.payloads[0].text
-    }
+    $mainReply = Get-AgentReplyText -AgentJson $mainJson
+    $mainStopReason = [string]$mainJson.result.meta.stopReason
 
-    $childTranscriptPath = Get-FinalizedTranscriptPath -BeforeFiles $beforeFiles
+    $mainTranscriptPath = Get-TranscriptPathContainingText -AgentId $RequesterAgentId -Needle $probeFileName -WaitSeconds 25
+    $childTranscriptPath = Get-TranscriptPathContainingText -AgentId $TargetAgentId -Needle $probeFileName -WaitSeconds 25
 
     $probeExists = Test-Path $probeFilePath
     $probeContent = if ($probeExists) { (Get-Content -Raw $probeFilePath).Trim() } else { "" }
+    $mainTranscriptText = if ($mainTranscriptPath -and (Test-Path $mainTranscriptPath)) { Get-Content -Raw $mainTranscriptPath } else { "" }
     $transcriptText = if ($childTranscriptPath -and (Test-Path $childTranscriptPath)) { Get-Content -Raw $childTranscriptPath } else { "" }
+    $escapedProbePath = [regex]::Escape("/home/node/.openclaw/workspace/$probeFileName")
 
     $sawStructuredToolCall = $transcriptText -match '"type":"toolCall"' -or $transcriptText -match '"toolName":"write"'
     $sawRawToolMarkup = $transcriptText -match '<function=write>' -or $transcriptText -match '</tool_call>'
+    $sawStructuredSpawn = [regex]::IsMatch($mainTranscriptText, '(?s)"name":"sessions_spawn".{0,1600}' + $escapedProbePath) -and $mainTranscriptText -match '"runtime":"subagent"' -and $mainTranscriptText -match ('"agentId":"' + [regex]::Escape($TargetAgentId) + '"')
+    $mainWroteProbeDirectly = [regex]::IsMatch($mainTranscriptText, '(?s)"name":"write".{0,800}' + $escapedProbePath)
+    $completionEventIndex = $mainTranscriptText.LastIndexOf('sourceTool":"subagent_announce"')
+    $finalMainDoneIndex = $mainTranscriptText.LastIndexOf('"text":"MAIN_DONE"')
+    $sawCompletionEvent = $completionEventIndex -ge 0 -and $mainTranscriptText -match [regex]::Escape($probeFileName)
+    $sawFinalMainDoneAfterCompletion = $completionEventIndex -ge 0 -and $finalMainDoneIndex -gt $completionEventIndex
 
-    $status = if ($probeExists -and $probeContent -eq $childExpectedText -and $sawStructuredToolCall) { "pass" } else { "fail" }
+    $status = if ($probeExists -and $probeContent -eq $childExpectedText -and $sawStructuredSpawn -and $sawStructuredToolCall -and -not $mainWroteProbeDirectly -and $sawCompletionEvent -and $sawFinalMainDoneAfterCompletion) { "pass" } else { "fail" }
     $category = ""
     if ($status -ne "pass") {
-        if ($sawRawToolMarkup) {
+        if ($mainWroteProbeDirectly) {
+            $category = "requester-wrote-directly"
+        }
+        elseif (-not $sawStructuredSpawn) {
+            $category = "spawn-not-observed"
+        }
+        elseif ($sawRawToolMarkup) {
             $category = "raw-tool-text"
         }
         elseif (-not $childTranscriptPath) {
@@ -197,6 +238,12 @@ try {
         }
         elseif (-not $probeExists) {
             $category = "child-did-not-write"
+        }
+        elseif (-not $sawCompletionEvent) {
+            $category = "missing-completion-event"
+        }
+        elseif (-not $sawFinalMainDoneAfterCompletion) {
+            $category = "requester-did-not-finish"
         }
         else {
             $category = "unexpected-child-behavior"
@@ -210,12 +257,18 @@ try {
         localModelRef       = $LocalModelRef
         mainSessionId       = $mainSessionId
         mainReply           = $mainReply
+        mainStopReason      = $mainStopReason
         probeFilePath       = $probeFilePath
         probeExists         = $probeExists
         probeContent        = $probeContent
+        mainTranscriptPath  = $mainTranscriptPath
         childTranscriptPath = $childTranscriptPath
+        sawStructuredSpawn  = $sawStructuredSpawn
         sawStructuredToolCall = $sawStructuredToolCall
         sawRawToolMarkup    = $sawRawToolMarkup
+        mainWroteProbeDirectly = $mainWroteProbeDirectly
+        sawCompletionEvent  = $sawCompletionEvent
+        sawFinalMainDoneAfterCompletion = $sawFinalMainDoneAfterCompletion
         category            = $category
     }
 
@@ -226,6 +279,7 @@ try {
             "Target: $TargetAgentId"
             "Model: $LocalModelRef"
             "Probe file: $probeFilePath"
+            "Main transcript: $mainTranscriptPath"
             "Transcript: $childTranscriptPath"
             "__SMOKE_JSON__: $(ConvertTo-Json $structured -Depth 8 -Compress)"
         ) | Write-Output
@@ -239,11 +293,17 @@ try {
         "Model: $LocalModelRef"
         "Category: $category"
         "Main reply: $mainReply"
+        "Main stop reason: $mainStopReason"
         "Probe exists: $probeExists"
         "Probe content: $probeContent"
+        "Main transcript: $mainTranscriptPath"
         "Transcript: $childTranscriptPath"
+        "Saw structured spawn: $sawStructuredSpawn"
         "Saw structured tool call: $sawStructuredToolCall"
         "Saw raw tool markup: $sawRawToolMarkup"
+        "Requester wrote probe directly: $mainWroteProbeDirectly"
+        "Saw completion event: $sawCompletionEvent"
+        "Saw final MAIN_DONE after completion: $sawFinalMainDoneAfterCompletion"
         "__SMOKE_JSON__: $(ConvertTo-Json $structured -Depth 8 -Compress)"
     ) | Write-Output
 

@@ -125,6 +125,7 @@ function Invoke-AgentTurn {
         [Parameter(Mandatory = $true)][string]$SessionId,
         [Parameter(Mandatory = $true)][string]$Message,
         [string]$ModelOverrideRef,
+        [string]$ThinkingLevel,
         [int]$Timeout = 180
     )
 
@@ -145,7 +146,7 @@ function Invoke-AgentTurn {
         }
     }
 
-    $result = Invoke-External -FilePath "docker" -Arguments @(
+    $arguments = @(
         "exec", $ContainerName,
         "node", "dist/index.js",
         "agent",
@@ -155,6 +156,11 @@ function Invoke-AgentTurn {
         "--timeout", [string]$Timeout,
         "--json"
     )
+    if (-not [string]::IsNullOrWhiteSpace($ThinkingLevel)) {
+        $arguments += @("--thinking", $ThinkingLevel)
+    }
+
+    $result = Invoke-External -FilePath "docker" -Arguments $arguments
 
     $json = $result.Output | ConvertFrom-Json -Depth 50
     if ($json.status -ne "ok") {
@@ -168,11 +174,16 @@ function Get-AgentReplyText {
     param([Parameter(Mandatory = $true)]$AgentJson)
 
     $payloads = @($AgentJson.result.payloads)
-    if ($payloads.Count -eq 0) {
-        return ""
+    if ($payloads.Count -gt 0 -and $null -ne $payloads[0] -and $payloads[0].PSObject.Properties.Name -contains "text") {
+        return [string]$payloads[0].text
     }
 
-    return [string]$payloads[0].text
+    $finalVisibleText = [string]$AgentJson.result.meta.finalAssistantVisibleText
+    if (-not [string]::IsNullOrWhiteSpace($finalVisibleText)) {
+        return $finalVisibleText
+    }
+
+    return ""
 }
 
 function Get-AgentRuntimeRef {
@@ -341,7 +352,31 @@ function Normalize-SmokeBlock {
         return ""
     }
 
-    return (($Text -replace "`r`n", "`n" -replace "`r", "`n").Trim())
+    $normalized = (($Text -replace "`r`n", "`n" -replace "`r", "`n").Trim())
+    if ($normalized -match '(?s)^.*?```[a-zA-Z0-9_-]*\n(?<block>.*?)\n```$') {
+        $normalized = $Matches.block.Trim()
+    }
+
+    return $normalized
+}
+
+function Normalize-GitStatusSmokeBlock {
+    param([string]$Text)
+
+    $normalized = Normalize-SmokeBlock -Text $Text
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return ""
+    }
+
+    $lines = @($normalized -split "`n")
+    if ($lines.Count -gt 0) {
+        $firstLine = $lines[0].Trim()
+        if ($firstLine -match '^(##\s+)?No commits yet on ') {
+            $lines[0] = ($firstLine -replace '^##\s+', '')
+        }
+    }
+
+    return (($lines -join "`n").Trim())
 }
 
 function Get-ErrorCategory {
@@ -603,7 +638,7 @@ try {
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingStatusReply = (Get-AgentReplyText -AgentJson $toolingStatus).Trim()
             $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $toolingRepoPath, "status", "--short", "--branch")).Output.Trim()
-            if ((Normalize-SmokeBlock -Text $hostStatus) -ne (Normalize-SmokeBlock -Text $toolingStatusReply)) {
+            if ((Normalize-GitStatusSmokeBlock -Text $hostStatus) -ne (Normalize-GitStatusSmokeBlock -Text $toolingStatusReply)) {
                 throw "Expected $toolingAgentId git status to match host status.`nHost: $hostStatus`nAgent: $toolingStatusReply"
             }
             if ($hostStatus -notmatch '^## ') {
@@ -714,7 +749,7 @@ try {
                 Write-ProgressLine "[$reviewAgentId] Switching smoke session to $($reviewModelPlan.modelOverrideRef)" Gray
             }
             Write-ProgressLine "[$reviewAgentId] Verifying read-only review access to the shared workspace" Gray
-            $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$reviewProbeName. If it contains the exact phrase 'review smoke ok', reply with exactly REVIEW_OK and nothing else." -ModelOverrideRef $reviewModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$reviewProbeName. If it contains the exact phrase 'review smoke ok', reply with exactly REVIEW_OK and nothing else." -ModelOverrideRef $reviewModelPlan.modelOverrideRef -ThinkingLevel "off" -Timeout $TimeoutSeconds
             $reviewRuntime = Get-AgentRuntimeRef -AgentJson $reviewTurn
             Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewRuntime | Out-Null
             $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
