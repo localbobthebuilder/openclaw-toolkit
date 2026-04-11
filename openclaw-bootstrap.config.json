@@ -276,7 +276,6 @@
     },
     {
       "id": "glm-4.7-flash:latest",
-      "reasoning": true,
       "input": [
         "text"
       ],
@@ -287,7 +286,7 @@
         "cacheWrite": 0
       },
       "minimumContextWindow": 24576,
-      "contextWindow": 80000,
+      "contextWindow": 65536,
       "maxTokens": 8192,
       "vramEstimateMiB": 19456
     },
@@ -478,7 +477,10 @@
             "minimumContextWindow": 24576,
             "contextWindow": 65536,
             "maxTokens": 8192,
-            "vramEstimateMiB": 22528
+            "vramEstimateMiB": 22528,
+            "fallbackModelIds": [
+              "qwen3-coder:30b"
+            ]
           },
           {
             "id": "qwen3-coder:30b",
@@ -498,7 +500,6 @@
           },
           {
             "id": "glm-4.7-flash:latest",
-            "reasoning": true,
             "input": [
               "text"
             ],
@@ -509,7 +510,7 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 24576,
-            "contextWindow": 90000,
+            "contextWindow": 65536,
             "maxTokens": 8192,
             "vramEstimateMiB": 19456
           },
