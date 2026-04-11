@@ -2572,7 +2572,7 @@ if (-not $hasActionableIssues -and (Test-CheckRequested -Names @("context")) -an
 if ($hasActionableIssues) {
     Write-Host "Verification completed with actionable issues. Review the details above and the saved report." -ForegroundColor Yellow
 }
-Write-Host "Verification report written to $reportPath" -ForegroundColor Green
+Write-Detail "Verification report written to $reportPath" ([ConsoleColor]::Green)
 $verificationExitCode = if ($hasActionableIssues) { 2 } else { 0 }
 }
 finally {
