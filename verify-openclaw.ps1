@@ -1214,6 +1214,182 @@ function Invoke-LoggedConfigLookup {
     }
 }
 
+function Format-ToolkitModelContextWindow {
+    param($ModelEntry)
+
+    if ($null -eq $ModelEntry) {
+        return "-"
+    }
+
+    $window = $null
+    foreach ($propertyName in @("contextWindow", "minimumContextWindow")) {
+        if ($ModelEntry.PSObject.Properties.Name -contains $propertyName -and $null -ne $ModelEntry.$propertyName) {
+            try {
+                $candidate = [double]$ModelEntry.$propertyName
+                if ($candidate -gt 0) {
+                    $window = $candidate
+                    break
+                }
+            }
+            catch {
+            }
+        }
+    }
+
+    if ($null -eq $window) {
+        return "-"
+    }
+
+    if ($window -ge 1024) {
+        return ("{0}k" -f [int][Math]::Round($window / 1024))
+    }
+
+    return [string]([int][Math]::Round($window))
+}
+
+function Invoke-LoggedToolkitModelSummary {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        $LiveConfig
+    )
+
+    Write-Step "OpenClaw model list"
+    $started = Get-Date
+
+    if ($null -eq $LiveConfig) {
+        $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+        $message = "Could not read live host config for model summary."
+        Write-Detail "$message ($elapsed)" ([ConsoleColor]::Yellow)
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output   = $message
+        }
+    }
+
+    $defaultModelRef = ""
+    if ($LiveConfig.agents -and $LiveConfig.agents.defaults -and $LiveConfig.agents.defaults.model -and $LiveConfig.agents.defaults.model.primary) {
+        $defaultModelRef = [string]$LiveConfig.agents.defaults.model.primary
+    }
+
+    $actualModelAllowlist = @()
+    if ($LiveConfig.agents -and $LiveConfig.agents.defaults -and $LiveConfig.agents.defaults.models) {
+        $actualModelAllowlist = @($LiveConfig.agents.defaults.models.PSObject.Properties.Name | ForEach-Object { [string]$_ })
+    }
+
+    $expectedModelRefs = @(Get-ExpectedManagedModelRefs -Config $Config -LiveConfig $LiveConfig)
+    $declaredToolkitRefs = @()
+    $hostedToolkitRefs = @()
+    $ollamaEndpointMap = @{}
+
+    foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        if ($null -eq $endpoint -or [string]::IsNullOrWhiteSpace([string]$endpoint.providerId)) {
+            continue
+        }
+
+        $ollamaEndpointMap[[string]$endpoint.providerId] = $endpoint
+
+        foreach ($modelEntry in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey ([string]$endpoint.key))) {
+            if ($null -eq $modelEntry -or [string]::IsNullOrWhiteSpace([string]$modelEntry.id)) {
+                continue
+            }
+
+            $modelRef = Convert-ToolkitLocalModelIdToRef -Config $Config -ModelId ([string]$modelEntry.id) -EndpointKey ([string]$endpoint.key)
+            $declaredToolkitRefs = Add-UniqueString -List $declaredToolkitRefs -Value $modelRef
+        }
+    }
+
+    foreach ($endpoint in @(Get-ToolkitEndpoints -Config $Config)) {
+        foreach ($hostedEntry in @($endpoint.hostedModels)) {
+            if ($null -eq $hostedEntry -or [string]::IsNullOrWhiteSpace([string]$hostedEntry.modelRef)) {
+                continue
+            }
+
+            $modelRef = [string]$hostedEntry.modelRef
+            $declaredToolkitRefs = Add-UniqueString -List $declaredToolkitRefs -Value $modelRef
+            $hostedToolkitRefs = Add-UniqueString -List $hostedToolkitRefs -Value $modelRef
+        }
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("Source: Toolkit fast summary (skips upstream availability discovery).")
+    [void]$lines.Add("Live default: $(if ([string]::IsNullOrWhiteSpace($defaultModelRef)) { '-' } else { $defaultModelRef })")
+    [void]$lines.Add("Live configured models: $(@($actualModelAllowlist).Count)")
+    [void]$lines.Add("Toolkit-managed refs expected: $(@($expectedModelRefs).Count)")
+    [void]$lines.Add("")
+    [void]$lines.Add("Configured models")
+
+    if (@($actualModelAllowlist).Count -eq 0) {
+        [void]$lines.Add("- (none)")
+    }
+    else {
+        foreach ($modelRef in @($actualModelAllowlist)) {
+            $providerId, $modelId = ([string]$modelRef -split "/", 2)
+            $tags = New-Object System.Collections.Generic.List[string]
+            $details = New-Object System.Collections.Generic.List[string]
+
+            if ($modelRef -eq $defaultModelRef) {
+                $tags.Add("default")
+            }
+            if ($modelRef -in @($expectedModelRefs)) {
+                $tags.Add("managed")
+            }
+
+            $endpoint = $null
+            if ($providerId -in $ollamaEndpointMap.Keys) {
+                $endpoint = $ollamaEndpointMap[$providerId]
+            }
+
+            if ($null -ne $endpoint -and -not [string]::IsNullOrWhiteSpace($modelId)) {
+                $modelEntry = Get-ToolkitLocalModelEntry -Config $Config -ModelId $modelId -EndpointKey ([string]$endpoint.key)
+                $details.Add("endpoint=$([string]$endpoint.key)")
+                $details.Add("ctx=$(Format-ToolkitModelContextWindow -ModelEntry $modelEntry)")
+                if ($modelRef -notin @($declaredToolkitRefs)) {
+                    $tags.Add("undeclared")
+                }
+            }
+            else {
+                $details.Add("provider=$providerId")
+                if ($modelRef -in @($hostedToolkitRefs)) {
+                    $details.Add("hosted=yes")
+                }
+                elseif ($modelRef -notin @($declaredToolkitRefs)) {
+                    $tags.Add("undeclared")
+                }
+            }
+
+            $tagText = if ($tags.Count -gt 0) { " | tags=" + ($tags.ToArray() -join ",") } else { "" }
+            [void]$lines.Add("- $modelRef | $($details.ToArray() -join ' | ')$tagText")
+        }
+    }
+
+    $missingFromLive = @(
+        foreach ($modelRef in @($expectedModelRefs)) {
+            if ($modelRef -notin @($actualModelAllowlist)) {
+                [string]$modelRef
+            }
+        }
+    )
+    $undeclaredLiveRefs = @(
+        foreach ($modelRef in @($actualModelAllowlist)) {
+            if ($modelRef -notin @($declaredToolkitRefs)) {
+                [string]$modelRef
+            }
+        }
+    )
+
+    [void]$lines.Add("")
+    [void]$lines.Add("Drift checks")
+    [void]$lines.Add("Missing from live allowlist: $(if (@($missingFromLive).Count -gt 0) { @($missingFromLive) -join ', ' } else { '(none)' })")
+    [void]$lines.Add("Present in live allowlist but not declared in toolkit: $(if (@($undeclaredLiveRefs).Count -gt 0) { @($undeclaredLiveRefs) -join ', ' } else { '(none)' })")
+
+    $elapsed = Format-Duration -Elapsed ((Get-Date) - $started)
+    Write-Detail "Collected fast configured model summary in $elapsed" ([ConsoleColor]::Green)
+    return [pscustomobject]@{
+        ExitCode = 0
+        Output   = ($lines -join [Environment]::NewLine)
+    }
+}
+
 function Get-ManagedDockerImageTags {
     param($BootstrapConfig)
 
@@ -1708,7 +1884,7 @@ if (Test-CheckRequested -Names @("tailscale")) {
 $modelsList = New-SkippedExternalResult
 $modelsStatus = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("models")) {
-    $modelsList = Invoke-LoggedExternal -Label "OpenClaw model list" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "models", "list") -AllowFailure -SuccessSummary "Collected configured model list." -FailureSummary "Could not collect configured model list."
+    $modelsList = Invoke-LoggedToolkitModelSummary -Config $config -LiveConfig $liveConfig
     $modelsStatus = Invoke-LoggedExternal -Label "OpenClaw model provider status" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "models", "status") -AllowFailure -SuccessSummary "Collected model provider status." -FailureSummary "Could not collect model provider status."
 }
 $telegramConfig = New-SkippedExternalResult
