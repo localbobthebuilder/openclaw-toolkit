@@ -108,7 +108,14 @@ function Write-Detail {
         [ConsoleColor]$Color = [ConsoleColor]::White
     )
 
-    Write-Host "    $Message" -ForegroundColor $Color
+    $lines = @($Message -split "\r\n|\n|\r")
+    if ($lines.Count -eq 0) {
+        $lines = @("")
+    }
+
+    foreach ($line in $lines) {
+        Write-Host "    $line" -ForegroundColor $Color
+    }
 }
 
 function Test-SmokeStructuredMetadataLine {

@@ -334,6 +334,16 @@ function Normalize-SmokeSentence {
     return $normalized
 }
 
+function Normalize-SmokeBlock {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    return (($Text -replace "`r`n", "`n" -replace "`r", "`n").Trim())
+}
+
 function Get-ErrorCategory {
     param([string]$Message)
 
@@ -560,7 +570,7 @@ try {
             $outputLines.Add("Observed model for ${toolingAgentId}: $toolingRuntime")
 
             Write-ProgressLine "[$toolingAgentId] Writing a README inside that repo" Gray
-            $toolingWrite = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$toolingRepoName/README.md with exactly this content: tooling smoke test. Then reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingWrite = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$toolingRepoName/README.md with exact file contents shown on the next line and nothing else:`ntooling smoke test`nThen reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingWrite
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingWriteReply = (Get-AgentReplyText -AgentJson $toolingWrite).Trim()
@@ -593,14 +603,19 @@ try {
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingStatusReply = (Get-AgentReplyText -AgentJson $toolingStatus).Trim()
             $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $toolingRepoPath, "status", "--short", "--branch")).Output.Trim()
-            if ($hostStatus -ne $toolingStatusReply) {
+            if ((Normalize-SmokeBlock -Text $hostStatus) -ne (Normalize-SmokeBlock -Text $toolingStatusReply)) {
                 throw "Expected $toolingAgentId git status to match host status.`nHost: $hostStatus`nAgent: $toolingStatusReply"
             }
             if ($hostStatus -notmatch '^## ') {
                 throw "Unexpected git status output from ${toolingAgentId}: $hostStatus"
             }
             $outputLines.Add("PASS: $toolingAgentId ran git status in the repo")
-            $outputLines.Add("Git status: $hostStatus")
+            $outputLines.Add("Git status:")
+            foreach ($statusLine in @(($hostStatus -split "\r\n|\n|\r"))) {
+                if (-not [string]::IsNullOrWhiteSpace($statusLine)) {
+                    $outputLines.Add("  $statusLine")
+                }
+            }
             $checkResults.Add((New-CheckResult -Name "tooling" -Status "pass" -AgentId $toolingAgentId -TargetModel $toolingTargetModelRef -Runtime $toolingRuntime -Detail "Completed git/file workflow in shared workspace."))
         }
         catch {
@@ -767,7 +782,7 @@ try {
                 Write-ProgressLine "[$coderAgentId] Switching smoke session to $($coderModelPlan.modelOverrideRef)" Gray
             }
             Write-ProgressLine "[$coderAgentId] Creating a bounded coding artifact in the shared workspace" Gray
-            $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exactly this content: coder smoke ok. Then reply with exactly CODER_WRITE_OK and nothing else." -ModelOverrideRef $coderModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exact file contents shown on the next line and nothing else:`ncoder smoke ok`nThen reply with exactly CODER_WRITE_OK and nothing else." -ModelOverrideRef $coderModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $coderRuntime = Get-AgentRuntimeRef -AgentJson $coderWrite
             Add-ToolkitVerificationCleanupModelRef -ModelRef $coderRuntime | Out-Null
             $coderReply = (Get-AgentReplyText -AgentJson $coderWrite).Trim()
