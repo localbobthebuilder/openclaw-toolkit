@@ -176,6 +176,7 @@
         "hostBaseUrl": "http://127.0.0.1:11434",
         "apiKey": "ollama-local",
         "autoPullMissingModels": true,
+        "vramHeadroomMiB": 1536,
         "models": []
       }
     }

@@ -347,9 +347,33 @@ function Get-ToolkitOllamaPullVramBudgetFraction {
 }
 
 function Get-ToolkitOllamaVramHeadroomMiB {
-    param($Config)
+    param(
+        $Config,
+        [string]$EndpointKey
+    )
 
     $headroomMiB = 1536
+
+    # If an endpoint key was provided, prefer endpoint-specific headroom if configured
+    if (-not [string]::IsNullOrWhiteSpace($EndpointKey)) {
+        try {
+            $endpoint = Get-ToolkitEndpoint -Config $Config -EndpointKey $EndpointKey
+            if ($null -ne $endpoint) {
+                if ($endpoint.PSObject.Properties.Name -contains "ollama" -and $endpoint.ollama -ne $null -and $endpoint.ollama.PSObject.Properties.Name -contains "vramHeadroomMiB" -and $endpoint.ollama.vramHeadroomMiB -ne $null) {
+                    $parsed = [double]$endpoint.ollama.vramHeadroomMiB
+                    if ($parsed -ge 0) { return [int][math]::Round($parsed) }
+                }
+                elseif ($endpoint.PSObject.Properties.Name -contains "vramHeadroomMiB" -and $endpoint.vramHeadroomMiB -ne $null) {
+                    $parsed = [double]$endpoint.vramHeadroomMiB
+                    if ($parsed -ge 0) { return [int][math]::Round($parsed) }
+                }
+            }
+        }
+        catch {
+        }
+    }
+
+    # Fall back to global config.ollama.vramHeadroomMiB if present
     if ($null -ne $Config -and
         $Config.PSObject.Properties.Name -contains "ollama" -and
         $null -ne $Config.ollama -and

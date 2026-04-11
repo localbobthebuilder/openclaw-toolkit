@@ -222,7 +222,7 @@ $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
 if (-not $PSBoundParameters.ContainsKey("HeadroomMiB")) {
-    $HeadroomMiB = Get-ToolkitOllamaVramHeadroomMiB -Config $config
+    $HeadroomMiB = Get-ToolkitOllamaVramHeadroomMiB -Config $config -EndpointKey $EndpointKey
 }
 
 $endpoint = Get-ToolkitOllamaEndpoint -Config $config -EndpointKey $EndpointKey

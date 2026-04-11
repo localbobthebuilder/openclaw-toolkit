@@ -239,7 +239,7 @@
     "setAsDefaultModel": false,
     "clearFallbacks": true,
     "pullVramBudgetFraction": 0.7,
-    "vramHeadroomMiB": 1536
+    "vramHeadroomMiB": 3072
   },
   "modelCatalog": [
     {
@@ -649,7 +649,8 @@
             "maxTokens": 8192,
             "vramEstimateMiB": 19968
           }
-        ]
+        ],
+        "vramHeadroomMiB": 1536
       }
     },
     {

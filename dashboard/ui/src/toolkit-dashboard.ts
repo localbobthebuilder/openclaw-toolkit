@@ -4737,6 +4737,13 @@ export class ToolkitDashboard extends LitElement {
         if (Array.isArray(rawRuntime?.models)) {
           runtime.models = this.sanitizeModelEntries(rawRuntime.models);
         }
+        // Per-endpoint VRAM headroom override (MiB)
+        if (typeof rawRuntime?.vramHeadroomMiB !== 'undefined') {
+          const parsed = Number(rawRuntime.vramHeadroomMiB);
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            runtime.vramHeadroomMiB = Math.round(parsed);
+          }
+        }
         normalized.ollama = runtime;
       }
 
@@ -5659,7 +5666,25 @@ export class ToolkitDashboard extends LitElement {
                 </div>
             </div>
 
-            <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
+            <div class="form-group">
+                <label>Model Fit VRAM Headroom (MiB)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="128"
+                  .value=${typeof runtime.vramHeadroomMiB === 'number' ? String(Math.round(runtime.vramHeadroomMiB)) : ''}
+                  @input=${(e: any) => {
+                    const parsed = Number(e.target.value);
+                    if (Number.isFinite(parsed) && parsed >= 0) {
+                      runtime.vramHeadroomMiB = Math.round(parsed);
+                    } else {
+                      delete runtime.vramHeadroomMiB;
+                    }
+                    this.requestUpdate();
+                  }}>
+                <div class="help-text">Per-endpoint override for probe headroom. Leave blank to use global setting.</div>
+              </div>
+              <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
             <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine. When a model has fallbacks, both toolkit fit checks and OpenClaw runtime fallbacks follow the order shown here.</p>
              
             ${endpointModels.map((mo: any, idx: number) => html`
