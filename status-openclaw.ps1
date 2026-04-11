@@ -754,6 +754,7 @@ function Write-ProviderAuthSection {
         [Parameter(Mandatory = $true)][string]$SetupCommand,
         [Parameter(Mandatory = $true)][string]$ReadyLabel,
         $AuthProfilesSnapshot = $null,
+        $LiveConfig = $null,
         [switch]$DockerInstalled,
         [switch]$DockerEngineReady,
         [switch]$BootstrapReady
@@ -782,6 +783,22 @@ function Write-ProviderAuthSection {
     if ($AuthProfilesSnapshot.Exists -and (Test-ProviderProfilePresence -Object $AuthProfilesSnapshot.Data -ProviderIds $ProviderIds)) {
         Write-Host "$($ReadyLabel): ready" -ForegroundColor Green
         Write-Host "Source: gateway auth profiles"
+        return
+    }
+
+    $liveAuthProfiles = if ($null -ne $LiveConfig -and
+        $LiveConfig.PSObject.Properties.Name -contains "auth" -and
+        $null -ne $LiveConfig.auth -and
+        $LiveConfig.auth.PSObject.Properties.Name -contains "profiles") {
+        $LiveConfig.auth.profiles
+    }
+    else {
+        $null
+    }
+
+    if ($null -ne $liveAuthProfiles -and (Test-ProviderProfilePresence -Object $liveAuthProfiles -ProviderIds $ProviderIds)) {
+        Write-Host "$($ReadyLabel): ready" -ForegroundColor Green
+        Write-Host "Source: live OpenClaw config"
         return
     }
 
@@ -1216,6 +1233,7 @@ Write-ProviderAuthSection `
     -SetupCommand ".\run-openclaw.cmd openai-auth" `
     -ReadyLabel "OpenAI auth" `
     -AuthProfilesSnapshot $authProfilesSnapshot `
+    -LiveConfig $hostOpenClawConfig `
     -DockerInstalled:$dockerInstalled `
     -DockerEngineReady:$dockerEngineReady `
     -BootstrapReady:$bootstrapReady
@@ -1226,6 +1244,7 @@ Write-ProviderAuthSection `
     -SetupCommand ".\run-openclaw.cmd claude-auth" `
     -ReadyLabel "Claude auth" `
     -AuthProfilesSnapshot $authProfilesSnapshot `
+    -LiveConfig $hostOpenClawConfig `
     -DockerInstalled:$dockerInstalled `
     -DockerEngineReady:$dockerEngineReady `
     -BootstrapReady:$bootstrapReady
@@ -1236,6 +1255,7 @@ Write-ProviderAuthSection `
     -SetupCommand ".\run-openclaw.cmd gemini-auth" `
     -ReadyLabel "Gemini auth" `
     -AuthProfilesSnapshot $authProfilesSnapshot `
+    -LiveConfig $hostOpenClawConfig `
     -DockerInstalled:$dockerInstalled `
     -DockerEngineReady:$dockerEngineReady `
     -BootstrapReady:$bootstrapReady
@@ -1246,6 +1266,7 @@ Write-ProviderAuthSection `
     -SetupCommand ".\run-openclaw.cmd copilot-auth" `
     -ReadyLabel "Copilot auth" `
     -AuthProfilesSnapshot $authProfilesSnapshot `
+    -LiveConfig $hostOpenClawConfig `
     -DockerInstalled:$dockerInstalled `
     -DockerEngineReady:$dockerEngineReady `
     -BootstrapReady:$bootstrapReady
