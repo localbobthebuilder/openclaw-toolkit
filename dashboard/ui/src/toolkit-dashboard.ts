@@ -90,6 +90,8 @@ export class ToolkitDashboard extends LitElement {
   @state() private editingAgentTemplateDraft: any = null;
   @state() private editingAgentInitialDraft: any = null;
   @state() private editingAgentInitialTemplateDraft: any = null;
+  @state() private editingAgentWorkspaceId: string | null = null;
+  @state() private editingAgentInitialWorkspaceId: string | null = null;
   @state() private editingEndpointKey: string | null = null;
   @state() private editingWorkspaceId: string | null = null;
   @state() private topologyLinkSourceAgentId: string | null = null;
@@ -260,7 +262,7 @@ export class ToolkitDashboard extends LitElement {
     .topology-agent-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #3a3a3a; border-radius: 999px; background: #171717; color: #bfc9cf; font-size: 0.72rem; cursor: pointer; }
     .topology-agent-toggle input { width: auto; margin: 0; }
     .topology-agent-toggle.disabled { border-color: #6a2a2a; color: #ffb4ad; }
-    .topology-agent-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .topology-agent-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .topology-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; border: 1px solid #3a3a3a; color: #bbb; background: #191919; }
     .topology-pill.main { border-color: #7a6210; color: #ffd54f; }
     .topology-pill.disabled { border-color: #6a2a2a; color: #ff8a80; }
@@ -3072,11 +3074,14 @@ export class ToolkitDashboard extends LitElement {
   }
 
   setEditingAgentDraft(key: string, agent: any, templateFiles?: any) {
+    const primaryWorkspace = this.getWorkspaceForAgentId(agent?.id);
     this.editingAgentKey = key;
     this.editingAgentDraft = this.cloneValue(agent);
     this.editingAgentTemplateDraft = this.buildAgentTemplateDraft(this.editingAgentDraft, templateFiles);
     this.editingAgentInitialDraft = this.cloneValue(this.editingAgentDraft);
     this.editingAgentInitialTemplateDraft = this.cloneValue(this.editingAgentTemplateDraft);
+    this.editingAgentWorkspaceId = primaryWorkspace?.id || null;
+    this.editingAgentInitialWorkspaceId = primaryWorkspace?.id || null;
   }
 
   clearEditingAgentDraft() {
@@ -3085,6 +3090,8 @@ export class ToolkitDashboard extends LitElement {
     this.editingAgentTemplateDraft = null;
     this.editingAgentInitialDraft = null;
     this.editingAgentInitialTemplateDraft = null;
+    this.editingAgentWorkspaceId = null;
+    this.editingAgentInitialWorkspaceId = null;
   }
 
   startEditingAgent(key: string) {
@@ -3121,7 +3128,8 @@ export class ToolkitDashboard extends LitElement {
       return false;
     }
     return JSON.stringify(this.editingAgentDraft) !== JSON.stringify(this.editingAgentInitialDraft) ||
-      JSON.stringify(this.ensureEditingAgentTemplateFiles()) !== JSON.stringify(this.editingAgentInitialTemplateDraft);
+      JSON.stringify(this.ensureEditingAgentTemplateFiles()) !== JSON.stringify(this.editingAgentInitialTemplateDraft) ||
+      this.editingAgentWorkspaceId !== this.editingAgentInitialWorkspaceId;
   }
 
   closeEditingAgentEditor() {
@@ -3145,6 +3153,7 @@ export class ToolkitDashboard extends LitElement {
 
     const draftAgent = this.cloneValue(this.editingAgentDraft);
     const draftTemplates = this.cloneValue(this.ensureEditingAgentTemplateFiles());
+    const selectedWorkspaceId = this.editingAgentWorkspaceId;
     const existingIndex = this.config.agents.list.findIndex((candidate: any, idx: number) => {
       const candidateKey = typeof candidate?.key === 'string' && candidate.key.trim().length > 0 ? candidate.key : `agent:${idx}`;
       return candidateKey === this.editingAgentKey;
@@ -3170,6 +3179,14 @@ export class ToolkitDashboard extends LitElement {
       this.templateFiles = this.cloneTemplateState(this.templateFiles);
     }
     this.templateFiles.agents[this.normalizeAgentId(draftAgent.id)] = draftTemplates;
+
+    const shouldApplyWorkspaceSelection = existingIndex < 0
+      ? !!selectedWorkspaceId
+      : selectedWorkspaceId !== this.editingAgentInitialWorkspaceId;
+    if (shouldApplyWorkspaceSelection) {
+      this.setAgentPrimaryWorkspace(this.normalizeAgentId(draftAgent.id), selectedWorkspaceId);
+    }
+
     return this.normalizeAgentId(draftAgent.id);
   }
 
@@ -3873,7 +3890,6 @@ export class ToolkitDashboard extends LitElement {
                                         }}>
                                       <span>${entry.enabled ? 'Enabled' : 'Disabled'}</span>
                                     </label>
-                                    ${entry.isMain ? html`<span class="topology-agent-main">👑</span>` : ''}
                                   </div>
                                 </div>
 
@@ -3890,6 +3906,7 @@ export class ToolkitDashboard extends LitElement {
                                   <div class="topology-agent-workspace">
                                     <span class="topology-agent-workspace-icon">📁</span>
                                     <select
+                                      .value=${primaryWorkspace?.id || ''}
                                       @click=${(event: Event) => event.stopPropagation()}
                                       @pointerdown=${(event: Event) => event.stopPropagation()}
                                       @change=${(event: any) => {
@@ -4042,6 +4059,7 @@ export class ToolkitDashboard extends LitElement {
           <div>
             Workspace:
             <select
+              .value=${primaryWorkspace?.id || ''}
               style="margin-left: 8px; min-width: 240px;"
               @change=${(event: any) => this.setTopologyAgentWorkspace(selectedEntry.id, event.target.value || null)}>
               <option value="">No workspace</option>
@@ -6202,6 +6220,11 @@ export class ToolkitDashboard extends LitElement {
       return this.editingAgentDraft;
   }
 
+  setEditingAgentWorkspaceSelection(workspaceId: string | null) {
+    this.editingAgentWorkspaceId = workspaceId;
+    this.requestUpdate();
+  }
+
   renderAgentEditor(key: string) {
     const agent = this.getEditingAgent();
     if (!agent) return html`Agent not found`;
@@ -6211,7 +6234,9 @@ export class ToolkitDashboard extends LitElement {
     const subagents = this.ensureSubagentsConfig(agent);
     const agentTemplateFiles = this.ensureEditingAgentTemplateFiles();
     const agentIdValidationError = this.getEditingAgentValidationError();
-    const primaryWorkspace = this.getWorkspaceForAgentId(agent.id);
+    const editorWorkspaceAgentId = this.normalizeAgentId(this.editingAgentInitialDraft?.id || agent.id);
+    const primaryWorkspace = this.editingAgentWorkspaceId ? this.getWorkspaceById(this.editingAgentWorkspaceId) : null;
+    const workspaceOptions = this.getWorkspaceAssignmentOptions(editorWorkspaceAgentId);
     const accessibleSharedWorkspaces = primaryWorkspace?.mode === 'private'
       ? this.getWorkspaceSharedAccessIds(primaryWorkspace).map((workspaceId: string) => this.getWorkspaceById(workspaceId)).filter(Boolean)
       : [];
@@ -6315,7 +6340,23 @@ export class ToolkitDashboard extends LitElement {
                 <div class="card" style="margin-bottom: 0;">
                     <div class="card-header"><h3>Home Workspace</h3></div>
                     <div class="help-text" style="margin-top: 0;">This is the agent's home base. OpenClaw uses the configured workspace path directly, so it does not need to match the agent ID.</div>
-                    <div style="color: #fff; margin-top: 10px;">${primaryWorkspace ? this.getWorkspaceDisplayLabel(primaryWorkspace) : 'No primary workspace assigned yet.'}</div>
+                    <select
+                      .value=${primaryWorkspace?.id || ''}
+                      style="margin-top: 10px;"
+                      @change=${(e: any) => this.setEditingAgentWorkspaceSelection(e.target.value || null)}>
+                      <option value="">No workspace assigned</option>
+                      ${workspaceOptions.map((option: any) => html`
+                        <option
+                          value=${option.id}
+                          ?selected=${primaryWorkspace?.id === option.id}
+                          ?disabled=${option.disabled}>
+                          ${option.disabled
+                            ? `${option.label} - occupied by ${option.occupiedByLabel}`
+                            : option.label}
+                        </option>
+                      `)}
+                    </select>
+                    <div class="help-text" style="margin-top: 10px;">This selection is saved with the rest of the agent editor changes when you save configuration.</div>
                     ${primaryWorkspace ? html`
                       <div class="help-text" style="margin-top: 10px;">${this.getWorkspaceHomeBaseDescription(primaryWorkspace)} at <code>${primaryWorkspace.path || '(unset path)'}</code>.</div>
                     ` : ''}
