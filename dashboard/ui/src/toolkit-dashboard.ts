@@ -271,6 +271,7 @@ export class ToolkitDashboard extends LitElement {
     .topology-agent-meta { color: #8f8f8f; font-size: 0.74rem; line-height: 1.45; min-height: 32px; overflow-wrap: anywhere; }
     .topology-agent-workspace { display: flex; align-items: center; gap: 6px; color: #b7c4ca; margin-bottom: 4px; }
     .topology-agent-workspace-icon { flex-shrink: 0; }
+    .topology-agent-workspace select { min-width: 0; flex: 1 1 auto; margin: 0; font-size: 0.74rem; padding: 6px 8px; }
     .topology-agent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 0; }
     .topology-agent-actions .btn { flex: 1 1 120px; padding: 7px 10px; font-size: 0.75rem; min-width: 0; }
     .topology-card-link-hint { margin-top: 8px; color: #00bcd4; font-size: 0.72rem; }
@@ -278,6 +279,7 @@ export class ToolkitDashboard extends LitElement {
     .topology-inspector-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid #333; }
     .topology-inspector-meta { display: flex; flex-direction: column; gap: 6px; color: #9aa7ad; font-size: 0.82rem; }
     .topology-inspector-meta strong { color: #fff; }
+    .topology-inspector-meta select { min-width: 0; }
     .topology-expander { border: 1px solid #333; border-radius: 12px; background: #181818; overflow: hidden; }
     .topology-expander summary { cursor: pointer; list-style: none; padding: 12px 14px; color: #d6e0e5; font-weight: 700; }
     .topology-expander summary::-webkit-details-marker { display: none; }
@@ -3352,6 +3354,36 @@ export class ToolkitDashboard extends LitElement {
     return `${label} (${workspace.mode === 'private' ? 'private' : 'shared'})`;
   }
 
+  getWorkspaceAssignmentOptions(agentId: string | null | undefined) {
+    const normalizedAgentId = String(agentId || '').trim();
+    return this.getWorkspaces()
+      .map((workspace: any) => {
+        const workspaceId = String(workspace?.id || '').trim();
+        if (!workspaceId) {
+          return null;
+        }
+
+        const occupyingAgentId = workspace.mode === 'private'
+          ? this.getWorkspaceAgentIds(workspace).find((candidateId: string) => candidateId !== normalizedAgentId) || ''
+          : '';
+        const occupyingAgent = occupyingAgentId
+          ? this.getManagedAgentEntries().find(({ agent }: any) => String(agent?.id || '') === occupyingAgentId)?.agent || null
+          : null;
+        const occupiedByLabel = occupyingAgent
+          ? String(occupyingAgent?.name || occupyingAgent?.id || occupyingAgentId)
+          : occupyingAgentId;
+
+        return {
+          id: workspaceId,
+          workspace,
+          disabled: occupyingAgentId.length > 0,
+          occupiedByLabel,
+          label: this.getWorkspaceDisplayLabel(workspace)
+        };
+      })
+      .filter(Boolean);
+  }
+
   getAgentEffectiveSandboxMode(agent: any) {
     if (typeof agent?.sandboxMode === 'string' && agent.sandboxMode.trim().length > 0) {
       return agent.sandboxMode.trim();
@@ -3443,6 +3475,20 @@ export class ToolkitDashboard extends LitElement {
       }
     }
     this.requestUpdate();
+  }
+
+  setTopologyAgentWorkspace(agentId: string, workspaceId: string | null) {
+    const entry = this.getTopologyAgentEntryById(agentId);
+    this.setAgentPrimaryWorkspace(agentId, workspaceId);
+    if (!entry) {
+      return;
+    }
+
+    this.topologySelectedAgentId = agentId;
+    const assignedWorkspace = workspaceId ? this.getWorkspaceById(workspaceId) : null;
+    this.setTopologyNotice(assignedWorkspace
+      ? `${entry.name} now uses ${this.getWorkspaceDisplayLabel(assignedWorkspace)} as the home workspace.`
+      : `${entry.name} no longer has a primary workspace assigned.`);
   }
 
   setWorkspaceSharedAccess(workspace: any, sharedWorkspaceIds: string[]) {
@@ -3779,7 +3825,7 @@ export class ToolkitDashboard extends LitElement {
                             const isHoverPreview = !this.topologyShowAllArrows && !isLinkSource && previewSourceAgentId === entry.id && delegateCount > 0;
                             const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
                             const primaryWorkspace = this.getWorkspaceForAgentId(entry.id);
-                            const workspaceLabel = primaryWorkspace ? String(primaryWorkspace.name || primaryWorkspace.id || 'Workspace') : 'Unassigned';
+                            const workspaceOptions = this.getWorkspaceAssignmentOptions(entry.id);
                             const columnIndex = slot.columnCount > 1 ? (index % slot.columnCount) : 0;
                             const isSelected = selectedTopologyAgentId === entry.id;
                             return html`
@@ -3843,7 +3889,25 @@ export class ToolkitDashboard extends LitElement {
                                 <div class="topology-agent-meta">
                                   <div class="topology-agent-workspace">
                                     <span class="topology-agent-workspace-icon">📁</span>
-                                    <span>${workspaceLabel}</span>
+                                    <select
+                                      @click=${(event: Event) => event.stopPropagation()}
+                                      @pointerdown=${(event: Event) => event.stopPropagation()}
+                                      @change=${(event: any) => {
+                                        event.stopPropagation();
+                                        this.setTopologyAgentWorkspace(entry.id, event.target.value || null);
+                                      }}>
+                                      <option value="">No workspace</option>
+                                      ${workspaceOptions.map((option: any) => html`
+                                        <option
+                                          value=${option.id}
+                                          ?selected=${primaryWorkspace?.id === option.id}
+                                          ?disabled=${option.disabled}>
+                                          ${option.disabled
+                                            ? `${option.label} - occupied by ${option.occupiedByLabel}`
+                                            : option.label}
+                                        </option>
+                                      `)}
+                                    </select>
                                   </div>
                                   AGENTS.md: ${this.getMarkdownTemplateSelection(entry.agent, 'AGENTS.md', VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES) || 'custom'}<br>
                                   Model: ${entry.agent.modelRef || 'unassigned'}
@@ -3956,6 +4020,7 @@ export class ToolkitDashboard extends LitElement {
     const delegateTargets = this.getAgentDelegationTargets(agent);
     const selectedEndpoint = this.resolveAgentEndpoint(agent);
     const primaryWorkspace = this.getWorkspaceForAgentId(agent.id);
+    const workspaceOptions = this.getWorkspaceAssignmentOptions(agent.id);
     const appliedToolsets = this.getAgentAppliedToolsets(agent);
     const effectiveToolState = this.getEffectiveAgentToolState(agent);
     const selectedMarkdownFile = VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.includes(this.topologyInspectorMarkdownFile as any)
@@ -3974,8 +4039,29 @@ export class ToolkitDashboard extends LitElement {
         <div class="topology-inspector-meta">
           <div><strong>${selectedEntry.name}</strong> <span style="color:#777;">(${selectedEntry.id})</span></div>
           <div>Endpoint: <strong>${selectedEndpoint ? this.getEndpointLabel(selectedEndpoint) : 'Unassigned'}</strong></div>
-          <div>Workspace: <strong>${primaryWorkspace ? this.getWorkspaceDisplayLabel(primaryWorkspace) : 'Unassigned'}</strong></div>
+          <div>
+            Workspace:
+            <select
+              style="margin-left: 8px; min-width: 240px;"
+              @change=${(event: any) => this.setTopologyAgentWorkspace(selectedEntry.id, event.target.value || null)}>
+              <option value="">No workspace</option>
+              ${workspaceOptions.map((option: any) => html`
+                <option
+                  value=${option.id}
+                  ?selected=${primaryWorkspace?.id === option.id}
+                  ?disabled=${option.disabled}>
+                  ${option.disabled
+                    ? `${option.label} - occupied by ${option.occupiedByLabel}`
+                    : option.label}
+                </option>
+              `)}
+            </select>
+          </div>
           <div>Model: <strong>${agent.modelRef || 'unassigned'}</strong></div>
+        </div>
+
+        <div class="help-text" style="margin-top: 10px;">
+          Switching the home workspace here updates the same primary workspace assignment used by the full agent editor.
         </div>
 
         <div class="topology-inspector-section">
