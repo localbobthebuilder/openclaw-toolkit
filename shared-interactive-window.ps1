@@ -35,6 +35,7 @@ function Restart-InInteractiveWindowIfNeeded {
 
     $argumentList = @(
         "-NoExit",
+        "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", $ScriptPath
     ) + $Arguments

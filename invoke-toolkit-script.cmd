@@ -31,15 +31,15 @@ goto :collect_args
 where pwsh >nul 2>nul
 if %ERRORLEVEL%==0 (
   if defined FIXED_ARGS (
-    pwsh -ExecutionPolicy Bypass -File "%TARGET_PS1%" %FIXED_ARGS%!FORWARD_ARGS!
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%TARGET_PS1%" %FIXED_ARGS%!FORWARD_ARGS!
   ) else (
-    pwsh -ExecutionPolicy Bypass -File "%TARGET_PS1%" !FORWARD_ARGS!
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%TARGET_PS1%" !FORWARD_ARGS!
   )
 ) else (
   if defined FIXED_ARGS (
-    powershell -ExecutionPolicy Bypass -File "%TARGET_PS1%" %FIXED_ARGS%!FORWARD_ARGS!
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET_PS1%" %FIXED_ARGS%!FORWARD_ARGS!
   ) else (
-    powershell -ExecutionPolicy Bypass -File "%TARGET_PS1%" !FORWARD_ARGS!
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET_PS1%" !FORWARD_ARGS!
   )
 )
 
@@ -54,9 +54,9 @@ if not exist "%HELP_PS1%" (
 
 where pwsh >nul 2>nul
 if %ERRORLEVEL%==0 (
-  pwsh -ExecutionPolicy Bypass -File "%HELP_PS1%" -ScriptPath "%TARGET_PS1%" -WrapperName "%WRAPPER_NAME%"
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%HELP_PS1%" -ScriptPath "%TARGET_PS1%" -WrapperName "%WRAPPER_NAME%"
 ) else (
-  powershell -ExecutionPolicy Bypass -File "%HELP_PS1%" -ScriptPath "%TARGET_PS1%" -WrapperName "%WRAPPER_NAME%"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%HELP_PS1%" -ScriptPath "%TARGET_PS1%" -WrapperName "%WRAPPER_NAME%"
 )
 
 exit /b %ERRORLEVEL%

@@ -173,14 +173,17 @@ function Invoke-AgentTurn {
 function Get-AgentReplyText {
     param([Parameter(Mandatory = $true)]$AgentJson)
 
-    $payloads = @($AgentJson.result.payloads)
-    if ($payloads.Count -gt 0 -and $null -ne $payloads[0] -and $payloads[0].PSObject.Properties.Name -contains "text") {
-        return [string]$payloads[0].text
-    }
-
     $finalVisibleText = [string]$AgentJson.result.meta.finalAssistantVisibleText
     if (-not [string]::IsNullOrWhiteSpace($finalVisibleText)) {
         return $finalVisibleText
+    }
+
+    $payloads = @($AgentJson.result.payloads)
+    for ($idx = $payloads.Count - 1; $idx -ge 0; $idx--) {
+        $payload = $payloads[$idx]
+        if ($null -ne $payload -and $payload.PSObject.Properties.Name -contains "text" -and -not [string]::IsNullOrWhiteSpace([string]$payload.text)) {
+            return [string]$payload.text
+        }
     }
 
     return ""
@@ -377,6 +380,62 @@ function Normalize-GitStatusSmokeBlock {
     }
 
     return (($lines -join "`n").Trim())
+}
+
+function Normalize-SingleLineSmokeReadback {
+    param([string]$Text)
+
+    $normalized = Normalize-SmokeBlock -Text $Text
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return ""
+    }
+
+    $lines = @(
+        foreach ($line in @($normalized -split "`n")) {
+            $trimmed = $line.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+                $trimmed
+            }
+        }
+    )
+    if ($lines.Count -eq 0) {
+        return ""
+    }
+
+    if ($lines.Count -gt 1) {
+        $firstLine = $lines[0]
+        if ($firstLine -match '^(?:[A-Za-z]:\\|/).+\.(?:md|txt)$') {
+            $lines = @($lines | Select-Object -Skip 1)
+        }
+    }
+
+    if ($lines.Count -eq 0) {
+        return ""
+    }
+
+    $candidate = [string]$lines[$lines.Count - 1]
+    $candidate = $candidate -replace '^#\s+', ''
+    return (Normalize-SmokeSentence -Text $candidate)
+}
+
+function Test-ResearchSmokeSuccess {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+
+    $normalized = Normalize-SmokeBlock -Text $Text
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return $false
+    }
+
+    $compact = $normalized.Trim()
+    if ($compact -eq "RESEARCH_OK") {
+        return $true
+    }
+
+    return $compact.ToLowerInvariant().Contains("docs.openclaw.ai")
 }
 
 function Get-ErrorCategory {
@@ -623,12 +682,12 @@ try {
             $outputLines.Add("PASS: $toolingAgentId wrote README.md in shared workspace")
 
             Write-ProgressLine "[$toolingAgentId] Reading the README back through OpenClaw" Gray
-            $toolingRead = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-read-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$toolingRepoName/README.md. Reply with exactly the file contents and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingRead = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-read-$suffix" -Message "First use the read tool on /home/node/.openclaw/workspace/$toolingRepoName/README.md. After you receive the file contents, send one visible assistant reply with exact text README_OK if and only if the file contains the exact phrase tooling smoke test. Do not include the path. Do not quote the file. Do not add explanation." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingRead
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingReadReply = (Get-AgentReplyText -AgentJson $toolingRead).Trim()
-            if ((Normalize-SmokeSentence -Text $toolingReadReply) -ne "tooling smoke test") {
-                throw "Expected README readback 'tooling smoke test', but got: $toolingReadReply"
+            if ($toolingReadReply -ne "README_OK") {
+                throw "Expected README_OK from $toolingAgentId after README readback, but got: $toolingReadReply"
             }
             $outputLines.Add("PASS: $toolingAgentId read back README.md content")
 
@@ -686,13 +745,43 @@ try {
         }
         $researchRuntime = ""
         try {
-            Write-ProgressLine "[$researchAgentId] Performing a real web-backed research check" Gray
-            $researchTurn = Invoke-AgentTurn -AgentId $researchAgentId -SessionId "smoke-research-$suffix" -Message "Use web_search to find the official documentation domain for OpenClaw. Reply with exactly docs.openclaw.ai and nothing else." -Timeout $TimeoutSeconds
-            $researchRuntime = Get-AgentRuntimeRef -AgentJson $researchTurn
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $researchRuntime | Out-Null
-            $researchReply = (Get-AgentReplyText -AgentJson $researchTurn).Trim()
-            if ($researchReply -ne "docs.openclaw.ai") {
-                throw "Expected docs.openclaw.ai from $researchAgentId, but got: $researchReply"
+            $researchReply = ""
+            $researchPrompt = "Use web_search to find the official documentation domain for OpenClaw. If the official documentation domain is docs.openclaw.ai, reply with exactly RESEARCH_OK and nothing else. If you cannot verify that domain, reply with exactly RESEARCH_FAIL and nothing else."
+            for ($researchAttempt = 1; $researchAttempt -le 2; $researchAttempt++) {
+                try {
+                    if ($researchAttempt -eq 1) {
+                        Write-ProgressLine "[$researchAgentId] Performing a real web-backed research check" Gray
+                    }
+                    else {
+                        Write-ProgressLine "[$researchAgentId] Retrying research after a transient provider/gateway failure" DarkGray
+                    }
+
+                    $researchTurn = Invoke-AgentTurn -AgentId $researchAgentId -SessionId "smoke-research-$suffix-$researchAttempt" -Message $researchPrompt -Timeout $TimeoutSeconds
+                    $researchRuntime = Get-AgentRuntimeRef -AgentJson $researchTurn
+                    Add-ToolkitVerificationCleanupModelRef -ModelRef $researchRuntime | Out-Null
+                    $researchReply = (Get-AgentReplyText -AgentJson $researchTurn).Trim()
+                    if (-not (Test-ResearchSmokeSuccess -Text $researchReply)) {
+                        throw "Expected docs.openclaw.ai from $researchAgentId, but got: $researchReply"
+                    }
+
+                    break
+                }
+                catch {
+                    if ($researchAttempt -ge 2) {
+                        throw
+                    }
+
+                    $attemptMessage = Get-ErrorMessage -ErrorRecord $_
+                    $attemptCategory = Get-ErrorCategory -Message $attemptMessage
+                    if ($attemptCategory -notin @("provider-quota", "provider-capacity", "gateway", "task")) {
+                        throw
+                    }
+                    if ($attemptMessage.ToLowerInvariant() -notmatch 'timed out|timeout|overloaded|capacity|busy|temporarily|gateway|econnrefused|service restart|closed') {
+                        throw
+                    }
+
+                    Start-Sleep -Seconds 3
+                }
             }
             $outputLines.Add("PASS: $researchAgentId completed a real research workflow")
             if ($researchModelRef) {
@@ -743,16 +832,32 @@ try {
         else {
         $reviewRuntime = ""
         try {
+            $reviewPrompt = "First use the read tool on /home/node/.openclaw/workspace/$reviewProbeName. After you receive the file contents, send one visible assistant reply with exact text REVIEW_OK if and only if the file contains the exact phrase review smoke ok. Do not output NO_REPLY. Do not keep the final answer only in hidden reasoning."
             if ($reviewModelPlan.modelOverrideRef) {
                 $modelsToStop.Add([string]$reviewModelPlan.modelOverrideRef)
                 $outputLines.Add("INFO: $($reviewModelPlan.detail)")
                 Write-ProgressLine "[$reviewAgentId] Switching smoke session to $($reviewModelPlan.modelOverrideRef)" Gray
             }
             Write-ProgressLine "[$reviewAgentId] Verifying read-only review access to the shared workspace" Gray
-            $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix" -Message "Use the read tool to read /home/node/.openclaw/workspace/$reviewProbeName. If it contains the exact phrase 'review smoke ok', reply with exactly REVIEW_OK and nothing else." -ModelOverrideRef $reviewModelPlan.modelOverrideRef -ThinkingLevel "off" -Timeout $TimeoutSeconds
-            $reviewRuntime = Get-AgentRuntimeRef -AgentJson $reviewTurn
-            Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewRuntime | Out-Null
-            $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
+            $reviewReply = ""
+            for ($reviewAttempt = 1; $reviewAttempt -le 2; $reviewAttempt++) {
+                if ($reviewAttempt -gt 1) {
+                    Write-ProgressLine "[$reviewAgentId] Retrying after non-visible review reply" DarkGray
+                }
+
+                $reviewTurn = Invoke-AgentTurn -AgentId $reviewAgentId -SessionId "smoke-review-$suffix-$reviewAttempt" -Message $reviewPrompt -ModelOverrideRef $reviewModelPlan.modelOverrideRef -ThinkingLevel "off" -Timeout $TimeoutSeconds
+                $reviewRuntime = Get-AgentRuntimeRef -AgentJson $reviewTurn
+                Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewRuntime | Out-Null
+                $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
+                if ($reviewReply -eq "REVIEW_OK") {
+                    break
+                }
+                if ($reviewAttempt -ge 2 -or ($reviewReply -ne "NO_REPLY" -and -not [string]::IsNullOrWhiteSpace($reviewReply))) {
+                    break
+                }
+
+                Start-Sleep -Seconds 2
+            }
             if ($reviewReply -ne "REVIEW_OK") {
                 $friendlyReviewFailure = Get-FriendlyModelCapabilityFailureMessage -AgentId $reviewAgentId -TargetModelRef $reviewTargetModelRef -Message $reviewReply
                 if ($friendlyReviewFailure -ne $reviewReply) {

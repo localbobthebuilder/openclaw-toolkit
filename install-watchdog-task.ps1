@@ -23,7 +23,7 @@ if (-not (Test-Path $watchdogScript)) {
 $pwshCommand = (Get-Command pwsh -ErrorAction SilentlyContinue)
 $shell = if ($null -ne $pwshCommand) { $pwshCommand.Source } else { "powershell.exe" }
 
-$args = @("-ExecutionPolicy", "Bypass", "-File", "`"$watchdogScript`"")
+$args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$watchdogScript`"")
 if ($RestartOnFailure) {
     $args += "-RestartOnFailure"
 }
