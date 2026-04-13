@@ -506,7 +506,8 @@ function Ensure-ManagedMarkdownFiles {
     param(
         [Parameter(Mandatory = $true)][string]$TargetDir,
         $TemplateMap,
-        [string[]]$AllowedFileNames = $script:ManagedAgentBootstrapOverlayFiles
+        [string[]]$AllowedFileNames = $script:ManagedAgentBootstrapOverlayFiles,
+        [switch]$PreserveUnspecifiedFiles
     )
 
     $writtenPaths = New-Object System.Collections.Generic.List[string]
@@ -528,7 +529,7 @@ function Ensure-ManagedMarkdownFiles {
                 $writtenPaths.Add($writtenPath)
             }
         }
-        else {
+        elseif (-not $PreserveUnspecifiedFiles) {
             Remove-ManagedTextFileIfPresent -Path $targetPath
         }
     }
@@ -678,6 +679,51 @@ function Ensure-ManagedSeedOnceMarkdownFiles {
     }
 
     return @($writtenPaths.ToArray())
+}
+
+function Ensure-OpenClawWorkspaceBootstrap {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkspacePath,
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [switch]$SkipBootstrap
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WorkspacePath)) {
+        return
+    }
+
+    $ensureScript = @'
+import { ensureAgentWorkspace } from "./dist/agents/workspace.js";
+
+const workspaceDir = process.env.OPENCLAW_TOOLKIT_WORKSPACE_DIR ?? "";
+if (!workspaceDir.trim()) {
+  throw new Error("OPENCLAW_TOOLKIT_WORKSPACE_DIR is required.");
+}
+
+await ensureAgentWorkspace({
+  dir: workspaceDir,
+  ensureBootstrapFiles: (process.env.OPENCLAW_TOOLKIT_ENSURE_BOOTSTRAP ?? "1") === "1",
+});
+'@
+
+    $ensureBootstrapFlag = if ($SkipBootstrap) { "0" } else { "1" }
+    $result = Invoke-External -FilePath "docker" -Arguments @(
+        "exec",
+        "-e", "OPENCLAW_NO_RESPAWN=$(Get-ToolkitGatewayOpenClawNoRespawnValue)",
+        "-e", "NODE_COMPILE_CACHE=$(Get-ToolkitGatewayNodeCompileCachePath)",
+        "-e", "OPENCLAW_TOOLKIT_WORKSPACE_DIR=$WorkspacePath",
+        "-e", "OPENCLAW_TOOLKIT_ENSURE_BOOTSTRAP=$ensureBootstrapFlag",
+        $ContainerName,
+        "node",
+        "--input-type=module",
+        "-e",
+        $ensureScript
+    )
+
+    if ($result.ExitCode -ne 0) {
+        $detail = if ($result.Output) { "`n$($result.Output)" } else { "" }
+        throw "Failed to seed workspace bootstrap files via OpenClaw for $WorkspacePath.$detail"
+    }
 }
 
 function Get-DefaultPrivateWorkspaceTemplateLines {
@@ -2219,6 +2265,14 @@ foreach ($managedExtraAgentId in @($currentManagedExtraAgentIds)) {
 }
 
 $sharedWorkspacePath = Get-SharedWorkspacePath -Config $config
+$skipBootstrap = $false
+if ($config.PSObject.Properties.Name -contains "agents" -and
+    $null -ne $config.agents -and
+    $config.agents.PSObject.Properties.Name -contains "defaults" -and
+    $null -ne $config.agents.defaults -and
+    $config.agents.defaults.PSObject.Properties.Name -contains "skipBootstrap") {
+    $skipBootstrap = [bool]$config.agents.defaults.skipBootstrap
+}
 foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
     $staleOverlayDir = Get-AgentBootstrapOverlayDir -Config $config -AgentId ([string]$staleExtraAgentId) -OverlayDirName $overlayDirName
     foreach ($fileName in @($script:ManagedAgentBootstrapOverlayFiles)) {
@@ -2284,8 +2338,9 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
     if ([string]$workspace.mode -eq "shared") {
         $sharedTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -SharedWorkspacePaths @($workspacePath)
         $workspaceHostDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath
+        Ensure-OpenClawWorkspaceBootstrap -WorkspacePath $workspacePath -ContainerName $ContainerName -SkipBootstrap:$skipBootstrap
         $managedAgentsFiles += @(Ensure-ManagedSeedOnceMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceSeedOnceMarkdownFiles)
-        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles)
+        $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $sharedTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles -PreserveUnspecifiedFiles)
         continue
     }
 
@@ -2307,8 +2362,9 @@ foreach ($workspace in @(Get-ToolkitWorkspaceList -Config $config)) {
     )
     $workspaceTemplateMap = Get-WorkspaceMarkdownTemplateMap -Workspace $workspace -WorkspacePath $workspacePath -AgentName $workspaceAgentName -SharedWorkspacePaths $sharedWorkspacePathsForPrivateWorkspace
     $workspaceHostDir = Resolve-HostWorkspacePath -Config $config -WorkspacePath $workspacePath
+    Ensure-OpenClawWorkspaceBootstrap -WorkspacePath $workspacePath -ContainerName $ContainerName -SkipBootstrap:$skipBootstrap
     $managedAgentsFiles += @(Ensure-ManagedSeedOnceMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceSeedOnceMarkdownFiles)
-    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles)
+    $managedAgentsFiles += @(Ensure-ManagedMarkdownFiles -TargetDir $workspaceHostDir -TemplateMap $workspaceTemplateMap -AllowedFileNames $script:ManagedWorkspaceMarkdownFiles -PreserveUnspecifiedFiles)
 }
 
 Write-Host "Configured agents:" -ForegroundColor Green

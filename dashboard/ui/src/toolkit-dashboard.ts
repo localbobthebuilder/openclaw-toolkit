@@ -2836,7 +2836,9 @@ export class ToolkitDashboard extends LitElement {
         return this.buildTemplateGuidance([
           `# MEMORY.md - ${agentName}`,
           '',
-          `Add curated long-term memory that should stay available for ${agentName}'s normal sessions.`
+          `Optional curated long-term memory for ${agentName}'s normal sessions.`,
+          'OpenClaw does not seed this file on first run; create it only if you want durable memory up front.',
+          'The memory system may also create or update it later through promotion flows.'
         ]);
       default:
         return '';
@@ -2930,7 +2932,9 @@ export class ToolkitDashboard extends LitElement {
         return this.buildTemplateGuidance([
           `# MEMORY.md - ${workspaceName}`,
           '',
-          'Add curated long-term memory that should be available in normal sessions for this workspace.'
+          'Optional curated long-term memory for normal sessions in this workspace.',
+          'OpenClaw does not seed this file on first run; create it only if you want durable memory up front.',
+          'The memory system may also create or update it later through promotion flows.'
         ]);
       case 'BOOTSTRAP.md':
         return this.buildTemplateGuidance([
@@ -2972,7 +2976,7 @@ export class ToolkitDashboard extends LitElement {
       case 'HEARTBEAT.md':
         return 'Optional tiny checklist for heartbeat runs. Keep it short to avoid token burn.';
       case 'MEMORY.md':
-        return 'Optional curated long-term memory for normal sessions.';
+        return 'Optional durable memory. OpenClaw does not seed it automatically; memory promotion may create or update it later.';
       case 'BOOTSTRAP.md':
         return 'One-time first-run ritual for a brand-new workspace. The toolkit seeds it once and does not recreate it after the live file is deleted.';
       case 'BOOT.md':
@@ -4043,8 +4047,8 @@ export class ToolkitDashboard extends LitElement {
     const selectedMarkdownFile = VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.includes(this.topologyInspectorMarkdownFile as any)
       ? this.topologyInspectorMarkdownFile
       : 'AGENTS.md';
-    const selectedMarkdown = this.getEffectiveAgentBootstrapMarkdown(agent, selectedMarkdownFile);
-    const markdownValue = selectedMarkdown.effectiveValue || '';
+    const combinedMarkdown = this.getCombinedAgentBootstrapMarkdown(agent, selectedMarkdownFile);
+    const markdownValue = combinedMarkdown.effectiveValue || '';
 
     return html`
       <div class="card">
@@ -4169,7 +4173,7 @@ export class ToolkitDashboard extends LitElement {
           <div class="card-header" style="padding: 0 0 10px; margin-bottom: 0; border-bottom: none;">
             <h3 style="font-size: 1rem;">Combined Markdown</h3>
           </div>
-          <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">Preview the effective bootstrap markdown for the selected agent. Template-backed files show the shared template content; custom files show the agent-specific markdown.</div>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">Preview the layered bootstrap markdown for the selected agent. Workspace content and agent-specific overlay markdown are shown together when both exist.</div>
           <div class="topology-markdown-tabs">
             ${VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => html`
               <div class="topology-markdown-tab ${selectedMarkdownFile === fileName ? 'active' : ''}" @click=${() => { this.topologyInspectorMarkdownFile = fileName; }}>
@@ -4178,9 +4182,9 @@ export class ToolkitDashboard extends LitElement {
             `)}
           </div>
           <div class="help-text" style="margin-top: 0; margin-bottom: 8px;">
-            ${selectedMarkdown.selectedTemplateKey
-              ? html`Using template <code>${selectedMarkdown.selectedTemplateKey}</code> for <code>${selectedMarkdownFile}</code>.`
-              : html`Using custom markdown for <code>${selectedMarkdownFile}</code>.`}
+            ${combinedMarkdown.sourceLabels.length > 0
+              ? html`${combinedMarkdown.sourceLabels.join(' + ')} for <code>${selectedMarkdownFile}</code>.`
+              : html`No workspace or agent markdown is defined for <code>${selectedMarkdownFile}</code> yet.`}
           </div>
           <textarea rows=${Math.max(8, this.getMarkdownEditorRows(selectedMarkdownFile))} .value=${markdownValue} readonly placeholder="No effective markdown content for this file yet."></textarea>
         </div>
@@ -5332,6 +5336,83 @@ export class ToolkitDashboard extends LitElement {
     };
   }
 
+  getEffectiveWorkspaceBootstrapMarkdown(workspace: any, fileName: string) {
+    if (!workspace || !VALID_WORKSPACE_MARKDOWN_FILES.includes(fileName as any)) {
+      return {
+        selectedTemplateKey: '',
+        effectiveValue: ''
+      };
+    }
+
+    const selectedTemplateKey = this.getMarkdownTemplateSelection(workspace, fileName, VALID_WORKSPACE_MARKDOWN_FILES);
+    const workspaceTemplateFiles = this.ensureWorkspaceTemplateFiles(workspace);
+    let effectiveValue = selectedTemplateKey
+      ? this.getMarkdownTemplateContent('workspaces', fileName, selectedTemplateKey)
+      : (workspaceTemplateFiles[fileName] || '');
+
+    if (!effectiveValue && fileName === 'AGENTS.md') {
+      effectiveValue = this.buildWorkspaceBootstrapPlaceholder(workspace, fileName);
+    }
+
+    return {
+      selectedTemplateKey,
+      effectiveValue
+    };
+  }
+
+  getCombinedAgentBootstrapMarkdown(agent: any, fileName: string) {
+    const workspace = this.getWorkspaceForAgentId(agent?.id);
+    const workspaceMarkdown = this.getEffectiveWorkspaceBootstrapMarkdown(workspace, fileName);
+    const agentMarkdown = this.getEffectiveAgentBootstrapMarkdown(agent, fileName);
+    const sections: string[] = [];
+    const sourceLabels: string[] = [];
+
+    const workspaceValue = typeof workspaceMarkdown.effectiveValue === 'string'
+      ? workspaceMarkdown.effectiveValue.trim()
+      : '';
+    if (workspaceValue) {
+      const workspaceLabel = workspace?.name || workspace?.id || 'workspace';
+      sections.push(`## Workspace ${fileName} (${workspaceLabel})`, '', workspaceValue);
+      sourceLabels.push(
+        workspaceMarkdown.selectedTemplateKey
+          ? `Workspace template ${workspaceMarkdown.selectedTemplateKey}`
+          : 'Workspace markdown'
+      );
+    }
+
+    const agentValue = typeof agentMarkdown.effectiveValue === 'string'
+      ? agentMarkdown.effectiveValue.trim()
+      : '';
+    if (agentValue) {
+      const agentLabel = agent?.name || agent?.id || 'agent';
+      sections.push(`## Agent ${fileName} (${agentLabel})`, '', agentValue);
+      sourceLabels.push(
+        agentMarkdown.selectedTemplateKey
+          ? `Agent template ${agentMarkdown.selectedTemplateKey}`
+          : 'Agent overlay markdown'
+      );
+    }
+
+    return {
+      sourceLabels,
+      effectiveValue: sections.join('\n').trim()
+    };
+  }
+
+  addToolset() {
+    const nextToolsets = [...this.getToolsetsList()];
+    let counter = nextToolsets.length + 1;
+    let key = `toolset-${counter}`;
+    while (this.getToolsetByKey(key)) {
+      counter += 1;
+      key = `toolset-${counter}`;
+    }
+    nextToolsets.push(this.createToolsetRecord({ key, name: `Toolset ${counter}`, allow: [], deny: [] }));
+    this.ensureToolsetsConfig(this.config);
+    this.config.toolsets.list = nextToolsets;
+    this.requestUpdate();
+  }
+
   getAgentDelegationTargets(agent: any) {
     const subagents = this.ensureSubagentsConfig(agent);
     return subagents.allowAgents;
@@ -6077,17 +6158,7 @@ export class ToolkitDashboard extends LitElement {
       <div class="card">
         <div class="card-header">
           <h3>Toolsets</h3>
-          <button class="btn btn-ghost" @click=${() => {
-            const toolsetsList = this.getToolsetsList();
-            let counter = toolsetsList.length + 1;
-            let key = `toolset-${counter}`;
-            while (this.getToolsetByKey(key)) {
-              counter += 1;
-              key = `toolset-${counter}`;
-            }
-            toolsetsList.push(this.createToolsetRecord({ key, name: `Toolset ${counter}`, allow: [], deny: [] }));
-            this.requestUpdate();
-          }}>+ Add Toolset</button>
+          <button class="btn btn-ghost" @click=${() => this.addToolset()}>+ Add Toolset</button>
         </div>
         <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Toolsets are reusable allow/deny layers. The built-in <code>minimal</code> toolset is always applied first as a safe chat-only baseline, then each agent's own toolsets are merged from top to bottom so lower entries win conflicts.</p>
 
@@ -6674,7 +6745,7 @@ export class ToolkitDashboard extends LitElement {
 
             <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
                 <div class="card-header"><h3>Agent Bootstrap Markdown</h3></div>
-                <p class="help-text">Custom markdown for this agent is stored in <code>openclaw-toolkit\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\agents\\&lt;TYPE&gt;\\</code>. The selected effective files are copied into <code>.openclaw\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> as agent-specific bootstrap overlays. Workspace-only lifecycle files such as <code>BOOT.md</code> and one-time <code>BOOTSTRAP.md</code> live on the workspace page instead.</p>
+                <p class="help-text">Custom markdown for this agent is stored in <code>openclaw-toolkit\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\agents\\&lt;TYPE&gt;\\</code>. The selected effective files are copied into <code>.openclaw\\agents\\${agent.id || 'agent-id'}\\bootstrap\\</code> as agent-specific bootstrap overlays. Root workspace starter files such as <code>AGENTS.md</code>, <code>SOUL.md</code>, <code>TOOLS.md</code>, <code>IDENTITY.md</code>, <code>USER.md</code>, and <code>HEARTBEAT.md</code> are seeded by OpenClaw itself. <code>MEMORY.md</code> is optional and not first-run seeded. <code>DREAMS.md</code> is agent-maintained by OpenClaw's memory system and is not configured here.</p>
                 ${VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.map((fileName) => {
                     const selectedTemplateKey = this.getMarkdownTemplateSelection(agent, fileName, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
                     const templateKeys = this.getMarkdownTemplateKeys('agents', fileName);
@@ -6953,7 +7024,7 @@ export class ToolkitDashboard extends LitElement {
 
         <div class="card" style="margin-top: 20px;">
           <div class="card-header"><h3>Workspace Markdown</h3></div>
-          <p class="help-text">Custom markdown for this workspace is stored in <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\workspaces\\&lt;TYPE&gt;\\</code>. The selected effective files are synced into the live workspace home base. <code>BOOT.md</code> is a startup checklist. <code>BOOTSTRAP.md</code> is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.</p>
+          <p class="help-text">Custom markdown for this workspace is stored in <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\workspaces\\&lt;TYPE&gt;\\</code>. The toolkit now asks OpenClaw itself to seed the standard starter files for each managed workspace, then applies any custom workspace markdown on top. <code>MEMORY.md</code> is optional and not first-run seeded. <code>DREAMS.md</code> is agent-maintained by the memory system and is not edited here. <code>BOOT.md</code> is a toolkit startup checklist. <code>BOOTSTRAP.md</code> is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.</p>
           ${VALID_WORKSPACE_MARKDOWN_FILES.map((fileName) => {
             const selectedTemplateKey = this.getMarkdownTemplateSelection(workspace, fileName, VALID_WORKSPACE_MARKDOWN_FILES);
             const templateKeys = this.getMarkdownTemplateKeys('workspaces', fileName);
