@@ -821,6 +821,7 @@
             "research",
             "review-local",
             "chat-local",
+            "coder-remote",
             "coder-local"
           ]
         },

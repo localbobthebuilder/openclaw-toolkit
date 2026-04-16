@@ -693,7 +693,31 @@ function Ensure-OpenClawWorkspaceBootstrap {
     }
 
     $ensureScript = @'
-import { ensureAgentWorkspace } from "./dist/agents/workspace.js";
+const workspaceModuleCandidates = [
+  "./dist/extensionAPI.js",
+  "./dist/agents/workspace.js",
+];
+
+let ensureAgentWorkspace = null;
+let lastImportError = null;
+for (const modulePath of workspaceModuleCandidates) {
+  try {
+    const workspaceModule = await import(modulePath);
+    if (typeof workspaceModule.ensureAgentWorkspace === "function") {
+      ensureAgentWorkspace = workspaceModule.ensureAgentWorkspace;
+      break;
+    }
+  } catch (error) {
+    lastImportError = error;
+  }
+}
+
+if (!ensureAgentWorkspace) {
+  throw new Error(
+    `Could not load OpenClaw ensureAgentWorkspace from ${workspaceModuleCandidates.join(", ")}.` +
+      (lastImportError ? ` Last error: ${lastImportError.message}` : "")
+  );
+}
 
 const workspaceDir = process.env.OPENCLAW_TOOLKIT_WORKSPACE_DIR ?? "";
 if (!workspaceDir.trim()) {
@@ -711,6 +735,7 @@ await ensureAgentWorkspace({
         "exec",
         "-e", "OPENCLAW_NO_RESPAWN=$(Get-ToolkitGatewayOpenClawNoRespawnValue)",
         "-e", "NODE_COMPILE_CACHE=$(Get-ToolkitGatewayNodeCompileCachePath)",
+        "-e", "OPENCLAW_SUPPRESS_EXTENSION_API_WARNING=1",
         "-e", "OPENCLAW_TOOLKIT_WORKSPACE_DIR=$WorkspacePath",
         "-e", "OPENCLAW_TOOLKIT_ENSURE_BOOTSTRAP=$ensureBootstrapFlag",
         $ContainerName,
