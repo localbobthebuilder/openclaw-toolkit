@@ -1735,6 +1735,11 @@ function Resolve-OllamaModelRef {
         }
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($EndpointKey)) {
+        Write-Host "Preferred $Purpose model $desiredResolvedRef is unavailable on endpoint '$EndpointKey'. Keeping endpoint-specific model instead of falling back to another endpoint." -ForegroundColor Yellow
+        return $desiredResolvedRef
+    }
+
     if ($availableRefs.Count -gt 0) {
         Write-Host "Preferred $Purpose model $desiredResolvedRef is unavailable. Falling back to $($availableRefs[0])." -ForegroundColor Yellow
         return [string]$availableRefs[0]
@@ -1866,7 +1871,15 @@ function Resolve-PreferredAgentModelRef {
     }
 
     foreach ($candidateRef in @($candidateRefs)) {
-        return $candidateRef
+        $candidateRefText = [string]$candidateRef
+        if ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $candidateRefText) -or $candidateRefText.StartsWith("ollama/")) {
+            $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+            if (-not [string]::IsNullOrWhiteSpace($endpointKey)) {
+                return (Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $candidateRefText -EndpointKey $endpointKey)
+            }
+        }
+
+        return $candidateRefText
     }
 
     return $null

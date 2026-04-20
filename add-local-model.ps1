@@ -585,6 +585,7 @@ function Resolve-ModelPlan {
     $rawBytes = Get-OllamaRegistryModelSizeBytes -ModelId $ModelId
     $rawMiB = [int][math]::Ceiling($rawBytes / 1MB)
     $rawLimitMiB = [int][math]::Floor($gpuTotalMiB * $RawSizeLimitRatio)
+    $rawLimitPercent = [int][math]::Round($RawSizeLimitRatio * 100)
     $diskFreeBytes = $null
     $requiredDiskBytes = [int64][math]::Ceiling($rawBytes * 1.10)
 
@@ -604,11 +605,11 @@ function Resolve-ModelPlan {
         if ($remainingFallbackModelIds.Count -gt 0) {
             $nextFallbackModelId = [string]$remainingFallbackModelIds[0]
             $subsequentFallbackModelIds = @($remainingFallbackModelIds.ToArray() | Select-Object -Skip 1)
-            Write-Warning "Skipping $ModelId on endpoint '$($Endpoint.key)': raw size ${rawMiB}MiB exceeds 70% VRAM threshold (${rawLimitMiB}MiB). Falling back to $nextFallbackModelId."
+            Write-Warning "Skipping $ModelId on endpoint '$($Endpoint.key)': raw size ${rawMiB}MiB exceeds $rawLimitPercent% VRAM threshold (${rawLimitMiB}MiB). Falling back to $nextFallbackModelId."
             return (Resolve-ModelPlan -Config $Config -Endpoint $Endpoint -ModelId $nextFallbackModelId -DisplayName $DisplayName -FallbackModelIds $subsequentFallbackModelIds -InstalledModelIds $InstalledModelIds -AlreadyInstalled:($nextFallbackModelId -in @($InstalledModelIds)) -Visited $Visited)
         }
 
-        throw "Model '$ModelId' raw size ${rawMiB}MiB exceeds 70% of endpoint GPU VRAM (${rawLimitMiB}MiB). Configure a smaller fallback model."
+        throw "Model '$ModelId' raw size ${rawMiB}MiB exceeds $rawLimitPercent% of endpoint GPU VRAM (${rawLimitMiB}MiB). Configure a smaller fallback model or raise the auto-pull VRAM budget."
     }
 
     if (-not $AlreadyInstalled) {
@@ -643,6 +644,9 @@ $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
 $config = Resolve-PortableConfigPaths -Config $config -BaseDir (Split-Path -Parent $ConfigPath)
 if (-not $PSBoundParameters.ContainsKey("HeadroomMiB")) {
     $HeadroomMiB = Get-ToolkitOllamaVramHeadroomMiB -Config $config -EndpointKey $EndpointKey
+}
+if (-not $PSBoundParameters.ContainsKey("RawSizeLimitRatio")) {
+    $RawSizeLimitRatio = Get-ToolkitOllamaPullVramBudgetFraction -Config $config
 }
 $InputKinds = @(Normalize-InputKinds -Values $InputKinds)
 $endpoint = Get-ToolkitOllamaEndpoint -Config $config -EndpointKey $EndpointKey

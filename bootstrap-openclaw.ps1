@@ -1653,6 +1653,11 @@ function Resolve-OllamaModelRef {
         }
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($EndpointKey)) {
+        Write-WarnLine "Preferred $Purpose model $desiredResolvedRef is unavailable on endpoint '$EndpointKey'. Keeping endpoint-specific model instead of falling back to another endpoint."
+        return $desiredResolvedRef
+    }
+
     if (@($AvailableRefs).Count -gt 0) {
         Write-WarnLine "Preferred $Purpose model $desiredResolvedRef is unavailable. Falling back to $($AvailableRefs[0])."
         return [string]$AvailableRefs[0]
@@ -2134,6 +2139,19 @@ function Resolve-AgentPreferredModelRef {
         $resolvedLocalCandidate = Resolve-UsableLocalModelCandidate -Config $Config -AgentConfig $AgentConfig -Purpose $Purpose -CandidateRefs $candidateRefs -AvailableOllamaRefs $AvailableOllamaRefs
         if (-not [string]::IsNullOrWhiteSpace($resolvedLocalCandidate)) {
             return $resolvedLocalCandidate
+        }
+
+        if ($FallbackToFirstCandidate -and @($candidateRefs).Count -gt 0) {
+            $fallbackCandidate = [string](@($candidateRefs)[0])
+            $endpointKey = Get-AgentOllamaEndpointKey -Config $Config -AgentConfig $AgentConfig
+            if (-not [string]::IsNullOrWhiteSpace($endpointKey) -and ((Test-IsToolkitLocalModelRef -Config $Config -ModelRef $fallbackCandidate) -or $fallbackCandidate -like "ollama/*")) {
+                $endpointFallbackCandidate = Convert-ToolkitLocalRefToEndpointRef -Config $Config -ModelRef $fallbackCandidate -EndpointKey $endpointKey
+                Write-WarnLine "No available local model is ready for $Purpose on endpoint '$endpointKey'. Keeping preferred endpoint model ref $endpointFallbackCandidate."
+                return $endpointFallbackCandidate
+            }
+
+            Write-WarnLine "No available local model is ready for $Purpose. Keeping preferred model ref $fallbackCandidate."
+            return $fallbackCandidate
         }
 
         return $null
