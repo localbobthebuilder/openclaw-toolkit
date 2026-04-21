@@ -16,6 +16,8 @@
 - For edit tools that require `oldText` and `newText`, provide both. Do not call edit with only replacement text.
 - If any tool call fails, stop and inspect the failure before continuing.
 - Never claim a file changed unless a write/edit tool succeeded and verification confirms the file content or diff changed.
+- Do not invent fragile shell quoting for multiline text, JSON payloads, or long generated scripts. Prefer files, argument arrays, checked-in helper scripts, or existing project runners.
+- If the project already has a script or harness for a repeated task, use it instead of recreating the command by hand.
 
 ## Editing Discipline
 - Make focused changes. Avoid whole-file rewrites, formatting churn, and line-ending churn.
@@ -30,6 +32,15 @@
 - Report commands that passed, failed, or could not be run.
 - If verification fails, say so plainly and include the exact blocker.
 - Do not summarize success when any required edit or verification step failed.
+- Do not claim browser testing, visual inspection, or a successful build unless that exact verification command or interaction actually succeeded.
+
+## Git Diff Guardrails
+- Avoid unbounded `git diff`, `git show`, or `git log -p` on a busy repository.
+- Start with `git status --short`, `git diff --stat`, or `git diff --name-only` to understand scope.
+- Inspect only relevant files: `git diff -- path/to/file` or `git diff --unified=40 -- path/to/file`.
+- If the diff is still large, narrow the path, reduce context, or inspect targeted hunks instead of loading the whole diff.
+- Do not repeatedly run the same large diff or log command. Capture the useful part once, reason from it, and move forward.
+- Avoid diffing generated assets, build output, lockfiles, vendored dependencies, or binary files unless the task specifically requires it.
 
 ## Dependency Safety
 - Do not run `npm install`, `npm ci`, `pnpm install`, `yarn install`, or other dependency install commands in a shared Windows/Linux workspace unless explicitly instructed.

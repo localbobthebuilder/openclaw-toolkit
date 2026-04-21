@@ -247,8 +247,8 @@
     "enabled": true,
     "setAsDefaultModel": false,
     "clearFallbacks": true,
-    "pullVramBudgetFraction": 0.7,
-    "vramHeadroomMiB": 3072
+    "pullVramBudgetFraction": 0.9,
+    "vramHeadroomMiB": 1000
   },
   "modelCatalog": [
     {
@@ -415,7 +415,7 @@
         "cacheWrite": 0
       },
       "minimumContextWindow": 24576,
-      "contextWindow": 24576,
+      "contextWindow": 65536,
       "maxTokens": 8192,
       "vramEstimateMiB": 19968
     },
@@ -427,6 +427,21 @@
     },
     {
       "modelRef": "google/gemini-3.1-flash-lite-preview"
+    },
+    {
+      "id": "qwen3.6:35b-a3b-q4_K_M",
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "minimumContextWindow": 24576,
+      "contextWindow": 65536,
+      "maxTokens": 8192
     }
   ],
   "endpoints": [
@@ -648,9 +663,24 @@
               "cacheWrite": 0
             },
             "minimumContextWindow": 24576,
-            "contextWindow": 24576,
+            "contextWindow": 65536,
             "maxTokens": 8192,
             "vramEstimateMiB": 19968
+          },
+          {
+            "id": "qwen3.6:35b-a3b-q4_K_M",
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "minimumContextWindow": 24576,
+            "contextWindow": 65536,
+            "maxTokens": 8192
           }
         ],
         "vramHeadroomMiB": 3072
@@ -809,7 +839,7 @@
         "name": "Strong Coder",
         "enabled": true,
         "markdownTemplateKeys": {
-          "AGENTS.md": "orchestrator"
+          "AGENTS.md": "codingDelegate"
         },
         "isMain": true,
         "default": true,
@@ -825,7 +855,7 @@
             "coder-local"
           ]
         },
-        "modelRef": "ollama/gemma4:latest",
+        "modelRef": "ollama/qwen3-coder:30b",
         "thinkingDefault": "high",
         "candidateModelRefs": [
           "ollama/gemma4:latest",

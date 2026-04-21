@@ -110,6 +110,90 @@ function Remove-OpenClawConfigJson {
     Add-ToolkitOpenClawConfigUnsetOperation -Path $Path
 }
 
+function Convert-ToolkitConfiguredLocalModelToProviderModel {
+    param([Parameter(Mandatory = $true)]$Model)
+
+    $inputKinds = @(
+        if ($Model.PSObject.Properties.Name -contains "input" -and $Model.input) {
+            foreach ($kind in @($Model.input)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$kind)) {
+                    [string]$kind
+                }
+            }
+        }
+        else {
+            "text"
+        }
+    )
+    if (@($inputKinds).Count -eq 0) {
+        $inputKinds = @("text")
+    }
+
+    $entry = [ordered]@{
+        id    = [string]$Model.id
+        name  = if ($Model.PSObject.Properties.Name -contains "name" -and $Model.name) { [string]$Model.name } else { [string]$Model.id }
+        input = @($inputKinds)
+        cost  = [ordered]@{
+            input      = 0
+            output     = 0
+            cacheRead  = 0
+            cacheWrite = 0
+        }
+    }
+
+    if ($Model.PSObject.Properties.Name -contains "reasoning" -and $Model.reasoning) {
+        $entry.reasoning = $true
+    }
+    if ($Model.PSObject.Properties.Name -contains "contextWindow" -and $Model.contextWindow) {
+        $entry.contextWindow = [int]$Model.contextWindow
+    }
+    if ($Model.PSObject.Properties.Name -contains "maxTokens" -and $Model.maxTokens) {
+        $entry.maxTokens = [int]$Model.maxTokens
+    }
+    if ($Model.PSObject.Properties.Name -contains "cost" -and $Model.cost) {
+        $entry.cost = [ordered]@{
+            input      = if ($Model.cost.input -ne $null) { $Model.cost.input } else { 0 }
+            output     = if ($Model.cost.output -ne $null) { $Model.cost.output } else { 0 }
+            cacheRead  = if ($Model.cost.cacheRead -ne $null) { $Model.cost.cacheRead } else { 0 }
+            cacheWrite = if ($Model.cost.cacheWrite -ne $null) { $Model.cost.cacheWrite } else { 0 }
+        }
+    }
+
+    return $entry
+}
+
+function Get-ToolkitOllamaProviderConfigEntries {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $entries = @{}
+    foreach ($endpoint in @(Get-ToolkitOllamaEndpoints -Config $Config)) {
+        if ([string]::IsNullOrWhiteSpace([string]$endpoint.providerId)) {
+            continue
+        }
+
+        $providerModels = @()
+        foreach ($configuredModel in @(Get-ToolkitEndpointModelCatalog -Config $Config -EndpointKey ([string]$endpoint.key))) {
+            if (-not $configuredModel.id) {
+                continue
+            }
+            $providerModels += (Convert-ToolkitConfiguredLocalModelToProviderModel -Model $configuredModel)
+        }
+
+        if (@($providerModels).Count -eq 0) {
+            continue
+        }
+
+        $entries[[string]$endpoint.providerId] = [ordered]@{
+            baseUrl = Get-ToolkitOllamaProviderBaseUrl -Endpoint $endpoint
+            apiKey  = [string]$endpoint.apiKey
+            api     = "ollama"
+            models  = @($providerModels)
+        }
+    }
+
+    return $entries
+}
+
 function Flush-OpenClawConfigChanges {
     if (-not (Test-ToolkitOpenClawConfigBatchPending)) {
         return
@@ -2287,6 +2371,14 @@ if ($agentToAgentEnabled) {
         allow   = @($allow)
     }
     Set-OpenClawConfigJson -Path "tools.agentToAgent" -Value $agentToAgent
+}
+
+$ollamaProviderEntries = Get-ToolkitOllamaProviderConfigEntries -Config $config
+if (@($ollamaProviderEntries.Keys).Count -gt 0) {
+    Set-OpenClawConfigJson -Path "models.mode" -Value "merge"
+    foreach ($providerId in @($ollamaProviderEntries.Keys)) {
+        Set-OpenClawConfigJson -Path ("models.providers." + [string]$providerId) -Value $ollamaProviderEntries[$providerId]
+    }
 }
 
 Flush-OpenClawConfigChanges

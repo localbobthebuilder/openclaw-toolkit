@@ -56,6 +56,7 @@ if /I "%ACTION%"=="compact-storage" goto :compact_storage
 if /I "%ACTION%"=="voice-test" goto :voice_test
 if /I "%ACTION%"=="local-model-test" goto :local_model_test
 if /I "%ACTION%"=="agent-smoke" goto :agent_smoke
+if /I "%ACTION%"=="agent-session" goto :agent_session
 if /I "%ACTION%"=="remote-review-smoke" goto :remote_review_smoke
 if /I "%ACTION%"=="local-delegate-test" goto :local_delegate_test
 if /I "%ACTION%"=="temp-agent-probe" goto :temp_agent_probe
@@ -183,6 +184,10 @@ exit /b %ERRORLEVEL%
 
 :agent_smoke
 call "%SCRIPT_DIR%run-agent-smoke.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
+
+:agent_session
+call "%SCRIPT_DIR%run-agent-session.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :remote_review_smoke
@@ -324,6 +329,9 @@ echo     Smoke-test OpenClaw through the configured Ollama local model path.
 echo.
 echo   run-openclaw.cmd agent-smoke
 echo     Smoke-test the shared-workspace agent roles, especially coder-local's file and git workflows.
+echo.
+echo   run-openclaw.cmd agent-session
+echo     Run one OpenClaw agent session from a prompt file without shell-quoting multiline prompts.
 echo.
 echo   run-openclaw.cmd remote-review-smoke
 echo     Smoke-test main spawning coder-remote for a code task and review-local for a path-aware review pass.
