@@ -1,0 +1,27 @@
+You are running a controlled local model benchmark for OpenClaw.
+
+Model under test: {{MODEL_REF}}
+Benchmark run id: {{RUN_ID}}
+Benchmark directory: {{BENCHMARK_DIR}}
+
+Your task is deliberately small but tool-heavy. Complete it end-to-end.
+
+Requirements:
+1. Create the directory {{BENCHMARK_DIR}} if it does not exist.
+2. In that directory, create word-count.js with a CommonJS module that exports:
+   - normalizeWords(text): returns lowercase words from text, splitting on non-alphanumeric boundaries and dropping empty entries.
+   - countWords(text): returns an object whose keys are normalized words and whose values are counts.
+3. In that directory, create word-count.test.js using only Node's built-in assert module.
+4. The tests must cover:
+   - repeated words with different casing
+   - punctuation boundaries
+   - empty input
+   - numbers mixed with words
+   - a sentence with at least five unique words
+5. Run node word-count.test.js from {{BENCHMARK_DIR}}.
+6. If the test fails, inspect the files, fix the implementation, and run the test again.
+7. Do not install packages. Do not use network access. Do not edit files outside {{BENCHMARK_DIR}}.
+
+Completion contract:
+- Only after node word-count.test.js passes, reply with exactly BENCHMARK_OK and nothing else.
+- If you cannot complete the task, reply with exactly BENCHMARK_FAIL: followed by one short reason.

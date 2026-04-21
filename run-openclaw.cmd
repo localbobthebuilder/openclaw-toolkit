@@ -53,10 +53,12 @@ if /I "%ACTION%"=="reset-config" goto :reset_config
 if /I "%ACTION%"=="watchdog" goto :watchdog
 if /I "%ACTION%"=="install-watchdog" goto :install_watchdog
 if /I "%ACTION%"=="compact-storage" goto :compact_storage
+if /I "%ACTION%"=="cleanup-containers" goto :cleanup_containers
 if /I "%ACTION%"=="voice-test" goto :voice_test
 if /I "%ACTION%"=="local-model-test" goto :local_model_test
 if /I "%ACTION%"=="agent-smoke" goto :agent_smoke
 if /I "%ACTION%"=="agent-session" goto :agent_session
+if /I "%ACTION%"=="agent-benchmark" goto :agent_benchmark
 if /I "%ACTION%"=="remote-review-smoke" goto :remote_review_smoke
 if /I "%ACTION%"=="local-delegate-test" goto :local_delegate_test
 if /I "%ACTION%"=="temp-agent-probe" goto :temp_agent_probe
@@ -174,6 +176,10 @@ exit /b %ERRORLEVEL%
 call "%SCRIPT_DIR%run-compact-storage.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
+:cleanup_containers
+call "%SCRIPT_DIR%run-cleanup-containers.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
+
 :voice_test
 call "%SCRIPT_DIR%run-voice-test.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
@@ -188,6 +194,10 @@ exit /b %ERRORLEVEL%
 
 :agent_session
 call "%SCRIPT_DIR%run-agent-session.cmd" %FORWARD_ARGS%
+exit /b %ERRORLEVEL%
+
+:agent_benchmark
+call "%SCRIPT_DIR%run-agent-benchmark.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :remote_review_smoke
@@ -321,6 +331,9 @@ echo.
 echo   run-openclaw.cmd compact-storage
 echo     Compact Docker Desktop's WSL data VHDX and restart OpenClaw afterward.
 echo.
+echo   run-openclaw.cmd cleanup-containers
+echo     Preview or remove stale OpenClaw Docker containers such as exited sandbox workers.
+echo.
 echo   run-openclaw.cmd voice-test
 echo     Smoke-test local voice-note transcription.
 echo.
@@ -332,6 +345,9 @@ echo     Smoke-test the shared-workspace agent roles, especially coder-local's f
 echo.
 echo   run-openclaw.cmd agent-session
 echo     Run one OpenClaw agent session from a prompt file without shell-quoting multiline prompts.
+echo.
+echo   run-openclaw.cmd agent-benchmark
+echo     Run a sequential local-model coding/tool benchmark across the configured benchmark model list.
 echo.
 echo   run-openclaw.cmd remote-review-smoke
 echo     Smoke-test main spawning coder-remote for a code task and review-local for a path-aware review pass.
@@ -366,10 +382,13 @@ echo   %~f0 agents
 echo   %~f0 verify -Checks voice
 echo   %~f0 verify -Checks "local-model agent"
 echo   %~f0 compact-storage
+echo   %~f0 cleanup-containers
+echo   %~f0 cleanup-containers -Remove
 echo   %~f0 update -Channel beta
 echo   %~f0 update -Ref main
 echo   %~f0 model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
 echo   %~f0 agent-smoke
+echo   %~f0 agent-benchmark
 echo   %~f0 remote-review-smoke
 echo   %~f0 local-delegate-test
 echo   %~f0 temp-agent-probe
