@@ -1795,6 +1795,9 @@ function Resolve-OllamaModelRef {
                 Write-WarnLine "Skipping pull of '$desiredModelId' on endpoint '$($endpoint.key)': $estimateMiB MiB exceeds VRAM budget of $vramBudgetMiB MiB ($pullBudgetPercent% of $gpuTotalMiB MiB total)."
                 $shouldAttemptPull = $false
             }
+            elseif ($null -eq $estimateMiB) {
+                Write-Host "INFO: Could not fetch registry size for '$desiredModelId'; skipping pre-pull VRAM size check." -ForegroundColor DarkGray
+            }
         }
     }
 

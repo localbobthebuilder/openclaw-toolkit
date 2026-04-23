@@ -161,6 +161,21 @@ export class ToolkitDashboard extends LitElement {
     .item-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
     .item-title { font-weight: bold; color: #fff; }
     .item-sub { font-size: 0.75rem; color: #777; }
+    .model-catalog-list { display: flex; flex-direction: column; gap: 14px; }
+    .model-catalog-card { background: #252525; border: 1px solid #333; border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+    .model-catalog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .model-catalog-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .model-catalog-title .item-title { overflow-wrap: anywhere; }
+    .model-catalog-pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .model-catalog-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; border: 1px solid #444; font-size: 0.72rem; color: #bbb; background: #1b1b1b; }
+    .model-catalog-pill.reasoning { border-color: #245b68; color: #7fe8ff; background: rgba(0, 188, 212, 0.08); }
+    .model-catalog-pill.standard { border-color: #4f3c1d; color: #ffd180; background: rgba(255, 152, 0, 0.08); }
+    .model-catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .model-catalog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .model-catalog-help { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 0 0 18px; }
+    .model-catalog-help-card { background: #161616; border: 1px solid #2e2e2e; border-radius: 8px; padding: 12px; }
+    .model-catalog-help-card strong { color: #fff; display: block; margin-bottom: 6px; }
+    .model-catalog-help-card span { color: #9a9a9a; font-size: 0.8rem; line-height: 1.45; }
     .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
     .tab { padding: 10px 20px; cursor: pointer; border: 1px solid #333; background: #1a1a1a; border-radius: 4px; font-size: 0.9rem; color: #888; transition: all 0.2s; }
     .tab:hover { background: #252525; color: #fff; border-color: #444; }
@@ -295,6 +310,11 @@ export class ToolkitDashboard extends LitElement {
     @media (max-width: 1480px) {
       .topology-main-grid { grid-template-columns: minmax(0, 1fr); }
       .topology-inspector-sticky { position: static; }
+    }
+    @media (max-width: 900px) {
+      .model-catalog-header { flex-direction: column; }
+      .model-catalog-actions { justify-content: stretch; }
+      .model-catalog-actions .btn { flex: 1 1 180px; }
     }
   `;
 
@@ -2065,6 +2085,39 @@ export class ToolkitDashboard extends LitElement {
       return defaultValue;
     }
     return Boolean(value);
+  }
+
+  getModelNumberInputValue(value: any, fallbackValue?: number) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(Math.round(value));
+    }
+    if (typeof fallbackValue === 'number' && Number.isFinite(fallbackValue)) {
+      return String(Math.round(fallbackValue));
+    }
+    return '';
+  }
+
+  updateModelNumericField(model: any, field: string, rawValue: any, options: { min?: number; fallbackValue?: number; deleteWhenBlank?: boolean } = {}) {
+    const trimmed = String(rawValue ?? '').trim();
+    if (!trimmed.length) {
+      if (options.deleteWhenBlank) {
+        delete model[field];
+      }
+      else if (typeof options.fallbackValue === 'number' && Number.isFinite(options.fallbackValue)) {
+        model[field] = Math.round(options.fallbackValue);
+      }
+      this.requestUpdate();
+      return;
+    }
+
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+
+    const minValue = typeof options.min === 'number' && Number.isFinite(options.min) ? options.min : 0;
+    model[field] = Math.max(minValue, Math.round(parsed));
+    this.requestUpdate();
   }
 
   normalizeThinkingDefault(value: any) {
@@ -4533,6 +4586,7 @@ export class ToolkitDashboard extends LitElement {
     return models.map((model: any) => {
       const clone = JSON.parse(JSON.stringify(model));
       delete clone.name;
+      delete clone.vramEstimateMiB;
       this.setOrderedFallbackModelIds(clone, this.getOrderedFallbackModelIds(clone));
       return clone;
     });
@@ -4543,6 +4597,10 @@ export class ToolkitDashboard extends LitElement {
       delete model.fallbackModelIds;
       return model;
     });
+  }
+
+  isReasoningCapableModel(model: any) {
+    return this.normalizeBoolean(model?.reasoning, false);
   }
 
   getOrderedFallbackModelIds(model: any) {
@@ -6070,23 +6128,105 @@ export class ToolkitDashboard extends LitElement {
             ? 'This shared catalog is stored in top-level modelCatalog in openclaw-bootstrap.config.json. Endpoint model rows still decide what each machine should pull, run, and fall back to.'
             : 'No shared catalog exists yet. The view below is inferred from endpoint-local and endpoint-hosted models; adding a catalog model will seed a reusable shared catalog from this list.'}
         </p>
+        <div class="model-catalog-help">
+          <div class="model-catalog-help-card">
+            <strong>Min Ctx</strong>
+            <span>The smallest memory window we still consider worth using for this model. If the model cannot fit at least this much, the toolkit should switch to a smaller fallback instead.</span>
+          </div>
+          <div class="model-catalog-help-card">
+            <strong>Ctx</strong>
+            <span>How much conversation and file content we want this machine to keep in mind while the model is running. Bigger values help with larger tasks, but they also use more VRAM.</span>
+          </div>
+          <div class="model-catalog-help-card">
+            <strong>Max Tokens</strong>
+            <span>How long we allow the model's reply to be. Bigger values let it write more before stopping, but they can make runs slower and more expensive.</span>
+          </div>
+          <div class="model-catalog-help-card">
+            <strong>Reasoning</strong>
+            <span>Turn this on only for models that truly support extra thinking mode. If this stays off, the toolkit will avoid asking that model to use thinking features it may not understand.</span>
+          </div>
+        </div>
         <h4 style="color: #666; margin-bottom: 10px;">Local Catalog</h4>
+        <div class="model-catalog-list">
         ${repeat(localModels, (m: any) => m.id, (m: any) => {
           const idx = hasSharedCatalog ? this.getSharedModelCatalog().indexOf(m) : -1;
+          const reasoningCapable = this.isReasoningCapableModel(m);
+          const contextWindowSummary = typeof m.contextWindow === 'number' ? `${m.contextWindow}` : 'unset';
+          const maxTokensSummary = typeof m.maxTokens === 'number' ? `${m.maxTokens}` : 'unset';
           return html`
-          <div class="item-row">
-            <div class="item-info">
-              <span class="item-title">${m.id}</span>
-              <span class="item-sub">Min Ctx: ${m.minimumContextWindow || 24576}</span>
+          <div class="model-catalog-card">
+            <div class="model-catalog-header">
+              <div class="model-catalog-title">
+                <span class="item-title">${m.id}</span>
+                <div class="model-catalog-pill-row">
+                  <span class="model-catalog-pill">${`Min Ctx ${m.minimumContextWindow || 24576}`}</span>
+                  <span class="model-catalog-pill">${`Ctx ${contextWindowSummary}`}</span>
+                  <span class="model-catalog-pill">${`Max Tokens ${maxTokensSummary}`}</span>
+                  <span class="model-catalog-pill ${reasoningCapable ? 'reasoning' : 'standard'}">
+                    ${reasoningCapable ? 'Reasoning / thinking-capable' : 'Standard / thinking-off by default'}
+                  </span>
+                </div>
+              </div>
+              ${hasSharedCatalog && idx >= 0 ? html`
+                <label class="toggle-switch" style="margin: 0; align-self: center;">
+                  <input
+                    type="checkbox"
+                    ?checked=${reasoningCapable}
+                    @change=${(e: any) => {
+                      m.reasoning = e.target.checked;
+                      this.requestUpdate();
+                    }}
+                  >
+                  Reasoning / thinking-capable
+                </label>
+              ` : html`
+                <div class="help-text" style="margin: 0; text-align: right;">Save the shared catalog first to edit local model metadata.</div>
+              `}
             </div>
             ${hasSharedCatalog && idx >= 0 ? html`
-              <div style="display: flex; gap: 8px;">
+              <div class="model-catalog-grid">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label>Min Ctx</label>
+                  <input
+                    type="number"
+                    min="1024"
+                    step="1024"
+                    .value=${this.getModelNumberInputValue(m.minimumContextWindow, 24576)}
+                    @change=${(e: any) => this.updateModelNumericField(m, 'minimumContextWindow', e.target.value, { min: 1024, fallbackValue: 24576 })}
+                  >
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label>Ctx</label>
+                  <input
+                    type="number"
+                    min="1024"
+                    step="1024"
+                    .value=${this.getModelNumberInputValue(m.contextWindow)}
+                    placeholder="Unset"
+                    @change=${(e: any) => this.updateModelNumericField(m, 'contextWindow', e.target.value, { min: 1024, deleteWhenBlank: true })}
+                  >
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label>Max Tokens</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="256"
+                    .value=${this.getModelNumberInputValue(m.maxTokens, 8192)}
+                    @change=${(e: any) => this.updateModelNumericField(m, 'maxTokens', e.target.value, { min: 1, fallbackValue: 8192 })}
+                  >
+                </div>
+              </div>
+              <div class="model-catalog-actions">
                 <button class="btn btn-ghost" @click=${() => this.removeModel(idx, { keepOllamaModel: true })}>Remove from Config</button>
                 <button class="btn btn-danger" @click=${() => this.removeModel(idx)}>Delete from Ollama Too</button>
               </div>
             ` : ''}
           </div>
         `;})}
+        </div>
+        <div class="help-text" style="margin-top: 10px;">Mark local models as reasoning-capable only when the model actually supports OpenClaw thinking levels. The toolkit benchmark and agent session helpers use this metadata when <code>Thinking=auto</code>.</div>
+        <div class="help-text" style="margin-top: 6px;">Ollama can tell us some facts like the model's maximum context length and whether it supports tools, but it does not reliably tell us the true maximum reply length, so <code>Max Tokens</code> is still something we manage here in the toolkit.</div>
         <h4 style="color: #666; margin: 20px 0 10px;">Hosted Catalog</h4>
         ${repeat(hostedModels, (m: any) => m.modelRef, (m: any) => {
           const idx = hasSharedCatalog ? this.getSharedModelCatalog().indexOf(m) : -1;
@@ -7205,7 +7345,7 @@ export class ToolkitDashboard extends LitElement {
               alert(`Model "${id}" is already in the catalog.`);
               return;
           }
-          models.push({ id, input: ['text'], minimumContextWindow: 24576 });
+          models.push({ id, input: ['text'], minimumContextWindow: 24576, maxTokens: 8192 });
           this.requestUpdate();
       }
   }

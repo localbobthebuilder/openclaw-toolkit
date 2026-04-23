@@ -1859,18 +1859,15 @@ function Ensure-OllamaState {
                 }
 
                 if ($null -ne $vramBudgetMiB) {
-                    $catalogEntry = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId $request.modelId -EndpointKey $request.endpointKey
                     $estimateMiB = $null
 
                     $registryMiB = Get-OllamaRegistryModelSizeMiB -ModelId $request.modelId
                     if ($null -ne $registryMiB) {
                         $estimateMiB = $registryMiB
                         Write-Host "INFO: Registry reports '$($request.modelId)' as $estimateMiB MiB" -ForegroundColor DarkGray
-                    } elseif ($null -ne $catalogEntry -and
-                              $catalogEntry.PSObject.Properties.Name -contains "vramEstimateMiB" -and
-                              $catalogEntry.vramEstimateMiB) {
-                        $estimateMiB = [int]$catalogEntry.vramEstimateMiB
-                        Write-Host "INFO: Using catalog estimate for '$($request.modelId)': $estimateMiB MiB" -ForegroundColor DarkGray
+                    }
+                    else {
+                        Write-Host "INFO: Could not fetch registry size for '$($request.modelId)'; skipping pre-pull VRAM size check." -ForegroundColor DarkGray
                     }
 
                     if ($null -ne $estimateMiB -and $estimateMiB -gt $vramBudgetMiB) {

@@ -374,6 +374,9 @@ function New-ManagedEndpointModelEntry {
     if ($entry.Contains("name")) {
         $entry.Remove("name")
     }
+    if ($entry.Contains("vramEstimateMiB")) {
+        $entry.Remove("vramEstimateMiB")
+    }
     $entry.input = @($Inputs)
     $entry.cost = [ordered]@{
         input      = 0

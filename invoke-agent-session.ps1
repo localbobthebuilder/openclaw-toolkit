@@ -4,10 +4,11 @@ param(
     [string]$PromptFile,
     [string]$Agent = "main",
     [string]$SessionId,
-    [ValidateSet("off", "minimal", "low", "medium", "high", "xhigh")]
-    [string]$Thinking = "high",
+    [ValidateSet("auto", "off", "minimal", "low", "medium", "high", "xhigh")]
+    [string]$Thinking = "auto",
     [int]$TimeoutSeconds = 900,
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
+    [string]$ConfigPath,
     [string]$OutputDirectory,
     [switch]$Wait,
     [switch]$NoJson,
@@ -15,6 +16,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$sharedThinkingPath = Join-Path $PSScriptRoot "shared-thinking.ps1"
+if (-not (Test-Path -LiteralPath $sharedThinkingPath -PathType Leaf)) {
+    throw "Shared thinking helper not found: $sharedThinkingPath"
+}
+. $sharedThinkingPath
 
 if (-not (Test-Path -LiteralPath $PromptFile -PathType Leaf)) {
     throw "Prompt file not found: $PromptFile"
@@ -40,6 +47,10 @@ $containerPromptPath = "/tmp/openclaw-agent-prompt-$runId.txt"
 $containerRunnerPath = "/tmp/openclaw-agent-runner-$runId.js"
 $stdoutPath = Join-Path $OutputDirectory ("$SessionId.stdout.txt")
 $stderrPath = Join-Path $OutputDirectory ("$SessionId.stderr.txt")
+$thinkingPlan = Resolve-ToolkitThinkingLevel -RequestedThinking $Thinking -AgentId $Agent -ConfigPath $ConfigPath
+$effectiveThinking = [string]$thinkingPlan.Thinking
+$resolvedModelRef = [string]$thinkingPlan.ModelRef
+$thinkingReason = [string]$thinkingPlan.Reason
 
 $runnerScript = @'
 const fs = require("node:fs");
@@ -110,7 +121,7 @@ $dockerArgs = @(
     $containerPromptPath,
     $Agent,
     $SessionId,
-    $Thinking,
+    $effectiveThinking,
     ([string]$TimeoutSeconds),
     $emitJsonFlag
 )
@@ -129,6 +140,10 @@ if ($DryRun) {
             DryRun = $true
             Command = "docker"
             Arguments = @($dockerArgs)
+            RequestedThinking = $Thinking
+            EffectiveThinking = $effectiveThinking
+            ThinkingReason = $thinkingReason
+            ResolvedModelRef = $resolvedModelRef
             Stdout = $stdoutPath
             Stderr = $stderrPath
             PromptFile = $resolvedPromptFile
@@ -138,10 +153,14 @@ if ($DryRun) {
 
 if ($Wait) {
     $process = Start-Process -FilePath "docker" -ArgumentList $dockerArgs -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru -NoNewWindow -Wait
-    Write-AgentSessionSummary -Summary ([pscustomobject]@{
+        Write-AgentSessionSummary -Summary ([pscustomobject]@{
             SessionId = $SessionId
             Agent = $Agent
             ExitCode = $process.ExitCode
+            RequestedThinking = $Thinking
+            EffectiveThinking = $effectiveThinking
+            ThinkingReason = $thinkingReason
+            ResolvedModelRef = $resolvedModelRef
             Stdout = $stdoutPath
             Stderr = $stderrPath
         })
@@ -153,6 +172,10 @@ Write-AgentSessionSummary -Summary ([pscustomobject]@{
         SessionId = $SessionId
         Agent = $Agent
         ProcessId = $process.Id
+        RequestedThinking = $Thinking
+        EffectiveThinking = $effectiveThinking
+        ThinkingReason = $thinkingReason
+        ResolvedModelRef = $resolvedModelRef
         Stdout = $stdoutPath
         Stderr = $stderrPath
         PromptFile = $resolvedPromptFile

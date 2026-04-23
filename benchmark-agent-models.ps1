@@ -8,10 +8,11 @@ param(
         "ollama/gemma4:31b"
     ),
     [string]$Agent = "main",
-    [ValidateSet("off", "minimal", "low", "medium", "high", "xhigh")]
-    [string]$Thinking = "high",
+    [ValidateSet("auto", "off", "minimal", "low", "medium", "high", "xhigh")]
+    [string]$Thinking = "auto",
     [int]$TimeoutSeconds = 900,
     [string]$ContainerName = "openclaw-openclaw-gateway-1",
+    [string]$ConfigPath,
     [string]$PromptTemplate,
     [string]$OutputDirectory,
     [switch]$NoStopModels,
@@ -19,6 +20,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$sharedThinkingPath = Join-Path $PSScriptRoot "shared-thinking.ps1"
+if (-not (Test-Path -LiteralPath $sharedThinkingPath -PathType Leaf)) {
+    throw "Shared thinking helper not found: $sharedThinkingPath"
+}
+. $sharedThinkingPath
 
 function Write-BenchmarkLine {
     param(
@@ -208,7 +215,8 @@ if ($DryRun) {
         $slug = ConvertTo-SafeSlug -Value $modelRef
         $sessionId = "benchmark-$slug-$runId"
         $containerBenchmarkDir = "/home/node/.openclaw/workspace/model-benchmarks/$runId/$slug"
-        Write-BenchmarkLine "DRY RUN: $modelRef -> session $sessionId -> $containerBenchmarkDir" Yellow
+        $thinkingPlan = Resolve-ToolkitThinkingLevel -RequestedThinking $Thinking -ModelRef $modelRef -AgentId $Agent -ConfigPath $ConfigPath
+        Write-BenchmarkLine "DRY RUN: $modelRef -> session $sessionId -> $containerBenchmarkDir -> thinking $($thinkingPlan.Thinking) [$($thinkingPlan.Reason)]" Yellow
     }
     exit 0
 }
@@ -226,6 +234,9 @@ try {
         $slug = ConvertTo-SafeSlug -Value $modelRef
         $sessionId = "benchmark-$slug-$runId"
         $containerBenchmarkDir = "/home/node/.openclaw/workspace/model-benchmarks/$runId/$slug"
+        $thinkingPlan = Resolve-ToolkitThinkingLevel -RequestedThinking $Thinking -ModelRef $modelRef -AgentId $Agent -ConfigPath $ConfigPath
+        $effectiveThinking = [string]$thinkingPlan.Thinking
+        $thinkingReason = [string]$thinkingPlan.Reason
         $hostPromptPath = Join-Path $resolvedOutputDirectory "$sessionId.prompt.txt"
         $hostRunnerPath = Join-Path $resolvedOutputDirectory "$sessionId.runner.js"
         $containerPromptPath = "/tmp/$sessionId.prompt.txt"
@@ -243,7 +254,7 @@ try {
         $hostPromptFiles.Add($hostPromptPath) | Out-Null
         $hostRunnerFiles.Add($hostRunnerPath) | Out-Null
 
-        Write-BenchmarkLine "Starting $modelRef" Green
+        Write-BenchmarkLine "Starting $modelRef (thinking $effectiveThinking)" Green
         $null = Invoke-External -FilePath "docker" -Arguments @("cp", $hostPromptPath, ("{0}:{1}" -f $ContainerName, $containerPromptPath))
         $null = Invoke-External -FilePath "docker" -Arguments @("cp", $hostRunnerPath, ("{0}:{1}" -f $ContainerName, $containerRunnerPath))
 
@@ -255,7 +266,7 @@ try {
             $containerPromptPath,
             $Agent,
             $sessionId,
-            $Thinking,
+            $effectiveThinking,
             ([string]$TimeoutSeconds),
             $modelRef,
             "1"
@@ -302,6 +313,9 @@ try {
             sessionId             = $sessionId
             modelRef              = $modelRef
             agent                 = $Agent
+            requestedThinking     = $Thinking
+            effectiveThinking     = $effectiveThinking
+            thinkingReason        = $thinkingReason
             status                = $status
             exitCode              = $process.ExitCode
             durationSeconds       = [math]::Round($stopwatch.Elapsed.TotalSeconds, 2)
@@ -345,7 +359,7 @@ $summaryCsv = Join-Path $resolvedOutputDirectory "benchmark-summary.csv"
 Write-Host ""
 Write-BenchmarkLine "Summary" Cyan
 @($results) |
-    Select-Object modelRef, status, durationSeconds, exitCode, artifactCreated, artifactTestExitCode, finalMarkerObserved, rawToolCallLeak |
+    Select-Object modelRef, effectiveThinking, status, durationSeconds, exitCode, artifactCreated, artifactTestExitCode, finalMarkerObserved, rawToolCallLeak |
     Format-Table -AutoSize
 
 Write-BenchmarkLine "Summary JSON: $summaryJson" Cyan

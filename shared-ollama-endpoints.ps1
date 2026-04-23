@@ -796,13 +796,6 @@ function Get-ToolkitLocalModelPullEstimateMiB {
         return $registryMiB
     }
 
-    $catalogEntry = Get-ToolkitEffectiveLocalModelEntry -Config $Config -ModelId $ModelId -EndpointKey $EndpointKey
-    if ($null -ne $catalogEntry -and
-        $catalogEntry.PSObject.Properties.Name -contains "vramEstimateMiB" -and
-        $catalogEntry.vramEstimateMiB) {
-        return [int]$catalogEntry.vramEstimateMiB
-    }
-
     return $null
 }
 
