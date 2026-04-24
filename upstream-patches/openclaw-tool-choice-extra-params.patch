@@ -1,9 +1,9 @@
 diff --git a/src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts b/src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts
 new file mode 100644
-index 000000000..fc67ef1f7
+index 000000000..a4ca00fb5
 --- /dev/null
 +++ b/src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,131 @@
 +import type { Model } from "@mariozechner/pi-ai";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { __testing as extraParamsTesting } from "./extra-params.js";
@@ -65,6 +65,41 @@ index 000000000..fc67ef1f7
 +    expect((options as { toolChoice?: unknown } | undefined)?.toolChoice).toBe("required");
 +  });
 +
++  it("keeps configured toolChoice when caller options carry an unset toolChoice", () => {
++    const { options } = runExtraParamsCase({
++      cfg: {
++        agents: {
++          defaults: {
++            models: {
++              "ollama/qwen3-coder:30b": {
++                params: {
++                  toolChoice: "required",
++                },
++              },
++            },
++          },
++        },
++      } as never,
++      applyProvider: "ollama",
++      applyModelId: "qwen3-coder:30b",
++      model: {
++        api: "openai-completions",
++        provider: "ollama",
++        id: "qwen3-coder:30b",
++      } as unknown as Model<"openai-completions">,
++      options: {
++        toolChoice: undefined,
++      } as never,
++      payload: {
++        model: "qwen3-coder:30b",
++        messages: [],
++        stream: true,
++      },
++    });
++
++    expect((options as { toolChoice?: unknown } | undefined)?.toolChoice).toBe("required");
++  });
++
 +  it("lets higher-precedence tool_choice override lower-precedence toolChoice", () => {
 +    const { options } = runExtraParamsCase({
 +      cfg: {
@@ -101,10 +136,26 @@ index 000000000..fc67ef1f7
 +  });
 +});
 diff --git a/src/agents/pi-embedded-runner/extra-params.ts b/src/agents/pi-embedded-runner/extra-params.ts
-index 9d4ff6fe4..01ad48d47 100644
+index 8c5afa6e6..84bfbe618 100644
 --- a/src/agents/pi-embedded-runner/extra-params.ts
 +++ b/src/agents/pi-embedded-runner/extra-params.ts
-@@ -111,6 +111,17 @@ type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
+@@ -100,6 +100,15 @@ export function resolveExtraParams(params: {
+     merged.cachedContent = resolvedCachedContent;
+     delete merged.cached_content;
+   }
++  const resolvedToolChoice = resolveAliasedParamValue(
++    [defaultParams, globalParams, agentParams],
++    "tool_choice",
++    "toolChoice",
++  );
++  if (resolvedToolChoice !== undefined) {
++    merged.toolChoice = resolvedToolChoice;
++    delete merged.tool_choice;
++  }
+ 
+   applyDefaultOpenAIGptRuntimeParams(params, merged);
+ 
+@@ -111,6 +120,17 @@ type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
    cachedContent?: string;
    openaiWsWarmup?: boolean;
  };
@@ -122,7 +173,7 @@ index 9d4ff6fe4..01ad48d47 100644
  type SupportedTransport = Exclude<CacheRetentionStreamOptions["transport"], undefined>;
  
  function resolveSupportedTransport(value: unknown): SupportedTransport | undefined {
-@@ -121,6 +132,52 @@ function hasExplicitTransportSetting(settings: { transport?: unknown }): boolean
+@@ -121,6 +141,52 @@ function hasExplicitTransportSetting(settings: { transport?: unknown }): boolean
    return Object.hasOwn(settings, "transport");
  }
  
@@ -175,7 +226,23 @@ index 9d4ff6fe4..01ad48d47 100644
  export function resolvePreparedExtraParams(params: {
    cfg: OpenClawConfig | undefined;
    provider: string;
-@@ -260,6 +317,11 @@ function createStreamFnWithExtraParams(
+@@ -159,6 +225,15 @@ export function resolvePreparedExtraParams(params: {
+     merged.cachedContent = resolvedCachedContent;
+     delete merged.cached_content;
+   }
++  const resolvedToolChoice = resolveAliasedParamValue(
++    [resolvedExtraParams, override],
++    "tool_choice",
++    "toolChoice",
++  );
++  if (resolvedToolChoice !== undefined) {
++    merged.toolChoice = resolvedToolChoice;
++    delete merged.tool_choice;
++  }
+   return (
+     providerRuntimeDeps.prepareProviderExtraParams({
+       provider: params.provider,
+@@ -260,6 +335,11 @@ function createStreamFnWithExtraParams(
    if (typeof extraParams.openaiWsWarmup === "boolean") {
      streamParams.openaiWsWarmup = extraParams.openaiWsWarmup;
    }
@@ -187,3 +254,14 @@ index 9d4ff6fe4..01ad48d47 100644
    const cachedContent =
      typeof extraParams.cachedContent === "string"
        ? extraParams.cachedContent
+@@ -294,9 +374,9 @@ function createStreamFnWithExtraParams(
+       return underlying(callModel, context, options);
+     }
+     return underlying(callModel, context, {
++      ...options,
+       ...streamParams,
+       ...(cacheRetention ? { cacheRetention } : {}),
+-      ...options,
+     });
+   };
+ 
