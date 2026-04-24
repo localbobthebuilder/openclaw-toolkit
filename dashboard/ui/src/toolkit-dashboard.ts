@@ -64,6 +64,7 @@ const MINIMAL_CHAT_ONLY_DENY = AVAILABLE_TOOL_OPTIONS
   .map((tool) => tool.id)
   .filter((toolId) => !MINIMAL_CHAT_ONLY_ALLOW.includes(toolId));
 const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive'] as const;
+const TOOL_CHOICE_OPTIONS = ['', 'auto', 'required', 'none'] as const;
 
 @customElement('toolkit-dashboard')
 export class ToolkitDashboard extends LitElement {
@@ -2141,6 +2142,69 @@ export class ToolkitDashboard extends LitElement {
     return THINKING_LEVEL_OPTIONS.includes(normalized as typeof THINKING_LEVEL_OPTIONS[number])
       ? normalized
       : 'high';
+  }
+
+  normalizeToolChoiceValue(value: any) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return TOOL_CHOICE_OPTIONS.includes(normalized as typeof TOOL_CHOICE_OPTIONS[number])
+      ? normalized
+      : '';
+  }
+
+  normalizeParamsRecord(target: any) {
+    if (!target || typeof target !== 'object') {
+      return null;
+    }
+
+    const source = target.params;
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      delete target.params;
+      return null;
+    }
+
+    const nextParams: Record<string, any> = JSON.parse(JSON.stringify(source));
+    const normalizedToolChoice = this.normalizeToolChoiceValue(
+      nextParams.toolChoice !== undefined ? nextParams.toolChoice : nextParams.tool_choice
+    );
+    delete nextParams.toolChoice;
+    delete nextParams.tool_choice;
+    if (normalizedToolChoice) {
+      nextParams.toolChoice = normalizedToolChoice;
+    }
+
+    if (Object.keys(nextParams).length > 0) {
+      target.params = nextParams;
+      return nextParams;
+    }
+
+    delete target.params;
+    return null;
+  }
+
+  getConfiguredToolChoice(target: any) {
+    const params = this.normalizeParamsRecord(target);
+    if (!params) {
+      return '';
+    }
+    return this.normalizeToolChoiceValue(params.toolChoice);
+  }
+
+  setConfiguredToolChoice(target: any, value: any) {
+    if (!target || typeof target !== 'object') {
+      return;
+    }
+    const normalized = this.normalizeToolChoiceValue(value);
+    const params = this.normalizeParamsRecord(target) || {};
+    delete params.toolChoice;
+    if (normalized) {
+      params.toolChoice = normalized;
+    }
+    if (Object.keys(params).length > 0) {
+      target.params = params;
+    } else {
+      delete target.params;
+    }
+    this.requestUpdate();
   }
 
   ensureSubagentsConfig(agent: any) {
@@ -4587,6 +4651,7 @@ export class ToolkitDashboard extends LitElement {
       const clone = JSON.parse(JSON.stringify(model));
       delete clone.name;
       delete clone.vramEstimateMiB;
+      this.normalizeParamsRecord(clone);
       this.setOrderedFallbackModelIds(clone, this.getOrderedFallbackModelIds(clone));
       return clone;
     });
@@ -4742,6 +4807,7 @@ export class ToolkitDashboard extends LitElement {
     delete clone.modelSource;
     clone.enabled = this.normalizeBoolean(clone.enabled, true);
     clone.thinkingDefault = this.normalizeThinkingDefault(clone.thinkingDefault);
+    this.normalizeParamsRecord(clone);
     delete clone.endpointKey;
     clone.markdownTemplateKeys = this.normalizeMarkdownTemplateSelections(clone, VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES);
     delete clone.rolePolicyKey;
@@ -6145,12 +6211,17 @@ export class ToolkitDashboard extends LitElement {
             <strong>Reasoning</strong>
             <span>Turn this on only for models that truly support extra thinking mode. If this stays off, the toolkit will avoid asking that model to use thinking features it may not understand.</span>
           </div>
+          <div class="model-catalog-help-card">
+            <strong>Tool Use</strong>
+            <span>Leave this on default unless you want OpenClaw to push harder for real tool calls. <code>required</code> can help tool-first specialists, but it can be too strict for general chat.</span>
+          </div>
         </div>
         <h4 style="color: #666; margin-bottom: 10px;">Local Catalog</h4>
         <div class="model-catalog-list">
         ${repeat(localModels, (m: any) => m.id, (m: any) => {
           const idx = hasSharedCatalog ? this.getSharedModelCatalog().indexOf(m) : -1;
           const reasoningCapable = this.isReasoningCapableModel(m);
+          const toolChoice = this.getConfiguredToolChoice(m);
           const contextWindowSummary = typeof m.contextWindow === 'number' ? `${m.contextWindow}` : 'unset';
           const maxTokensSummary = typeof m.maxTokens === 'number' ? `${m.maxTokens}` : 'unset';
           return html`
@@ -6162,6 +6233,7 @@ export class ToolkitDashboard extends LitElement {
                   <span class="model-catalog-pill">${`Min Ctx ${m.minimumContextWindow || 24576}`}</span>
                   <span class="model-catalog-pill">${`Ctx ${contextWindowSummary}`}</span>
                   <span class="model-catalog-pill">${`Max Tokens ${maxTokensSummary}`}</span>
+                  <span class="model-catalog-pill">${`Tool Use ${toolChoice || 'default'}`}</span>
                   <span class="model-catalog-pill ${reasoningCapable ? 'reasoning' : 'standard'}">
                     ${reasoningCapable ? 'Reasoning / thinking-capable' : 'Standard / thinking-off by default'}
                   </span>
@@ -6216,6 +6288,17 @@ export class ToolkitDashboard extends LitElement {
                     @change=${(e: any) => this.updateModelNumericField(m, 'maxTokens', e.target.value, { min: 1, fallbackValue: 8192 })}
                   >
                 </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label>Tool Use</label>
+                  <select
+                    .value=${toolChoice}
+                    @change=${(e: any) => this.setConfiguredToolChoice(m, e.target.value)}>
+                    <option value="">Default</option>
+                    <option value="auto">Auto</option>
+                    <option value="required">Required</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
               </div>
               <div class="model-catalog-actions">
                 <button class="btn btn-ghost" @click=${() => this.removeModel(idx, { keepOllamaModel: true })}>Remove from Config</button>
@@ -6226,6 +6309,7 @@ export class ToolkitDashboard extends LitElement {
         `;})}
         </div>
         <div class="help-text" style="margin-top: 10px;">Mark local models as reasoning-capable only when the model actually supports OpenClaw thinking levels. The toolkit benchmark and agent session helpers use this metadata when <code>Thinking=auto</code>.</div>
+        <div class="help-text" style="margin-top: 6px;">Tool Use writes to the model's OpenClaw <code>params.toolChoice</code>. <code>required</code> is best for tool-first specialists and experiments, not for every general-purpose chat model.</div>
         <div class="help-text" style="margin-top: 6px;">Ollama can tell us some facts like the model's maximum context length and whether it supports tools, but it does not reliably tell us the true maximum reply length, so <code>Max Tokens</code> is still something we manage here in the toolkit.</div>
         <h4 style="color: #666; margin: 20px 0 10px;">Hosted Catalog</h4>
         ${repeat(hostedModels, (m: any) => m.modelRef, (m: any) => {
@@ -6470,6 +6554,7 @@ export class ToolkitDashboard extends LitElement {
     const availableDirectDenyOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directDeniedTools.includes(option.id));
     const sandboxModeOverride = typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '';
     const thinkingDefault = this.normalizeThinkingDefault(agent.thinkingDefault);
+    const toolChoiceDefault = this.getConfiguredToolChoice(agent);
     const forceSandboxOff = sandboxModeOverride === 'off';
     const telegramRoutesForAgent = this.getTelegramRoutesForAgent(String(agent.id || ''));
 
@@ -6634,6 +6719,17 @@ export class ToolkitDashboard extends LitElement {
                     </select>
                     <div class="help-text">Managed toolkit agents default to <code>high</code> instead of OpenClaw's normal <code>low</code>. Use <code>adaptive</code> for providers that support provider-managed thinking.</div>
                 </div>
+            </div>
+
+            <div class="form-group">
+                <label>Tool Use</label>
+                <select .value=${toolChoiceDefault} @change=${(e: any) => this.setConfiguredToolChoice(agent, e.target.value)}>
+                    <option value="">Default</option>
+                    <option value="auto">Auto</option>
+                    <option value="required">Required</option>
+                    <option value="none">None</option>
+                </select>
+                <div class="help-text">This writes to the agent's OpenClaw <code>params.toolChoice</code>. Use <code>required</code> only for tool-first specialists because it can be too strict for agents that also need to answer normally.</div>
             </div>
 
             <div class="card" style="margin-top: 20px; margin-bottom: 20px;">

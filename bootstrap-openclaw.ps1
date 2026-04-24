@@ -1530,6 +1530,9 @@ function Convert-ConfiguredLocalModelToProviderModel {
     if ($Model.PSObject.Properties.Name -contains "maxTokens" -and $Model.maxTokens) {
         $entry.maxTokens = [int]$Model.maxTokens
     }
+    if ($Model.PSObject.Properties.Name -contains "params" -and $null -ne $Model.params) {
+        $entry.params = $Model.params
+    }
     if ($Model.PSObject.Properties.Name -contains "cost" -and $Model.cost) {
         $entry.cost = [ordered]@{
             input      = if ($Model.cost.input -ne $null) { $Model.cost.input } else { 0 }

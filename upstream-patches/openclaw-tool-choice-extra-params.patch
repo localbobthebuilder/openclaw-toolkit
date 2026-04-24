@@ -1,0 +1,189 @@
+diff --git a/src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts b/src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts
+new file mode 100644
+index 000000000..fc67ef1f7
+--- /dev/null
++++ b/src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts
+@@ -0,0 +1,96 @@
++import type { Model } from "@mariozechner/pi-ai";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { __testing as extraParamsTesting } from "./extra-params.js";
++import { runExtraParamsCase } from "./extra-params.test-support.js";
++
++vi.mock("@mariozechner/pi-ai", async () => {
++  const original =
++    await vi.importActual<typeof import("@mariozechner/pi-ai")>("@mariozechner/pi-ai");
++  return {
++    ...original,
++    streamSimple: vi.fn(() => ({
++      push: vi.fn(),
++      result: vi.fn(),
++    })),
++  };
++});
++
++beforeEach(() => {
++  extraParamsTesting.setProviderRuntimeDepsForTest({
++    prepareProviderExtraParams: ({ context }) => context.extraParams,
++    wrapProviderStreamFn: () => undefined,
++  });
++});
++
++afterEach(() => {
++  extraParamsTesting.resetProviderRuntimeDepsForTest();
++});
++
++describe("extra-params: tool choice", () => {
++  it("forwards configured toolChoice into stream options", () => {
++    const { options } = runExtraParamsCase({
++      cfg: {
++        agents: {
++          defaults: {
++            models: {
++              "ollama/qwen3-coder:30b": {
++                params: {
++                  toolChoice: "required",
++                },
++              },
++            },
++          },
++        },
++      } as never,
++      applyProvider: "ollama",
++      applyModelId: "qwen3-coder:30b",
++      model: {
++        api: "openai-completions",
++        provider: "ollama",
++        id: "qwen3-coder:30b",
++      } as unknown as Model<"openai-completions">,
++      payload: {
++        model: "qwen3-coder:30b",
++        messages: [],
++        stream: true,
++      },
++    });
++
++    expect((options as { toolChoice?: unknown } | undefined)?.toolChoice).toBe("required");
++  });
++
++  it("lets higher-precedence tool_choice override lower-precedence toolChoice", () => {
++    const { options } = runExtraParamsCase({
++      cfg: {
++        agents: {
++          defaults: {
++            params: {
++              toolChoice: "auto",
++            },
++            models: {
++              "ollama/qwen3-coder:30b": {
++                params: {
++                  tool_choice: "required",
++                },
++              },
++            },
++          },
++        },
++      } as never,
++      applyProvider: "ollama",
++      applyModelId: "qwen3-coder:30b",
++      model: {
++        api: "openai-completions",
++        provider: "ollama",
++        id: "qwen3-coder:30b",
++      } as unknown as Model<"openai-completions">,
++      payload: {
++        model: "qwen3-coder:30b",
++        messages: [],
++        stream: true,
++      },
++    });
++
++    expect((options as { toolChoice?: unknown } | undefined)?.toolChoice).toBe("required");
++  });
++});
+diff --git a/src/agents/pi-embedded-runner/extra-params.ts b/src/agents/pi-embedded-runner/extra-params.ts
+index 9d4ff6fe4..01ad48d47 100644
+--- a/src/agents/pi-embedded-runner/extra-params.ts
++++ b/src/agents/pi-embedded-runner/extra-params.ts
+@@ -111,6 +111,17 @@ type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
+   cachedContent?: string;
+   openaiWsWarmup?: boolean;
+ };
++type SupportedToolChoice =
++  | "auto"
++  | "none"
++  | "any"
++  | "required"
++  | {
++      type: "function";
++      function: {
++        name: string;
++      };
++    };
+ type SupportedTransport = Exclude<CacheRetentionStreamOptions["transport"], undefined>;
+ 
+ function resolveSupportedTransport(value: unknown): SupportedTransport | undefined {
+@@ -121,6 +132,52 @@ function hasExplicitTransportSetting(settings: { transport?: unknown }): boolean
+   return Object.hasOwn(settings, "transport");
+ }
+ 
++function normalizeSupportedToolChoice(value: unknown): SupportedToolChoice | undefined {
++  if (typeof value === "string") {
++    const normalized = value.trim().toLowerCase();
++    if (
++      normalized === "auto" ||
++      normalized === "none" ||
++      normalized === "any" ||
++      normalized === "required"
++    ) {
++      return normalized;
++    }
++    return undefined;
++  }
++  if (!value || typeof value !== "object" || Array.isArray(value)) {
++    return undefined;
++  }
++  const typeValue = (value as { type?: unknown }).type;
++  if (typeValue !== "function") {
++    return undefined;
++  }
++  const functionName = (value as { function?: { name?: unknown } }).function?.name;
++  if (typeof functionName !== "string" || functionName.trim().length === 0) {
++    return undefined;
++  }
++  return {
++    type: "function",
++    function: {
++      name: functionName.trim(),
++    },
++  };
++}
++
++function resolveSupportedToolChoice(
++  extraParams: Record<string, unknown>,
++): SupportedToolChoice | undefined {
++  const rawToolChoice =
++    extraParams.toolChoice !== undefined ? extraParams.toolChoice : extraParams.tool_choice;
++  const normalized = normalizeSupportedToolChoice(rawToolChoice);
++  if (rawToolChoice !== undefined && normalized === undefined) {
++    const toolChoiceSummary =
++      typeof rawToolChoice === "string" ? rawToolChoice : typeof rawToolChoice;
++    log.warn(`ignoring invalid toolChoice param: ${toolChoiceSummary}`);
++  }
++  return normalized;
++}
++
+ export function resolvePreparedExtraParams(params: {
+   cfg: OpenClawConfig | undefined;
+   provider: string;
+@@ -260,6 +317,11 @@ function createStreamFnWithExtraParams(
+   if (typeof extraParams.openaiWsWarmup === "boolean") {
+     streamParams.openaiWsWarmup = extraParams.openaiWsWarmup;
+   }
++  const toolChoice = resolveSupportedToolChoice(extraParams);
++  if (toolChoice !== undefined) {
++    (streamParams as CacheRetentionStreamOptions & { toolChoice?: SupportedToolChoice }).toolChoice =
++      toolChoice;
++  }
+   const cachedContent =
+     typeof extraParams.cachedContent === "string"
+       ? extraParams.cachedContent

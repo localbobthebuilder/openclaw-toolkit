@@ -159,6 +159,26 @@
         "src/agents/command/session.ts",
         "src/agents/command/session.resolve-session-key.test.ts"
       ]
+    },
+    {
+      "enabled": true,
+      "name": "tool-choice-extra-params",
+      "path": ".\\upstream-patches\\openclaw-tool-choice-extra-params.patch",
+      "managedPaths": [
+        "src/agents/pi-embedded-runner/extra-params.ts",
+        "src/agents/pi-embedded-runner/extra-params.tool-choice.test.ts"
+      ]
+    },
+    {
+      "enabled": true,
+      "name": "tool-choice-request-shaping",
+      "path": ".\\upstream-patches\\openclaw-tool-choice-request-shaping.patch",
+      "managedPaths": [
+        "src/agents/pi-embedded-runner/run.ts",
+        "src/agents/pi-embedded-runner/run/attempt.ts",
+        "src/agents/pi-embedded-runner/run/types.ts",
+        "src/agents/pi-embedded-runner/types.ts"
+      ]
     }
   ],
   "ollama": {

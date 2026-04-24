@@ -150,6 +150,9 @@ function Convert-ToolkitConfiguredLocalModelToProviderModel {
     if ($Model.PSObject.Properties.Name -contains "maxTokens" -and $Model.maxTokens) {
         $entry.maxTokens = [int]$Model.maxTokens
     }
+    if ($Model.PSObject.Properties.Name -contains "params" -and $null -ne $Model.params) {
+        $entry.params = $Model.params
+    }
     if ($Model.PSObject.Properties.Name -contains "cost" -and $Model.cost) {
         $entry.cost = [ordered]@{
             input      = if ($Model.cost.input -ne $null) { $Model.cost.input } else { 0 }
@@ -1001,7 +1004,8 @@ function New-AgentEntry {
         $Tools,
         $Sandbox,
         $Subagents,
-        [string[]]$Skills
+        [string[]]$Skills,
+        $Params
     )
 
     $entry = [ordered]@{
@@ -1045,6 +1049,9 @@ function New-AgentEntry {
                 ForEach-Object { [string]$_ } |
                 Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         )
+    }
+    if ($null -ne $Params) {
+        $entry.params = $Params
     }
 
     return $entry
@@ -1554,8 +1561,9 @@ function Add-DesiredAgentFromConfig {
     $subagentPolicy = Get-AgentSubagentPolicy -AgentConfig $AgentConfig
     $skillsOverride = Get-AgentSkillsOverride -Config $Config
     $thinkingDefault = Get-AgentThinkingDefault -AgentConfig $AgentConfig
+    $agentParams = if ($AgentConfig.PSObject.Properties.Name -contains "params" -and $null -ne $AgentConfig.params) { $AgentConfig.params } else { $null }
 
-    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -ThinkingDefault $thinkingDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy -Skills $skillsOverride
+    $entry = New-AgentEntry -Id $agentId -Name $agentName -Workspace $workspacePath -ModelRef $resolvedModelRef -FallbackRefs $resolvedFallbackRefs -IsDefault $IsDefault -ThinkingDefault $thinkingDefault -Tools $toolsOverride -Sandbox $sandboxOverride -Subagents $subagentPolicy -Skills $skillsOverride -Params $agentParams
     return @(@($DesiredAgents) + $entry)
 }
 
@@ -1583,7 +1591,8 @@ function Merge-AgentEntry {
         "tools",
         "sandbox",
         "subagents",
-        "skills"
+        "skills",
+        "params"
     )
     foreach ($prop in $managedOptionalProps) {
         if (($Existing.PSObject.Properties.Name -contains $prop) -and -not ($Desired.Keys -contains $prop)) {

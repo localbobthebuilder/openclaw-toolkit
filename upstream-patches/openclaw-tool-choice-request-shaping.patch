@@ -1,0 +1,146 @@
+diff --git a/src/agents/pi-embedded-runner/run.ts b/src/agents/pi-embedded-runner/run.ts
+index 997cf7c5f..41b7eb3fd 100644
+--- a/src/agents/pi-embedded-runner/run.ts
++++ b/src/agents/pi-embedded-runner/run.ts
+@@ -2106,6 +2106,13 @@ export async function runEmbeddedPiAgent(
+               requestShaping: {
+                 ...(lastProfileId ? { authMode: "auth-profile" } : {}),
+                 ...(thinkLevel ? { thinking: thinkLevel } : {}),
++                ...(attempt.effectiveToolChoice ? { toolChoice: attempt.effectiveToolChoice } : {}),
++                ...(attempt.observedPayloadToolChoice
++                  ? { providerPayloadToolChoice: attempt.observedPayloadToolChoice }
++                  : {}),
++                ...(attempt.observedPayloadToolsCount !== undefined
++                  ? { providerPayloadTools: attempt.observedPayloadToolsCount }
++                  : {}),
+                 ...(params.reasoningLevel ? { reasoning: params.reasoningLevel } : {}),
+                 ...(params.verboseLevel ? { verbose: params.verboseLevel } : {}),
+                 ...(params.blockReplyBreak ? { blockStreaming: params.blockReplyBreak } : {}),
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index b5adfbe16..0e57249db 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -162,6 +162,7 @@ import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
+ import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
+ import { prepareSessionManagerForRun } from "../session-manager-init.js";
+ import { resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
++import { streamWithPayloadPatch } from "../stream-payload-utils.js";
+ import {
+   describeEmbeddedAgentStreamStrategy,
+   resetEmbeddedAgentBaseStreamFnCacheForTest,
+@@ -312,6 +313,36 @@ export {
+ 
+ const MAX_BTW_SNAPSHOT_MESSAGES = 100;
+ 
++function summarizeToolChoiceValue(value: unknown): string | undefined {
++  if (typeof value === "string") {
++    const trimmed = value.trim().toLowerCase();
++    return trimmed.length > 0 ? trimmed : undefined;
++  }
++  if (!value || typeof value !== "object" || Array.isArray(value)) {
++    return undefined;
++  }
++  const typeValue = (value as { type?: unknown }).type;
++  if (typeof typeValue !== "string") {
++    return "object";
++  }
++  const normalizedTypeValue = typeValue.trim().toLowerCase();
++  if (normalizedTypeValue === "function") {
++    const functionName = (value as { function?: { name?: unknown } }).function?.name;
++    if (typeof functionName !== "string" || functionName.trim().length === 0) {
++      return "function";
++    }
++    return `function:${functionName.trim()}`;
++  }
++  if (normalizedTypeValue === "tool") {
++    const toolName = (value as { name?: unknown }).name;
++    if (typeof toolName !== "string" || toolName.trim().length === 0) {
++      return "tool";
++    }
++    return `tool:${toolName.trim()}`;
++  }
++  return normalizedTypeValue;
++}
++
+ export function resolveUnknownToolGuardThreshold(loopDetection?: {
+   enabled?: boolean;
+   unknownToolThreshold?: number;
+@@ -1374,6 +1405,11 @@ export async function runEmbeddedAttempt(
+         params.model,
+         agentDir,
+       );
++      const effectiveToolChoice = summarizeToolChoiceValue(
++        effectiveExtraParams?.toolChoice ?? effectiveExtraParams?.tool_choice,
++      );
++      let observedPayloadToolChoice: string | undefined;
++      let observedPayloadToolsCount: number | undefined;
+       const effectivePromptCacheRetention = resolveCacheRetention(
+         effectiveExtraParams,
+         params.provider,
+@@ -2037,6 +2073,28 @@ export async function runEmbeddedAttempt(
+         if (googlePromptCacheStreamFn) {
+           activeSession.agent.streamFn = googlePromptCacheStreamFn;
+         }
++        const finalPayloadObservedStreamFn = activeSession.agent.streamFn;
++        activeSession.agent.streamFn = (model, context, options) =>
++          streamWithPayloadPatch(
++            finalPayloadObservedStreamFn,
++            model,
++            context,
++            options,
++            (payloadObj) => {
++              if (observedPayloadToolChoice === undefined) {
++                observedPayloadToolChoice = summarizeToolChoiceValue(
++                  payloadObj.tool_choice ?? payloadObj.toolChoice,
++                );
++              }
++              if (observedPayloadToolsCount === undefined) {
++                if (Array.isArray(payloadObj.tools)) {
++                  observedPayloadToolsCount = payloadObj.tools.length;
++                } else if (Object.hasOwn(payloadObj, "tools")) {
++                  observedPayloadToolsCount = 0;
++                }
++              }
++            },
++          );
+ 
+         const routingSummary = describeProviderRequestRoutingSummary({
+           provider: params.provider,
+@@ -2789,6 +2847,9 @@ export async function runEmbeddedAttempt(
+         attemptUsage,
+         promptCache,
+         compactionCount: getCompactionCount(),
++        effectiveToolChoice,
++        observedPayloadToolChoice,
++        observedPayloadToolsCount,
+         // Client tool call detected (OpenResponses hosted tools)
+         clientToolCall: clientToolCallDetected ?? undefined,
+         yieldDetected: yieldDetected || undefined,
+diff --git a/src/agents/pi-embedded-runner/run/types.ts b/src/agents/pi-embedded-runner/run/types.ts
+index dcf411af7..9c3eb1458 100644
+--- a/src/agents/pi-embedded-runner/run/types.ts
++++ b/src/agents/pi-embedded-runner/run/types.ts
+@@ -92,6 +92,9 @@ export type EmbeddedRunAttemptResult = {
+   attemptUsage?: NormalizedUsage;
+   promptCache?: ContextEnginePromptCacheInfo;
+   compactionCount?: number;
++  effectiveToolChoice?: string;
++  observedPayloadToolChoice?: string;
++  observedPayloadToolsCount?: number;
+   /** Client tool call detected (OpenResponses hosted tools). */
+   clientToolCall?: { name: string; params: Record<string, unknown> };
+   /** True when sessions_yield tool was called during this attempt. */
+diff --git a/src/agents/pi-embedded-runner/types.ts b/src/agents/pi-embedded-runner/types.ts
+index 337214aff..62ada15ff 100644
+--- a/src/agents/pi-embedded-runner/types.ts
++++ b/src/agents/pi-embedded-runner/types.ts
+@@ -60,6 +60,9 @@ export type ExecutionTrace = {
+ export type RequestShapingTrace = {
+   authMode?: string;
+   thinking?: string;
++  toolChoice?: string;
++  providerPayloadToolChoice?: string;
++  providerPayloadTools?: number;
+   reasoning?: string;
+   verbose?: string;
+   trace?: string;
