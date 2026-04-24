@@ -1,8 +1,8 @@
 diff --git a/src/agents/command/session.resolve-session-key.test.ts b/src/agents/command/session.resolve-session-key.test.ts
-index 0065ef4..e18a73c 100644
+index 106c9e282..feca4beed 100644
 --- a/src/agents/command/session.resolve-session-key.test.ts
 +++ b/src/agents/command/session.resolve-session-key.test.ts
-@@ -124,4 +124,30 @@ describe("resolveSessionKeyForRequest", () => {
+@@ -126,4 +126,30 @@ describe("resolveSessionKeyForRequest", () => {
      expect(result.storePath).toBe("/stores/embedded-agent.json");
      expect(hoisted.loadSessionStoreMock).toHaveBeenCalledTimes(1);
    });
@@ -33,24 +33,3 @@ index 0065ef4..e18a73c 100644
 +    expect(result.storePath).toBe("/stores/embedded-agent.json");
 +  });
  });
-diff --git a/src/agents/command/session.ts b/src/agents/command/session.ts
-index 0f0c700..5e868b4 100644
---- a/src/agents/command/session.ts
-+++ b/src/agents/command/session.ts
-@@ -138,10 +138,12 @@ export function resolveSessionKeyForRequest(opts: {
-   const mainKey = normalizeMainKey(sessionCfg?.mainKey);
-   const explicitSessionKey =
-     opts.sessionKey?.trim() ||
--    resolveExplicitAgentSessionKey({
--      cfg: opts.cfg,
--      agentId: opts.agentId,
--    });
-+    (opts.sessionId
-+      ? undefined
-+      : resolveExplicitAgentSessionKey({
-+          cfg: opts.cfg,
-+          agentId: opts.agentId,
-+        }));
-   const storeAgentId = resolveAgentIdFromSessionKey(explicitSessionKey);
-   const storePath = resolveStorePath(sessionCfg?.store, {
-     agentId: storeAgentId,
