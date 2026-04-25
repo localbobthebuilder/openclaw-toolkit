@@ -1589,62 +1589,62 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
 
     const required = [
       {
-        label: 'At least one endpoint configured',
+        label: 'At least one endpoint defined',
         complete: endpoints.length > 0,
         note: endpoints.length > 0
-          ? `${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'} configured.`
-          : 'Add your first endpoint in Configuration > Endpoints.'
+          ? `${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'} defined.`
+          : 'Create your first endpoint in Configuration > Endpoints so the dashboard has a place to run models.'
       },
       {
-        label: 'Default endpoint selected',
+        label: 'Default endpoint chosen',
         complete: !!defaultEndpoint,
         note: defaultEndpoint
-          ? `${defaultEndpoint.key} is the default endpoint.`
-          : 'Choose which endpoint should be preferred first.'
+          ? `${defaultEndpoint.key} is the preferred endpoint for new work.`
+          : 'Pick the endpoint that should be preferred first when agents need a home.'
       },
       {
         label: 'Default endpoint has models',
         complete: defaultEndpointModelCount > 0,
         note: defaultEndpoint
           ? defaultEndpointModelCount > 0
-            ? `${defaultEndpointModelCount} local or hosted model${defaultEndpointModelCount === 1 ? '' : 's'} configured.`
-            : 'Add at least one local or hosted model to the default endpoint.'
-          : 'Pick a default endpoint first.'
+            ? `${defaultEndpointModelCount} local or hosted model${defaultEndpointModelCount === 1 ? '' : 's'} attached to the default endpoint.`
+            : 'Add at least one local or hosted model to the default endpoint so agents have something to use.'
+          : 'Choose a default endpoint first.'
       },
       {
-        label: 'Workspaces defined',
+        label: 'At least one workspace defined',
         complete: workspaces.length > 0,
         note: workspaces.length > 0
           ? `${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} defined.`
-          : 'Create at least one shared or private workspace in Configuration > Workspaces.'
+          : 'Create at least one shared or private workspace in Configuration > Workspaces so agents have home bases.'
       },
       {
-        label: 'Workspace paths filled in',
+        label: 'Every workspace has a path',
         complete: workspaces.length > 0 && workspacePathsConfigured === workspaces.length,
         note: workspaces.length > 0
           ? workspacePathsConfigured === workspaces.length
             ? 'Every workspace has a home-base path.'
-            : `${workspaces.length - workspacePathsConfigured} workspace${workspaces.length - workspacePathsConfigured === 1 ? ' is' : 's are'} missing a path.`
+            : `${workspaces.length - workspacePathsConfigured} workspace${workspaces.length - workspacePathsConfigured === 1 ? ' is' : 's are'} missing a home-base path.`
           : 'Create a workspace first.'
       },
       {
-        label: 'At least one agent configured',
+        label: 'At least one agent defined',
         complete: agentIds.length > 0,
         note: agentIds.length > 0
-          ? `${agentIds.length} managed agent${agentIds.length === 1 ? '' : 's'} configured.`
-          : 'Add your first managed agent in Configuration > Agents.'
+          ? `${agentIds.length} managed agent${agentIds.length === 1 ? '' : 's'} defined.`
+          : 'Add your first managed agent in Configuration > Agents so the topology has something to route.'
       },
       {
-        label: 'Every agent has a workspace defined',
+        label: 'Every agent has a workspace',
         complete: agentIds.length > 0 && agentsWithWorkspace.length === agentIds.length,
         note: agentIds.length > 0
           ? agentsWithWorkspace.length === agentIds.length
             ? 'Every managed agent has a workspace home base.'
-            : `${agentIds.length - agentsWithWorkspace.length} agent${agentIds.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace definition.`
+            : `${agentIds.length - agentsWithWorkspace.length} agent${agentIds.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace assignment.`
           : 'Add a managed agent first.'
       },
       {
-        label: 'Agents assigned to endpoints',
+        label: 'Every agent has endpoint placement',
         complete: agentIds.length > 0 && agentsWithEndpoint.length === agentIds.length,
         state: !defaultEndpoint || defaultEndpointAgentCount === 0
           ? 'error'
@@ -1652,9 +1652,9 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
             ? 'success'
             : 'warning',
         note: !defaultEndpoint
-          ? 'Pick a default endpoint first.'
+          ? 'Choose a default endpoint first.'
           : defaultEndpointAgentCount === 0
-            ? 'The default endpoint has no agents assigned yet.'
+            ? 'The default endpoint has no agents assigned yet, so new work has nowhere to land.'
             : agentsWithEndpoint.length === agentIds.length
               ? 'Every managed agent is placed on an endpoint.'
               : `${agentIds.length - agentsWithEndpoint.length} agent${agentIds.length - agentsWithEndpoint.length === 1 ? ' is' : 's are'} still missing endpoint placement.`
@@ -1669,7 +1669,7 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
           ? telegramConfiguredByStatus
             ? 'Telegram setup status reports a configured live account.'
             : 'Telegram has a default account and at least one configured account.'
-          : 'Optional. Configure this only if you want Telegram routing.'
+          : 'Optional. Set this up only if you want Telegram routing and chat-based automation.'
       },
       {
         label: 'Voice notes configured',
@@ -1678,14 +1678,14 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
           ? voiceNotes.enabled
             ? `Voice notes are enabled with ${voiceNotes.mode} and ${voiceNotes.whisperModel}.`
             : 'Voice notes are disabled, which is fine if you do not need them.'
-          : 'Voice notes are enabled, but mode or model still needs attention.'
+          : 'Voice notes are enabled, but the mode or model still needs attention.'
       },
       {
         label: 'Additional toolsets defined',
         complete: toolsetsConfigured,
         note: toolsetsConfigured
           ? `${customToolsetCount} custom toolset${customToolsetCount === 1 ? '' : 's'} defined beyond the built-in minimal baseline.`
-          : 'Only the built-in minimal toolset exists. Add custom toolsets if you want more specific allow/deny layers.'
+          : 'Only the built-in minimal toolset exists. Add custom toolsets when you want more specific allow/deny layers.'
       }
     ];
 
