@@ -1,5 +1,5 @@
 import { html } from 'lit';
-import { renderCardSection } from './toolkit-dashboard-ui-helpers';
+import { renderCardSection, renderFormGroup, renderHelpText } from './toolkit-dashboard-ui-helpers';
 
 type MarkdownTemplateLibraryParams = {
   title: string;
@@ -29,6 +29,37 @@ type MarkdownFileEditorsParams = {
   onSelectTemplate: (fileName: string, templateKey: string | null) => void;
   onUpdateFile: (fileName: string, value: string) => void;
 };
+
+function renderMarkdownFileEditor(params: {
+  scopeLabel: string;
+  fileName: string;
+  helpText: string;
+  templateKeys: string[];
+  selectedTemplateKey: string;
+  effectiveValue: string;
+  placeholder: string;
+  rows: number;
+  isTemplateMode: boolean;
+  onSelectTemplate: (templateKey: string | null) => void;
+  onUpdateFile: (value: string) => void;
+}) {
+  return renderFormGroup({
+    label: params.fileName,
+    control: html`
+      ${renderHelpText(params.helpText, 'margin-top: 0; margin-bottom: 6px;')}
+      <select style="margin-bottom: 8px;" @change=${(e: any) => params.onSelectTemplate(e.target.value || null)}>
+        <option value="">Custom markdown</option>
+        ${params.templateKeys.map((templateKey) => html`<option value=${templateKey} ?selected=${params.selectedTemplateKey === templateKey}>Template: ${templateKey}</option>`)}
+      </select>
+      ${params.isTemplateMode ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 6px;">Using template <code>${params.selectedTemplateKey}</code>. Switch to Custom markdown to edit ${params.scopeLabel}-specific content without changing the shared template.</div>` : ''}
+      <textarea rows=${params.rows} .value=${params.effectiveValue} ?readonly=${params.isTemplateMode} placeholder=${params.isTemplateMode ? '' : params.placeholder} @input=${(e: any) => {
+        if (!params.isTemplateMode) {
+          params.onUpdateFile(e.target.value);
+        }
+      }}></textarea>
+    `
+  });
+}
 
 export function renderMarkdownTemplateLibrarySection(params: MarkdownTemplateLibraryParams) {
   return renderCardSection(params.title, html`
@@ -65,22 +96,19 @@ export function renderMarkdownFileEditors(params: MarkdownFileEditorsParams) {
       const templateKeys = params.getTemplateKeys(fileName);
       const isTemplateMode = selectedTemplateKey.length > 0;
       const effectiveValue = params.getEffectiveValue(fileName, selectedTemplateKey);
-      return html`
-        <div class="form-group">
-          <label>${fileName}</label>
-          <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${params.getHelpText(fileName)}</div>
-          <select style="margin-bottom: 8px;" @change=${(e: any) => params.onSelectTemplate(fileName, e.target.value || null)}>
-            <option value="">Custom markdown</option>
-            ${templateKeys.map((templateKey) => html`<option value=${templateKey} ?selected=${selectedTemplateKey === templateKey}>Template: ${templateKey}</option>`)}
-          </select>
-          ${isTemplateMode ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 6px;">Using template <code>${selectedTemplateKey}</code>. Switch to Custom markdown to edit ${params.scopeLabel}-specific content without changing the shared template.</div>` : ''}
-          <textarea rows=${params.getRows(fileName)} .value=${effectiveValue} ?readonly=${isTemplateMode} placeholder=${isTemplateMode ? '' : params.getPlaceholder(fileName)} @input=${(e: any) => {
-            if (!isTemplateMode) {
-              params.onUpdateFile(fileName, e.target.value);
-            }
-          }}></textarea>
-        </div>
-      `;
+      return renderMarkdownFileEditor({
+        scopeLabel: params.scopeLabel,
+        fileName,
+        helpText: params.getHelpText(fileName),
+        templateKeys,
+        selectedTemplateKey,
+        effectiveValue,
+        placeholder: params.getPlaceholder(fileName),
+        rows: params.getRows(fileName),
+        isTemplateMode,
+        onSelectTemplate: (templateKey) => params.onSelectTemplate(fileName, templateKey),
+        onUpdateFile: (value) => params.onUpdateFile(fileName, value)
+      });
     })}
   `;
 }
