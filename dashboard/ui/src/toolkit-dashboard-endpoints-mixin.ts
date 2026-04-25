@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderActionRow, renderHelpText, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderFormGroup, renderHelpText, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -84,10 +84,10 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                         </label>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Endpoint Role</label>
-                    ${renderHelpText('The default endpoint is the main workbench the toolkit prefers first when an agent has not been moved elsewhere.', 'margin-top: 0;')}
-                </div>
+                ${renderFormGroup({
+                  label: 'Endpoint Role',
+                  control: renderHelpText('The default endpoint is the main workbench the toolkit prefers first when an agent has not been moved elsewhere.', 'margin-top: 0;')
+                })}
             </div>
 
             <div class="form-group" style="margin-top: 16px;">
@@ -162,20 +162,21 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                         </label>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Runtime Pull Behavior</label>
-                    ${renderHelpText('When enabled, bootstrap can pull missing local models onto this machine if they fit the configured hardware budget.', 'margin-top: 0;')}
-                </div>
+                ${renderFormGroup({
+                  label: 'Runtime Pull Behavior',
+                  control: renderHelpText('When enabled, bootstrap can pull missing local models onto this machine if they fit the configured hardware budget.', 'margin-top: 0;')
+                })}
             </div>
 
-            <div class="form-group">
-                <label>Model Fit VRAM Headroom (MiB)</label>
+            ${renderFormGroup({
+              label: 'Model Fit VRAM Headroom (MiB)',
+              control: html`
                 <input
                   type="number"
                   min="0"
                   step="128"
                   .value=${typeof runtime.vramHeadroomMiB === 'number' ? String(Math.round(runtime.vramHeadroomMiB)) : ''}
-                @input=${(e: any) => {
+                  @input=${(e: any) => {
                     const parsed = Number(e.target.value);
                     if (Number.isFinite(parsed) && parsed >= 0) {
                       runtime.vramHeadroomMiB = Math.round(parsed);
@@ -184,8 +185,9 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                     }
                     this.requestUpdate();
                   }}>
-                ${renderHelpText('Per-endpoint override for probe headroom. Leave blank to use global setting.')}
-              </div>
+              `,
+              help: renderHelpText('Per-endpoint override for probe headroom. Leave blank to use global setting.')
+            })}
             ${renderSectionHeader({
               title: 'Local Runtime Models',
               intro: "Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine. When a model has fallbacks, both toolkit fit checks and OpenClaw runtime fallbacks follow the order shown here.",

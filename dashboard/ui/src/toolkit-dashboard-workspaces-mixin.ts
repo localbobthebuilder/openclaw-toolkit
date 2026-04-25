@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
 import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
-import { renderHelpText, renderSectionHeader, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderFormGroup, renderHelpText, renderSectionHeader, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -99,55 +99,57 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
           </div>
 
           <div class="grid-2">
-            <div class="form-group">
-              <label>Workspace Name</label>
-              <input type="text" .value=${workspace.name || ''} @input=${(e: any) => { workspace.name = e.target.value; this.requestUpdate(); }}>
-            </div>
-            <div class="form-group">
-              <label>Workspace ID</label>
-              <input type="text" .value=${workspace.id || ''} @input=${(e: any) => {
+            ${renderFormGroup({
+              label: 'Workspace Name',
+              control: html`<input type="text" .value=${workspace.name || ''} @input=${(e: any) => { workspace.name = e.target.value; this.requestUpdate(); }}>`
+            })}
+            ${renderFormGroup({
+              label: 'Workspace ID',
+              control: html`<input type="text" .value=${workspace.id || ''} @input=${(e: any) => {
                 const nextId = e.target.value;
                 this.renameWorkspaceIdEverywhere(previousWorkspaceId, nextId);
                 workspace.id = nextId;
                 this.requestUpdate();
-              }}>
-            </div>
+              }}>`
+            })}
           </div>
 
           <div class="grid-2">
-            <div class="form-group">
-              <label>Workspace Mode</label>
-              <select @change=${(e: any) => {
-                const nextMode = e.target.value === 'private' ? 'private' : 'shared';
-                if (nextMode === 'private' && workspace.mode !== 'private' && this.getWorkspaceAgentIds(workspace).length > 1) {
-                  alert('A private workspace can only host one primary agent. Move the extra agents to other workspaces first.');
-                  e.target.value = workspace.mode;
-                  return;
-                }
-                workspace.mode = nextMode;
-                if (workspace.mode === 'shared') {
-                  workspace.sharedWorkspaceIds = [];
-                } else if (!Array.isArray(workspace.sharedWorkspaceIds)) {
-                  workspace.sharedWorkspaceIds = [];
-                }
-                this.normalizeWorkspaceAssignments(this.config);
-                const messages = occupantEntries
-                  .map(({ agent }: any) => this.enforceWorkspaceSandboxPolicy(agent, workspace))
-                  .filter((message: string) => message.length > 0);
-                if (messages.length > 0) {
-                  alert(messages.join('\n\n'));
-                }
-                this.requestUpdate();
-              }}>
-                <option value="shared" ?selected=${workspace.mode === 'shared'}>shared</option>
-                <option value="private" ?selected=${workspace.mode === 'private'}>private</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>${workspace.mode === 'private' ? 'Home Workspace Path' : 'Shared Workspace Path'}</label>
-              <input type="text" .value=${workspace.path || ''} @input=${(e: any) => { workspace.path = e.target.value; this.requestUpdate(); }}>
-              ${renderHelpText('This exact path becomes the workspace home base path used by OpenClaw. It can be any valid path; it does not need to match the agent name.')}
-            </div>
+            ${renderFormGroup({
+              label: 'Workspace Mode',
+              control: html`
+                <select @change=${(e: any) => {
+                  const nextMode = e.target.value === 'private' ? 'private' : 'shared';
+                  if (nextMode === 'private' && workspace.mode !== 'private' && this.getWorkspaceAgentIds(workspace).length > 1) {
+                    alert('A private workspace can only host one primary agent. Move the extra agents to other workspaces first.');
+                    e.target.value = workspace.mode;
+                    return;
+                  }
+                  workspace.mode = nextMode;
+                  if (workspace.mode === 'shared') {
+                    workspace.sharedWorkspaceIds = [];
+                  } else if (!Array.isArray(workspace.sharedWorkspaceIds)) {
+                    workspace.sharedWorkspaceIds = [];
+                  }
+                  this.normalizeWorkspaceAssignments(this.config);
+                  const messages = occupantEntries
+                    .map(({ agent }: any) => this.enforceWorkspaceSandboxPolicy(agent, workspace))
+                    .filter((message: string) => message.length > 0);
+                  if (messages.length > 0) {
+                    alert(messages.join('\n\n'));
+                  }
+                  this.requestUpdate();
+                }}>
+                  <option value="shared" ?selected=${workspace.mode === 'shared'}>shared</option>
+                  <option value="private" ?selected=${workspace.mode === 'private'}>private</option>
+                </select>
+              `
+            })}
+            ${renderFormGroup({
+              label: workspace.mode === 'private' ? 'Home Workspace Path' : 'Shared Workspace Path',
+              control: html`<input type="text" .value=${workspace.path || ''} @input=${(e: any) => { workspace.path = e.target.value; this.requestUpdate(); }}>`,
+              help: renderHelpText('This exact path becomes the workspace home base path used by OpenClaw. It can be any valid path; it does not need to match the agent name.')
+            })}
           </div>
 
           <div class="grid-2">

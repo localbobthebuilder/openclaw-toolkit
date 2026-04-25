@@ -132,6 +132,21 @@ export function renderSectionHeader(params: {
   `;
 }
 
+export function renderFormGroup(params: {
+  label: MaybeTemplate;
+  control: MaybeTemplate;
+  help?: MaybeTemplate;
+  style?: string;
+}) {
+  return html`
+    <div class="form-group" style=${params.style ?? ''}>
+      <label>${params.label}</label>
+      ${params.control}
+      ${params.help !== undefined ? html`<div class="help-text">${params.help}</div>` : nothing}
+    </div>
+  `;
+}
+
 export function renderModalShell(params: {
   title: MaybeTemplate;
   body: MaybeTemplate;
