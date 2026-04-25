@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
-import { renderPreviewCard, renderPreviewTags, renderSelectableTagList } from './toolkit-dashboard-ui-helpers';
+import { renderHelpText, renderPreviewCard, renderPreviewTags, renderSelectableTagList } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -55,7 +55,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
 
         <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
           <div class="card-header"><h3>Toolsets</h3></div>
-          <div class="help-text" style="margin-top: 0; margin-bottom: 14px;">The global <code>minimal</code> toolset is always applied first. Toolsets lower in the list win when the same tool is both allowed and denied.</div>
+          ${renderHelpText(html`The global <code>minimal</code> toolset is always applied first. Toolsets lower in the list win when the same tool is both allowed and denied.`, 'margin-top: 0; margin-bottom: 14px;')}
 
           <div class="form-group">
             <label>Applied Toolsets</label>
@@ -155,7 +155,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                 `
               }
             ], undefined, html`<span class="badge">Final Layer</span>`)}
-            <div class="help-text" style="margin-top: 8px;">These direct per-agent tool picks merge after all applied toolsets, so they are the easiest way to make one-off tweaks.</div>
+            ${renderHelpText('These direct per-agent tool picks merge after all applied toolsets, so they are the easiest way to make one-off tweaks.', 'margin-top: 8px;')}
           </div>
 
           <div class="form-group">
@@ -181,7 +181,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
           </div>
 
           ${effectiveToolState.explicitTools ? html`
-            <div class="help-text" style="margin-top: 0;">This agent also has a raw <code>tools</code> block in config. Those direct OpenClaw overrides still apply after the combined toolkit toolset shown above.</div>
+            ${renderHelpText(html`This agent also has a raw <code>tools</code> block in config. Those direct OpenClaw overrides still apply after the combined toolkit toolset shown above.`, 'margin-top: 0;')}
           ` : ''}
         </div>
       `;

@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
 import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
-import { renderSectionHeader, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderHelpText, renderSectionHeader, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -95,9 +95,7 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
                 : 'this is a collaboration area, not a private boundary. The toolkit forces sandbox off for agents who live here so they can work beyond a single private home-base path.',
               introStyle: 'font-size: 0.8rem; color: #888; margin-bottom: 0; margin-top: 0;'
             })}
-            <div class="help-text" style="margin-top: 10px;">
-              OpenClaw uses the exact configured workspace path directly. It does not require the private workspace name or path to match the agent ID.
-            </div>
+            ${renderHelpText('OpenClaw uses the exact configured workspace path directly. It does not require the private workspace name or path to match the agent ID.', 'margin-top: 10px;')}
           </div>
 
           <div class="grid-2">
@@ -148,7 +146,7 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
             <div class="form-group">
               <label>${workspace.mode === 'private' ? 'Home Workspace Path' : 'Shared Workspace Path'}</label>
               <input type="text" .value=${workspace.path || ''} @input=${(e: any) => { workspace.path = e.target.value; this.requestUpdate(); }}>
-              <div class="help-text">This exact path becomes the workspace home base path used by OpenClaw. It can be any valid path; it does not need to match the agent name.</div>
+              ${renderHelpText('This exact path becomes the workspace home base path used by OpenClaw. It can be any valid path; it does not need to match the agent name.')}
             </div>
           </div>
 
@@ -164,14 +162,14 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
                 <input type="checkbox" ?checked=${!!workspace.manageWorkspaceAgentsMd} @change=${(e: any) => { workspace.manageWorkspaceAgentsMd = e.target.checked; this.requestUpdate(); }}>
                 Manage workspace markdown files
               </label>
-              <div class="help-text">Workspace markdown lives under <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>.</div>
+              ${renderHelpText(html`Workspace markdown lives under <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>.`)}
             </div>
           </div>
 
           ${workspace.mode === 'shared' ? html`
             <div class="form-group">
               <label>Primary Agents in this Shared Workspace</label>
-              <div class="help-text" style="margin-bottom: 10px;">Assigning an agent here makes this shared workspace the agent's home base and forces sandbox off so collaboration is not blocked by a private workspace restriction.</div>
+              ${renderHelpText('Assigning an agent here makes this shared workspace the agent\'s home base and forces sandbox off so collaboration is not blocked by a private workspace restriction.', 'margin-bottom: 10px;')}
               ${renderSelectableTagList(
                 occupantEntries,
                 ({ agent }: any) => html`
@@ -210,11 +208,11 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
                     <option value=${agent.id} ?selected=${occupantIds.includes(String(agent?.id || ''))}>${agent.name || agent.id}</option>
                   `)}
                 </select>
-                <div class="help-text">A private workspace can host only one primary agent at a time. If that agent was previously sandbox-off, the toolkit turns sandbox back on with workspace-write mode unless shared collaboration access is attached below.</div>
+                ${renderHelpText('A private workspace can host only one primary agent at a time. If that agent was previously sandbox-off, the toolkit turns sandbox back on with workspace-write mode unless shared collaboration access is attached below.')}
               </div>
               <div class="form-group">
                 <label>Shared Workspaces Accessible from this Private Workspace</label>
-                <div class="help-text" style="margin-bottom: 10px;">Granting shared collaboration access means the agent must reach paths outside its private home base, so the toolkit will turn sandbox off for the occupying agent.</div>
+                ${renderHelpText('Granting shared collaboration access means the agent must reach paths outside its private home base, so the toolkit will turn sandbox off for the occupying agent.', 'margin-bottom: 10px;')}
                 ${renderSelectableTagList(
                   selectedSharedAccessIds,
                   (sharedWorkspaceId: string) => {

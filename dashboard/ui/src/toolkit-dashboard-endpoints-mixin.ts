@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderActionRow, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderHelpText, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -86,7 +86,7 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 </div>
                 <div class="form-group">
                     <label>Endpoint Role</label>
-                    <div class="help-text" style="margin-top: 0;">The default endpoint is the main workbench the toolkit prefers first when an agent has not been moved elsewhere.</div>
+                    ${renderHelpText('The default endpoint is the main workbench the toolkit prefers first when an agent has not been moved elsewhere.', 'margin-top: 0;')}
                 </div>
             </div>
 
@@ -164,7 +164,7 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 </div>
                 <div class="form-group">
                     <label>Runtime Pull Behavior</label>
-                    <div class="help-text" style="margin-top: 0;">When enabled, bootstrap can pull missing local models onto this machine if they fit the configured hardware budget.</div>
+                    ${renderHelpText('When enabled, bootstrap can pull missing local models onto this machine if they fit the configured hardware budget.', 'margin-top: 0;')}
                 </div>
             </div>
 
@@ -175,7 +175,7 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                   min="0"
                   step="128"
                   .value=${typeof runtime.vramHeadroomMiB === 'number' ? String(Math.round(runtime.vramHeadroomMiB)) : ''}
-                  @input=${(e: any) => {
+                @input=${(e: any) => {
                     const parsed = Number(e.target.value);
                     if (Number.isFinite(parsed) && parsed >= 0) {
                       runtime.vramHeadroomMiB = Math.round(parsed);
@@ -184,7 +184,7 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                     }
                     this.requestUpdate();
                   }}>
-                <div class="help-text">Per-endpoint override for probe headroom. Leave blank to use global setting.</div>
+                ${renderHelpText('Per-endpoint override for probe headroom. Leave blank to use global setting.')}
               </div>
             ${renderSectionHeader({
               title: 'Local Runtime Models',
