@@ -3,6 +3,7 @@ import {
   VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES,
   VALID_WORKSPACE_MARKDOWN_FILES
 } from './toolkit-dashboard-constants';
+import { renderPreviewCard, renderPreviewRows, renderPreviewTags } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -454,19 +455,17 @@ export const ToolkitDashboardTopologyMixin = <TBase extends Constructor<LitEleme
             Delegation enabled for this agent
           </label>
           <div class="help-text" style="margin-top: 8px;">Turning delegation off pauses this agent's ability to spawn or delegate, but it keeps the configured allowed agents in place.</div>
-          <div class="toolset-preview-rows" style="margin-top: 12px;">
-            <div class="toolset-preview-row">
-              <div class="toolset-preview-label">Allowed Delegatees</div>
-              ${delegateTargets.length === 0
-                ? html`<div class="toolset-preview-empty">No delegate targets configured.</div>`
-                : html`<div class="toolset-preview-tags">
-                    ${delegateTargets.map((targetId: string) => {
-                      const targetEntry = this.getTopologyAgentEntryById(targetId);
-                      return html`<div class="tag">${targetEntry ? `${targetEntry.name} (${targetId})` : targetId}</div>`;
-                    })}
-                  </div>`}
-            </div>
-          </div>
+          ${renderPreviewRows([{
+            label: 'Allowed Delegatees',
+            body: renderPreviewTags(
+              delegateTargets,
+              (targetId: string) => {
+                const targetEntry = this.getTopologyAgentEntryById(targetId);
+                return html`<div class="tag">${targetEntry ? `${targetEntry.name} (${targetId})` : targetId}</div>`;
+              },
+              html`No delegate targets configured.`
+            )
+          }], 'margin-top: 12px;')}
         </div>
 
         <div class="topology-inspector-section">
@@ -481,46 +480,46 @@ export const ToolkitDashboardTopologyMixin = <TBase extends Constructor<LitEleme
                 ${appliedToolsets.map((toolset: any) => {
                   const allowedTools = this.normalizeToolNameList(toolset.allow);
                   const deniedTools = this.normalizeToolNameList(toolset.deny);
-                  return html`
-                    <div class="applied-toolset-card">
-                      <div class="applied-toolset-header">
-                        <strong>${toolset.name || toolset.key}</strong>
-                        ${toolset.key === 'minimal' ? html`<span class="badge">Global</span>` : ''}
-                      </div>
-                      <div class="toolset-preview-rows">
-                        <div class="toolset-preview-row">
-                          <div class="toolset-preview-label">Allow</div>
-                          ${allowedTools.length === 0
-                            ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
-                            : html`<div class="toolset-preview-tags">${allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
-                        </div>
-                        <div class="toolset-preview-row">
-                          <div class="toolset-preview-label">Deny</div>
-                          ${deniedTools.length === 0
-                            ? html`<div class="toolset-preview-empty">No denied tools.</div>`
-                            : html`<div class="toolset-preview-tags">${deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
-                        </div>
-                      </div>
-                    </div>
-                  `;
+                  return renderPreviewCard(toolset.name || toolset.key, [
+                    {
+                      label: 'Allow',
+                      body: renderPreviewTags(
+                        allowedTools,
+                        (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                        html`No allowed tools.`
+                      )
+                    },
+                    {
+                      label: 'Deny',
+                      body: renderPreviewTags(
+                        deniedTools,
+                        (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                        html`No denied tools.`
+                      )
+                    }
+                  ], undefined, toolset.key === 'minimal' ? html`<span class="badge">Global</span>` : '');
                 })}
               </div>
             </div>
           </details>
-          <div class="toolset-preview-rows" style="margin-top: 14px;">
-            <div class="toolset-preview-row">
-              <div class="toolset-preview-label">Final Allow</div>
-              ${effectiveToolState.allowedTools.length === 0
-                ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
-                : html`<div class="toolset-preview-tags">${effectiveToolState.allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
-            </div>
-            <div class="toolset-preview-row">
-              <div class="toolset-preview-label">Final Deny</div>
-              ${effectiveToolState.deniedTools.length === 0
-                ? html`<div class="toolset-preview-empty">No denied tools.</div>`
-                : html`<div class="toolset-preview-tags">${effectiveToolState.deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}</div>`}
-            </div>
-          </div>
+          ${renderPreviewRows([
+            {
+              label: 'Final Allow',
+              body: renderPreviewTags(
+                effectiveToolState.allowedTools,
+                (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                html`No allowed tools.`
+              )
+            },
+            {
+              label: 'Final Deny',
+              body: renderPreviewTags(
+                effectiveToolState.deniedTools,
+                (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                html`No denied tools.`
+              )
+            }
+          ], 'margin-top: 14px;')}
         </div>
 
         <div class="topology-inspector-section">

@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
+import { renderPreviewCard, renderPreviewTags } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -65,41 +66,28 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                 const agentToolsetIndex = isMinimal ? -1 : toolsetKeys.indexOf(toolset.key);
                 const allowedTools = this.normalizeToolNameList(toolset.allow);
                 const deniedTools = this.normalizeToolNameList(toolset.deny);
-                return html`
-                  <div class="applied-toolset-card">
-                    <div class="applied-toolset-header">
-                      <strong>${toolset.name || toolset.key}</strong>
-                      ${isMinimal ? html`<span class="badge">Global</span>` : ''}
-                      ${!isMinimal ? html`
-                        <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex <= 0} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, -1)}>Up</button>
-                        <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex < 0 || agentToolsetIndex >= toolsetKeys.length - 1} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, 1)}>Down</button>
-                        <button class="btn btn-danger" style="padding: 2px 6px;" @click=${() => { agent.toolsetKeys.splice(agentToolsetIndex, 1); this.requestUpdate(); }}>Remove</button>
-                      ` : ''}
-                    </div>
-                    <div class="toolset-preview-rows">
-                      <div class="toolset-preview-row">
-                        <div class="toolset-preview-label">Allow</div>
-                        ${allowedTools.length === 0
-                          ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
-                          : html`
-                            <div class="toolset-preview-tags">
-                              ${allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                            </div>
-                          `}
-                      </div>
-                      <div class="toolset-preview-row">
-                        <div class="toolset-preview-label">Deny</div>
-                        ${deniedTools.length === 0
-                          ? html`<div class="toolset-preview-empty">No denied tools.</div>`
-                          : html`
-                            <div class="toolset-preview-tags">
-                              ${deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                            </div>
-                          `}
-                      </div>
-                    </div>
-                  </div>
-                `;
+                return renderPreviewCard(toolset.name || toolset.key, [
+                  {
+                    label: 'Allow',
+                    body: renderPreviewTags(
+                      allowedTools,
+                      (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                      html`No allowed tools.`
+                    )
+                  },
+                  {
+                    label: 'Deny',
+                    body: renderPreviewTags(
+                      deniedTools,
+                      (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                      html`No denied tools.`
+                    )
+                  }
+                ], undefined, isMinimal ? html`<span class="badge">Global</span>` : '', '', !isMinimal ? html`
+                  <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex <= 0} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, -1)}>Up</button>
+                  <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex < 0 || agentToolsetIndex >= toolsetKeys.length - 1} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, 1)}>Down</button>
+                  <button class="btn btn-danger" style="padding: 2px 6px;" @click=${() => { agent.toolsetKeys.splice(agentToolsetIndex, 1); this.requestUpdate(); }}>Remove</button>
+                ` : '');
               })}
             </div>
             <div style="margin-top: 10px;">
@@ -120,26 +108,20 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
 
           <div class="form-group">
             <label>Direct Tool Overrides</label>
-            <div class="applied-toolset-card">
-              <div class="applied-toolset-header">
-                <strong>Direct Tool Overrides</strong>
-                <span class="badge">Final Layer</span>
-              </div>
-              <div class="toolset-preview-rows">
-                <div class="toolset-preview-row">
-                  <div class="toolset-preview-label">Allow</div>
-                  ${directAllowedTools.length === 0
-                    ? html`<div class="toolset-preview-empty">No direct allow overrides.</div>`
-                    : html`
-                      <div class="toolset-preview-tags">
-                        ${directAllowedTools.map((toolId: string) => html`
-                          <div class="tag">
-                            ${this.renderToolLabel(toolId)}
-                            <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'allow', toolId)}>×</span>
-                          </div>
-                        `)}
+            ${renderPreviewCard('Direct Tool Overrides', [
+              {
+                label: 'Allow',
+                body: html`
+                  ${renderPreviewTags(
+                    directAllowedTools,
+                    (toolId: string) => html`
+                      <div class="tag">
+                        ${this.renderToolLabel(toolId)}
+                        <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'allow', toolId)}>×</span>
                       </div>
-                    `}
+                    `,
+                    html`No direct allow overrides.`
+                  )}
                   <div style="margin-top: 6px;">
                     <select @change=${(e: any) => {
                       const value = e.target.value;
@@ -152,21 +134,21 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                       ${availableDirectAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
                     </select>
                   </div>
-                </div>
-                <div class="toolset-preview-row">
-                  <div class="toolset-preview-label">Deny</div>
-                  ${directDeniedTools.length === 0
-                    ? html`<div class="toolset-preview-empty">No direct deny overrides.</div>`
-                    : html`
-                      <div class="toolset-preview-tags">
-                        ${directDeniedTools.map((toolId: string) => html`
-                          <div class="tag">
-                            ${this.renderToolLabel(toolId)}
-                            <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'deny', toolId)}>×</span>
-                          </div>
-                        `)}
+                `
+              },
+              {
+                label: 'Deny',
+                body: html`
+                  ${renderPreviewTags(
+                    directDeniedTools,
+                    (toolId: string) => html`
+                      <div class="tag">
+                        ${this.renderToolLabel(toolId)}
+                        <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'deny', toolId)}>×</span>
                       </div>
-                    `}
+                    `,
+                    html`No direct deny overrides.`
+                  )}
                   <div style="margin-top: 6px;">
                     <select @change=${(e: any) => {
                       const value = e.target.value;
@@ -179,42 +161,32 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                       ${availableDirectDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
                     </select>
                   </div>
-                </div>
-              </div>
-            </div>
+                `
+              }
+            ], undefined, html`<span class="badge">Final Layer</span>`)}
             <div class="help-text" style="margin-top: 8px;">These direct per-agent tool picks merge after all applied toolsets, so they are the easiest way to make one-off tweaks.</div>
           </div>
 
           <div class="form-group">
             <label>Combined Toolset</label>
-            <div class="applied-toolset-card">
-              <div class="applied-toolset-header">
-                <strong>Combined Toolset</strong>
-                <span class="badge">Final</span>
-              </div>
-              <div class="toolset-preview-rows">
-                <div class="toolset-preview-row">
-                  <div class="toolset-preview-label">Allow</div>
-                  ${effectiveToolState.allowedTools.length === 0
-                    ? html`<div class="toolset-preview-empty">No tools allowed yet.</div>`
-                    : html`
-                      <div class="toolset-preview-tags">
-                        ${effectiveToolState.allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                      </div>
-                    `}
-                </div>
-                <div class="toolset-preview-row">
-                  <div class="toolset-preview-label">Deny</div>
-                  ${effectiveToolState.deniedTools.length === 0
-                    ? html`<div class="toolset-preview-empty">No explicit denies.</div>`
-                    : html`
-                      <div class="toolset-preview-tags">
-                        ${effectiveToolState.deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                      </div>
-                    `}
-                </div>
-              </div>
-            </div>
+            ${renderPreviewCard('Combined Toolset', [
+              {
+                label: 'Allow',
+                body: renderPreviewTags(
+                  effectiveToolState.allowedTools,
+                  (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                  html`No tools allowed yet.`
+                )
+              },
+              {
+                label: 'Deny',
+                body: renderPreviewTags(
+                  effectiveToolState.deniedTools,
+                  (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                  html`No explicit denies.`
+                )
+              }
+            ], undefined, html`<span class="badge">Final</span>`)}
           </div>
 
           ${effectiveToolState.explicitTools ? html`

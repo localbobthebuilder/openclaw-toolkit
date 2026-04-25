@@ -56,13 +56,15 @@ export function renderPreviewCard(
   columns: Array<{ label: string; body: MaybeTemplate }>,
   footer?: MaybeTemplate,
   badge?: MaybeTemplate,
-  style = ''
+  style = '',
+  actions?: MaybeTemplate
 ) {
   return html`
     <div class="applied-toolset-card" style=${style}>
       <div class="applied-toolset-header">
         <strong>${title}</strong>
         ${badge ?? nothing}
+        ${actions ?? nothing}
       </div>
       <div class="toolset-preview-rows">
         ${columns.map((column) => html`
@@ -74,5 +76,30 @@ export function renderPreviewCard(
       </div>
       ${footer !== undefined ? footer : nothing}
     </div>
+  `;
+}
+
+export function renderPreviewRows(rows: Array<{ label: string; body: MaybeTemplate }>, style = '') {
+  return html`
+    <div class="toolset-preview-rows" style=${style}>
+      ${rows.map((row) => html`
+        <div class="toolset-preview-row">
+          <div class="toolset-preview-label">${row.label}</div>
+          ${row.body}
+        </div>
+      `)}
+    </div>
+  `;
+}
+
+export function renderPreviewTags<T>(
+  items: readonly T[],
+  renderItem: (item: T, index: number) => MaybeTemplate,
+  emptyText?: MaybeTemplate
+) {
+  return html`
+    ${items.length === 0
+      ? (emptyText !== undefined ? html`<div class="toolset-preview-empty">${emptyText}</div>` : nothing)
+      : html`<div class="toolset-preview-tags">${items.map((item, index) => renderItem(item, index))}</div>`}
   `;
 }
