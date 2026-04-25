@@ -1489,6 +1489,129 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
     return 'Shared collaboration home workspace';
   }
 
+  getConfigurationChecklist() {
+    const endpoints = this.getConfigEndpoints();
+    const workspaces = this.getWorkspaces();
+    const agents = this.getManagedAgentEntries();
+    const endpointAgentIds = new Set(
+      endpoints.flatMap((endpoint: any) => this.getEndpointAgentIds(endpoint))
+    );
+    const defaultEndpoint = endpoints.find((endpoint: any) => endpoint?.default) || null;
+    const defaultEndpointModelCount = defaultEndpoint
+      ? this.getEndpointModels(defaultEndpoint).length + this.getEndpointHostedModels(defaultEndpoint).length
+      : 0;
+    const workspacePathsConfigured = workspaces.filter((workspace: any) => String(workspace?.path || '').trim().length > 0).length;
+    const agentsWithWorkspace = agents.filter(({ agent }: any) => !!this.getWorkspaceForAgentId(String(agent?.id || '')));
+    const agentsWithEndpoint = agents.filter(({ agent }: any) => endpointAgentIds.has(String(agent?.id || '')));
+    const telegramConfig = this.ensureTelegramConfig();
+    const telegramAccounts = Array.isArray(telegramConfig.accounts) ? telegramConfig.accounts : [];
+    const telegramSetupStatus = this.telegramSetupStatus && typeof this.telegramSetupStatus === 'object' ? this.telegramSetupStatus : null;
+    const telegramConfigured = !!telegramSetupStatus?.configured || (
+      telegramConfig.enabled !== false &&
+      String(telegramConfig.defaultAccount || '').trim().length > 0 &&
+      telegramAccounts.length > 0
+    );
+    const voiceNotes = this.ensureVoiceNotesConfig();
+    const voiceConfigured = !voiceNotes.enabled || (
+      String(voiceNotes.mode || '').trim().length > 0 &&
+      String(voiceNotes.whisperModel || '').trim().length > 0
+    );
+
+    const required = [
+      {
+        label: 'At least one endpoint configured',
+        complete: endpoints.length > 0,
+        note: endpoints.length > 0
+          ? `${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'} configured.`
+          : 'Add your first endpoint in Configuration > Endpoints.'
+      },
+      {
+        label: 'Default endpoint selected',
+        complete: !!defaultEndpoint,
+        note: defaultEndpoint
+          ? `${defaultEndpoint.key} is the default endpoint.`
+          : 'Choose which endpoint should be preferred first.'
+      },
+      {
+        label: 'Default endpoint has models',
+        complete: defaultEndpointModelCount > 0,
+        note: defaultEndpoint
+          ? defaultEndpointModelCount > 0
+            ? `${defaultEndpointModelCount} local or hosted model${defaultEndpointModelCount === 1 ? '' : 's'} configured.`
+            : 'Add at least one local or hosted model to the default endpoint.'
+          : 'Pick a default endpoint first.'
+      },
+      {
+        label: 'At least one workspace configured',
+        complete: workspaces.length > 0,
+        note: workspaces.length > 0
+          ? `${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} configured.`
+          : 'Add a shared or private workspace in Configuration > Workspaces.'
+      },
+      {
+        label: 'Workspace paths filled in',
+        complete: workspaces.length > 0 && workspacePathsConfigured === workspaces.length,
+        note: workspaces.length > 0
+          ? workspacePathsConfigured === workspaces.length
+            ? 'Every workspace has a home-base path.'
+            : `${workspaces.length - workspacePathsConfigured} workspace${workspaces.length - workspacePathsConfigured === 1 ? ' is' : 's are'} missing a path.`
+          : 'Create a workspace first.'
+      },
+      {
+        label: 'At least one agent configured',
+        complete: agents.length > 0,
+        note: agents.length > 0
+          ? `${agents.length} managed agent${agents.length === 1 ? '' : 's'} configured.`
+          : 'Add your first managed agent in Configuration > Agents.'
+      },
+      {
+        label: 'Agents assigned to workspaces',
+        complete: agents.length > 0 && agentsWithWorkspace.length === agents.length,
+        note: agents.length > 0
+          ? agentsWithWorkspace.length === agents.length
+            ? 'Every agent has a workspace home base.'
+            : `${agents.length - agentsWithWorkspace.length} agent${agents.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace assignment.`
+          : 'Add a managed agent first.'
+      },
+      {
+        label: 'Agents assigned to endpoints',
+        complete: agents.length > 0 && agentsWithEndpoint.length === agents.length,
+        note: agents.length > 0
+          ? agentsWithEndpoint.length === agents.length
+            ? 'Every agent is placed on an endpoint.'
+            : `${agents.length - agentsWithEndpoint.length} agent${agents.length - agentsWithEndpoint.length === 1 ? ' is' : 's are'} still missing endpoint placement.`
+          : 'Add a managed agent first.'
+      }
+    ];
+
+    const optional = [
+      {
+        label: 'Telegram routing configured',
+        complete: telegramConfigured,
+        note: telegramConfigured
+          ? 'Telegram has a default account and setup data.'
+          : 'Optional. Configure this only if you want Telegram routing.'
+      },
+      {
+        label: 'Voice notes configured',
+        complete: voiceConfigured,
+        note: voiceConfigured
+          ? voiceNotes.enabled
+            ? `Voice notes are enabled with ${voiceNotes.mode} and ${voiceNotes.whisperModel}.`
+            : 'Voice notes are disabled, which is fine if you do not need them.'
+          : 'Voice notes are enabled, but mode or model still needs attention.'
+      }
+    ];
+
+    const missingRequired = required.filter((item) => !item.complete).length;
+    return {
+      ready: missingRequired === 0,
+      missingRequired,
+      required,
+      optional
+    };
+  }
+
   enforceWorkspaceSandboxPolicy(agent: any, workspace: any) {
     if (!agent || !workspace) {
       return '';

@@ -46,6 +46,51 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
   }
 
 
+  renderConfigurationChecklist() {
+    const checklist = this.getConfigurationChecklist();
+    const renderChecklistItem = (item: any, optional = false) => html`
+      <div class="status-checklist-item ${item.complete ? 'done' : 'active'} ${optional ? 'optional' : 'required'}">
+        <div class="status-checklist-copy">
+          <div class="status-checklist-title">
+            <span class="status-indicator ${item.complete ? 'status-online' : 'status-offline'}"></span>
+            <span>${item.label}</span>
+          </div>
+          <div class="status-checklist-note">${item.note}</div>
+        </div>
+        <span class="badge">${item.complete ? 'configured' : optional ? 'optional' : 'needs setup'}</span>
+      </div>
+    `;
+
+    return html`
+      <details class="topology-expander" open>
+        <summary>
+          Configuration checklist
+          <span class="badge">${checklist.ready ? 'minimal ready' : `${checklist.missingRequired} required missing`}</span>
+        </summary>
+        <div class="topology-expander-body">
+          <div class="help-text" style="margin-top: 0;">
+            Bootstrap and runtime services are summarized above. This checklist tracks the dashboard-managed settings needed for minimal operation.
+          </div>
+
+          <div class="status-checklist-group">
+            <h4>Required for minimal operation</h4>
+            <div class="status-checklist">
+              ${checklist.required.map((item: any) => renderChecklistItem(item, false))}
+            </div>
+          </div>
+
+          <div class="status-checklist-group">
+            <h4>Optional integrations</h4>
+            <div class="status-checklist">
+              ${checklist.optional.map((item: any) => renderChecklistItem(item, true))}
+            </div>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+
   renderStatus() {
     const telegramLiveCheckState = this.getTelegramLiveCheckState();
     const sections = this.parseStatusOutput(this.statusOutput);
@@ -86,6 +131,8 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
             </div>
           </div>
         </div>
+
+        ${this.renderConfigurationChecklist()}
       `;
     }
 
@@ -97,6 +144,8 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
         </div>
         ${renderHelpText('Current dashboard health summary and service checks.', 'margin-top: 0;')}
       </div>
+
+      ${this.renderConfigurationChecklist()}
 
       ${sections.length === 0 ? html`
         <div class="card">

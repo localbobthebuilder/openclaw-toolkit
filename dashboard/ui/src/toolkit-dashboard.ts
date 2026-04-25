@@ -268,6 +268,16 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .topology-expander summary::-webkit-details-marker { display: none; }
     .topology-expander[open] summary { border-bottom: 1px solid #333; }
     .topology-expander-body { padding: 12px; }
+    .status-checklist-group { margin-top: 14px; }
+    .status-checklist-group h4 { margin: 0 0 10px; color: #d6e0e5; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .status-checklist { display: flex; flex-direction: column; gap: 10px; }
+    .status-checklist-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #333; border-radius: 10px; background: #171717; }
+    .status-checklist-item.done { border-color: #4caf50; }
+    .status-checklist-item.active { border-color: #00bcd4; }
+    .status-checklist-item.optional { border-style: dashed; }
+    .status-checklist-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .status-checklist-title { display: flex; align-items: center; gap: 8px; color: #fff; font-weight: 600; }
+    .status-checklist-note { color: #8a8a8a; font-size: 0.8rem; line-height: 1.45; }
     .topology-markdown-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
     .topology-markdown-tab { padding: 6px 10px; border: 1px solid #333; border-radius: 999px; background: #181818; color: #888; cursor: pointer; font-size: 0.78rem; }
     .topology-markdown-tab.active { background: #00bcd4; border-color: #00bcd4; color: #000; font-weight: 700; }
