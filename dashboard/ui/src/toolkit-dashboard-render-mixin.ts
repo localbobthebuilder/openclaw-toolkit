@@ -6,6 +6,7 @@ import { ToolkitDashboardTelegramMixin } from './toolkit-dashboard-telegram-mixi
 import { ToolkitDashboardTopologyCatalogMixin } from './toolkit-dashboard-topology-catalog-mixin';
 import { ToolkitDashboardTopologyAgentsMixin } from './toolkit-dashboard-topology-agents-mixin';
 import { ToolkitDashboardTopologyModelsMixin } from './toolkit-dashboard-topology-models-mixin';
+import { ToolkitDashboardStatusLogicMixin } from './toolkit-dashboard-status-logic-mixin';
 import { ToolkitDashboardTopologyMixin } from './toolkit-dashboard-topology-mixin';
 import { ToolkitDashboardTopologyAssignmentMixin } from './toolkit-dashboard-topology-assignment-mixin';
 import { ToolkitDashboardTopologyGraphMixin } from './toolkit-dashboard-topology-graph-mixin';
@@ -24,7 +25,8 @@ export const ToolkitDashboardRenderMixin = <TBase extends Constructor<LitElement
     const WithModels = ToolkitDashboardTopologyModelsMixin(WithTopology);
     const WithCatalog = ToolkitDashboardTopologyCatalogMixin(WithModels);
     const WithAgents = ToolkitDashboardTopologyAgentsMixin(WithCatalog);
-    const WithGraph = ToolkitDashboardTopologyGraphMixin(WithAgents);
+    const WithStatusLogic = ToolkitDashboardStatusLogicMixin(WithAgents);
+    const WithGraph = ToolkitDashboardTopologyGraphMixin(WithStatusLogic);
     const WithSession = ToolkitDashboardTopologySessionMixin(WithGraph);
     const WithAssignment = ToolkitDashboardTopologyAssignmentMixin(WithSession);
     const WithShell = ToolkitDashboardShellViewMixin(WithAssignment);
