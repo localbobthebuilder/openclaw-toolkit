@@ -49,15 +49,23 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
   renderConfigurationChecklist() {
     const checklist = this.getConfigurationChecklist();
     const renderChecklistItem = (item: any, optional = false) => html`
-      <div class="status-checklist-item ${item.complete ? 'done' : 'active'} ${optional ? 'optional' : 'required'}">
+      <div class="status-checklist-item ${item.state === 'success' || item.complete ? 'done' : 'active'} ${item.state === 'warning' ? 'warning' : item.state === 'error' ? 'error' : optional ? 'optional' : 'required'}">
         <div class="status-checklist-copy">
           <div class="status-checklist-title">
-            <span class="status-indicator ${item.complete ? 'status-online' : optional ? 'status-warning' : 'status-offline'}"></span>
+            <span class="status-indicator ${item.state === 'success' || item.complete ? 'status-online' : item.state === 'warning' || optional ? 'status-warning' : 'status-offline'}"></span>
             <span>${item.label}</span>
           </div>
           <div class="status-checklist-note">${item.note}</div>
         </div>
-        <span class="badge ${!item.complete && optional ? 'badge-warning' : ''}">${item.complete ? 'configured' : optional ? 'optional' : 'needs setup'}</span>
+        <span class="badge ${item.state === 'warning' || (!item.complete && optional) ? 'badge-warning' : ''}">
+          ${item.state === 'success' || item.complete
+            ? 'configured'
+            : item.state === 'warning'
+              ? 'partial'
+              : optional
+                ? 'optional'
+                : 'needs setup'}
+        </span>
       </div>
     `;
 

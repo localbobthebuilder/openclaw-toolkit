@@ -1533,6 +1533,10 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
         .filter((agentId: string) => agentId.length > 0)
     );
     const defaultEndpoint = endpoints.find((endpoint: any) => endpoint?.default) || null;
+    const defaultEndpointAgentIds = defaultEndpoint
+      ? this.getEndpointAgentIds(defaultEndpoint)
+      : [];
+    const defaultEndpointAgentCount = defaultEndpointAgentIds.length;
     const defaultEndpointModelCount = defaultEndpoint
       ? (Array.isArray(defaultEndpoint.models) ? defaultEndpoint.models.length : 0) + (Array.isArray(defaultEndpoint.hostedModels) ? defaultEndpoint.hostedModels.length : 0)
       : 0;
@@ -1637,11 +1641,18 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
       {
         label: 'Agents assigned to endpoints',
         complete: agentIds.length > 0 && agentsWithEndpoint.length === agentIds.length,
-        note: agentIds.length > 0
-          ? agentsWithEndpoint.length === agentIds.length
-            ? 'Every agent is placed on an endpoint.'
-            : `${agentIds.length - agentsWithEndpoint.length} agent${agentIds.length - agentsWithEndpoint.length === 1 ? ' is' : 's are'} still missing endpoint placement.`
-          : 'Add a managed agent first.'
+        state: !defaultEndpoint || defaultEndpointAgentCount === 0
+          ? 'error'
+          : agentsWithEndpoint.length === agentIds.length
+            ? 'success'
+            : 'warning',
+        note: !defaultEndpoint
+          ? 'Pick a default endpoint first.'
+          : defaultEndpointAgentCount === 0
+            ? 'The default endpoint has no agents assigned yet.'
+            : agentsWithEndpoint.length === agentIds.length
+              ? 'Every managed agent is placed on an endpoint.'
+              : `${agentIds.length - agentsWithEndpoint.length} agent${agentIds.length - agentsWithEndpoint.length === 1 ? ' is' : 's are'} still missing endpoint placement.`
       }
     ];
 

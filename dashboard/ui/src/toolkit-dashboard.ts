@@ -276,6 +276,8 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .status-checklist-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #333; border-radius: 10px; background: #171717; }
     .status-checklist-item.done { border-color: #4caf50; }
     .status-checklist-item.active { border-color: #00bcd4; }
+    .status-checklist-item.warning { border-color: #ff9800; }
+    .status-checklist-item.error { border-color: #f44336; }
     .status-checklist-item.optional { border-style: dashed; border-color: #7a5a1d; }
     .status-checklist-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .status-checklist-title { display: flex; align-items: center; gap: 8px; color: #fff; font-weight: 600; }
