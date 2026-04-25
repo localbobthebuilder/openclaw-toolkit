@@ -1,6 +1,7 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
 import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
+import { renderSelectableTagList } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -174,28 +175,25 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
             <div class="form-group">
               <label>Primary Agents in this Shared Workspace</label>
               <div class="help-text" style="margin-bottom: 10px;">Assigning an agent here makes this shared workspace the agent's home base and forces sandbox off so collaboration is not blocked by a private workspace restriction.</div>
-              <div class="tag-list">
-                ${occupantEntries.map(({ agent }: any) => html`
+              ${renderSelectableTagList(
+                occupantEntries,
+                ({ agent }: any) => html`
                   <div class="tag">
                     ${agent.name || agent.id}
                     <span class="tag-remove" @click=${() => this.setAgentPrimaryWorkspace(agent.id, null)}>×</span>
                   </div>
-                `)}
-              </div>
-              <div style="margin-top: 10px;">
-                <select @change=${(e: any) => {
-                  const agentId = e.target.value;
-                  if (agentId) {
-                    this.setAgentPrimaryWorkspace(agentId, workspace.id);
-                  }
-                  e.target.value = '';
-                }}>
-                  <option value="">${availableAgents.length === 0 ? 'No unassigned agents available' : '+ Add Agent to Shared Workspace'}</option>
-                  ${availableAgents
-                    .filter(({ agent }: any) => !occupantIds.includes(String(agent?.id || '')))
-                    .map(({ agent }: any) => html`<option value=${agent.id}>${agent.name || agent.id}</option>`)}
-                </select>
-              </div>
+                `,
+                availableAgents
+                  .filter(({ agent }: any) => !occupantIds.includes(String(agent?.id || '')))
+                  .map(({ agent }: any) => ({
+                    value: agent.id,
+                    label: agent.name || agent.id
+                  })),
+                (agentId) => {
+                  this.setAgentPrimaryWorkspace(agentId, workspace.id);
+                },
+                availableAgents.length === 0 ? 'No unassigned agents available' : '+ Add Agent to Shared Workspace'
+              )}
             </div>
           ` : html`
             <div class="grid-2">
@@ -220,8 +218,9 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
               <div class="form-group">
                 <label>Shared Workspaces Accessible from this Private Workspace</label>
                 <div class="help-text" style="margin-bottom: 10px;">Granting shared collaboration access means the agent must reach paths outside its private home base, so the toolkit will turn sandbox off for the occupying agent.</div>
-                <div class="tag-list">
-                  ${selectedSharedAccessIds.map((sharedWorkspaceId: string) => {
+                ${renderSelectableTagList(
+                  selectedSharedAccessIds,
+                  (sharedWorkspaceId: string) => {
                     const sharedWorkspace = this.getWorkspaceById(sharedWorkspaceId);
                     if (!sharedWorkspace) return null;
                     return html`
@@ -232,22 +231,20 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
                         }}>×</span>
                       </div>
                     `;
-                  })}
-                </div>
-                <div style="margin-top: 10px;">
-                  <select @change=${(e: any) => {
-                    const selectedId = e.target.value;
-                    if (selectedId && !selectedSharedAccessIds.includes(selectedId)) {
+                  },
+                  sharedWorkspaces
+                    .filter((candidate: any) => !selectedSharedAccessIds.includes(String(candidate?.id || '')))
+                    .map((candidate: any) => ({
+                      value: candidate.id,
+                      label: candidate.name || candidate.id
+                    })),
+                  (selectedId) => {
+                    if (!selectedSharedAccessIds.includes(selectedId)) {
                       this.setWorkspaceSharedAccess(workspace, [...selectedSharedAccessIds, selectedId]);
                     }
-                    e.target.value = '';
-                  }}>
-                    <option value="">${sharedWorkspaces.length === 0 ? 'No shared workspaces available' : '+ Grant Shared Workspace Access'}</option>
-                    ${sharedWorkspaces
-                      .filter((candidate: any) => !selectedSharedAccessIds.includes(String(candidate?.id || '')))
-                      .map((candidate: any) => html`<option value=${candidate.id}>${candidate.name || candidate.id}</option>`)}
-                  </select>
-                </div>
+                  },
+                  sharedWorkspaces.length === 0 ? 'No shared workspaces available' : '+ Grant Shared Workspace Access'
+                )}
               </div>
             </div>
           `}

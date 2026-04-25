@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
-import { renderPreviewCard, renderPreviewTags } from './toolkit-dashboard-ui-helpers';
+import { renderPreviewCard, renderPreviewTags, renderSelectableTagList } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -25,33 +25,32 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
       return html`
         <div class="form-group">
           <label>Candidate Models</label>
-          <div class="tag-list">
-            ${(agent.candidateModelRefs || []).map((ref: string, idx: number) => html`
+          ${renderSelectableTagList(
+            candidateModelRefs,
+            (ref: string, idx: number) => html`
               <div class="tag">
                 ${ref}
                 <span class="tag-remove" @click=${() => { agent.candidateModelRefs.splice(idx, 1); this.requestUpdate(); }}>×</span>
               </div>
-            `)}
-          </div>
-          <div style="margin-top: 10px;">
-            <select ?disabled=${!selectedEndpoint || endpointModelOptions.length === 0} @change=${(e: any) => {
-              const value = e.target.value;
-              if (value) {
-                if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
-                if (!agent.candidateModelRefs.includes(value)) {
-                  agent.candidateModelRefs.push(value);
-                  this.syncAgentModelSource(agent);
-                  this.requestUpdate();
-                }
-                e.target.value = '';
+            `,
+            endpointModelOptions
+              .filter((option: any) => !candidateModelRefs.includes(option.ref))
+              .map((option: any) => ({
+                value: option.ref,
+                label: `${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}`
+              })),
+            (value) => {
+              if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
+              if (!agent.candidateModelRefs.includes(value)) {
+                agent.candidateModelRefs.push(value);
+                this.syncAgentModelSource(agent);
+                this.requestUpdate();
               }
-            }}>
-              <option value="">${selectedEndpoint ? '+ Add Endpoint Model' : 'Choose an endpoint first'}</option>
-              ${endpointModelOptions
-                .filter((option: any) => !candidateModelRefs.includes(option.ref))
-                .map((option: any) => html`<option value=${option.ref}>${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}</option>`)}
-            </select>
-          </div>
+            },
+            selectedEndpoint ? '+ Add Endpoint Model' : 'Choose an endpoint first',
+            undefined,
+            !selectedEndpoint || endpointModelOptions.length === 0
+          )}
         </div>
 
         <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
@@ -112,7 +111,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
               {
                 label: 'Allow',
                 body: html`
-                  ${renderPreviewTags(
+                  ${renderSelectableTagList(
                     directAllowedTools,
                     (toolId: string) => html`
                       <div class="tag">
@@ -120,26 +119,22 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                         <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'allow', toolId)}>×</span>
                       </div>
                     `,
+                    availableDirectAllowOptions.map((option) => ({
+                      value: option.id,
+                      label: `${this.getToolDisplayLabel(option.id)} - ${option.description}`
+                    })),
+                    (value) => {
+                      this.addAgentToolOverride(agent, 'allow', value);
+                    },
+                    '+ Add allowed tool override',
                     html`No direct allow overrides.`
                   )}
-                  <div style="margin-top: 6px;">
-                    <select @change=${(e: any) => {
-                      const value = e.target.value;
-                      if (value) {
-                        this.addAgentToolOverride(agent, 'allow', value);
-                        e.target.value = '';
-                      }
-                    }}>
-                      <option value="">+ Add allowed tool override</option>
-                      ${availableDirectAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
-                    </select>
-                  </div>
                 `
               },
               {
                 label: 'Deny',
                 body: html`
-                  ${renderPreviewTags(
+                  ${renderSelectableTagList(
                     directDeniedTools,
                     (toolId: string) => html`
                       <div class="tag">
@@ -147,20 +142,16 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                         <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'deny', toolId)}>×</span>
                       </div>
                     `,
+                    availableDirectDenyOptions.map((option) => ({
+                      value: option.id,
+                      label: `${this.getToolDisplayLabel(option.id)} - ${option.description}`
+                    })),
+                    (value) => {
+                      this.addAgentToolOverride(agent, 'deny', value);
+                    },
+                    '+ Add denied tool override',
                     html`No direct deny overrides.`
                   )}
-                  <div style="margin-top: 6px;">
-                    <select @change=${(e: any) => {
-                      const value = e.target.value;
-                      if (value) {
-                        this.addAgentToolOverride(agent, 'deny', value);
-                        e.target.value = '';
-                      }
-                    }}>
-                      <option value="">+ Add denied tool override</option>
-                      ${availableDirectDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
-                    </select>
-                  </div>
                 `
               }
             ], undefined, html`<span class="badge">Final Layer</span>`)}

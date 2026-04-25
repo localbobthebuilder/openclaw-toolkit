@@ -42,6 +42,33 @@ export function renderTagList<T>(
   `;
 }
 
+export function renderSelectableTagList<T>(
+  items: readonly T[],
+  renderItem: (item: T, index: number) => MaybeTemplate,
+  options: Array<{ value: string; label: MaybeTemplate }>,
+  onSelect: (value: string) => void,
+  selectPlaceholder: MaybeTemplate,
+  emptyText?: MaybeTemplate,
+  selectDisabled = false,
+  selectStyle = 'margin-top: 10px;'
+) {
+  return html`
+    ${renderTagList(items, renderItem, emptyText)}
+    <div style=${selectStyle}>
+      <select ?disabled=${selectDisabled} @change=${(e: any) => {
+        const value = e.target.value;
+        if (value) {
+          onSelect(value);
+          e.target.value = '';
+        }
+      }}>
+        <option value="">${selectPlaceholder}</option>
+        ${options.map((option) => html`<option value=${option.value}>${option.label}</option>`)}
+      </select>
+    </div>
+  `;
+}
+
 export function renderTwoColumnGrid(left: MaybeTemplate, right: MaybeTemplate) {
   return html`
     <div class="grid-2">
