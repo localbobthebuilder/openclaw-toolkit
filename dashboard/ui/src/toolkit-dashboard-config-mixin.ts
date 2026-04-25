@@ -1635,12 +1635,12 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
           : 'Add your first managed agent in Configuration > Agents.'
       },
       {
-        label: 'Agents assigned to workspaces',
+        label: 'Every agent has a workspace defined',
         complete: agentIds.length > 0 && agentsWithWorkspace.length === agentIds.length,
         note: agentIds.length > 0
           ? agentsWithWorkspace.length === agentIds.length
-            ? 'Every agent has a workspace home base.'
-            : `${agentIds.length - agentsWithWorkspace.length} agent${agentIds.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace assignment.`
+            ? 'Every managed agent has a workspace home base.'
+            : `${agentIds.length - agentsWithWorkspace.length} agent${agentIds.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace definition.`
           : 'Add a managed agent first.'
       },
       {
