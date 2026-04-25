@@ -1,14 +1,10 @@
 import { LitElement, html } from 'lit';
-import { ToolkitDashboardAgentPlacementMixin } from './toolkit-dashboard-agent-placement-mixin';
-import { ToolkitDashboardAgentBootstrapMixin } from './toolkit-dashboard-agent-bootstrap-mixin';
-import { ToolkitDashboardAgentSubagentsMixin } from './toolkit-dashboard-agent-subagents-mixin';
-import { ToolkitDashboardAgentToolsMixin } from './toolkit-dashboard-agent-tools-mixin';
-import { ToolkitDashboardAgentTelegramRoutingMixin } from './toolkit-dashboard-agent-telegram-routing-mixin';
+import { ToolkitDashboardAgentConfigViewMixin } from './toolkit-dashboard-agent-config-view-mixin';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
 export const ToolkitDashboardAgentsWorkspacesMixin = <TBase extends Constructor<LitElement>>(Base: TBase) =>
-  class ToolkitDashboardAgentsWorkspacesMixin extends ToolkitDashboardAgentTelegramRoutingMixin(ToolkitDashboardAgentToolsMixin(ToolkitDashboardAgentSubagentsMixin(ToolkitDashboardAgentPlacementMixin(ToolkitDashboardAgentBootstrapMixin(Base))))) {
+  class ToolkitDashboardAgentsWorkspacesMixin extends ToolkitDashboardAgentConfigViewMixin(Base) {
     [key: string]: any;
 
     renderAgentsConfig() {
