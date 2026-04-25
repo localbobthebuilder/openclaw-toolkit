@@ -1,4 +1,5 @@
 import { LitElement, html } from 'lit';
+import { renderHelpText } from './toolkit-dashboard-ui-helpers';
 type Constructor<T = {}> = new (...args: any[]) => T;
 
 export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitElement>>(Base: TBase) =>
@@ -48,19 +49,40 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
   renderStatus() {
     const telegramLiveCheckState = this.getTelegramLiveCheckState();
     const sections = this.parseStatusOutput(this.statusOutput);
+    const telegramStatusClass = telegramLiveCheckState.available ? 'online' : 'not-installed';
+    const telegramStatusBadge = telegramLiveCheckState.available
+      ? 'ready'
+      : telegramLiveCheckState.reason === 'loading'
+        ? 'loading'
+        : telegramLiveCheckState.reason === 'services-down'
+          ? 'blocked'
+          : 'unavailable';
+    const telegramStatusMessage = telegramLiveCheckState.available
+      ? 'The live Telegram channel is ready.'
+      : telegramLiveCheckState.reason === 'loading'
+        ? 'Waiting for the status probe to complete.'
+        : telegramLiveCheckState.reason === 'services-down'
+          ? 'Telegram checks are blocked because Docker or the gateway is not fully ready.'
+          : 'Telegram checks are not available yet.';
 
     if (!this.statusLoaded && sections.length === 0) {
       return html`
-        <div class="setup-guide">
-          <h2>System Status</h2>
-          <p class="subtitle">Loading dashboard health checks...</p>
-          <div class="setup-steps">
-            <div class="setup-step active">
-              <div class="step-num">1</div>
-              <div class="step-body">
-                <div class="step-title">Collecting service status</div>
-                <div class="step-desc">The dashboard is fetching Docker, gateway, and bootstrap state from the local toolkit backend.</div>
+        <div class="card">
+          <div class="card-header">
+            <h3>System Status</h3>
+            <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Status</button>
+          </div>
+          ${renderHelpText('Loading dashboard health checks...', 'margin-top: 0; margin-bottom: 16px;')}
+          <div class="status-grid" style="grid-template-columns: 1fr;">
+            <div class="status-card">
+              <div class="status-card-header">
+                <h4>
+                  <span class="status-indicator status-online"></span>
+                  Collecting service status
+                </h4>
+                <span class="badge">loading</span>
               </div>
+              <div class="status-content" style="white-space: normal;">The dashboard is fetching Docker, gateway, and bootstrap state from the local toolkit backend.</div>
             </div>
           </div>
         </div>
@@ -68,27 +90,12 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
     }
 
     return html`
-      <div class="setup-guide">
-        <h2>System Status</h2>
-        <p class="subtitle">Current dashboard health summary and service checks.</p>
-        <div class="setup-steps">
-          <div class="setup-step ${telegramLiveCheckState.available ? 'done' : 'active'}">
-            <div class="step-num">${telegramLiveCheckState.available ? '✓' : '!'}</div>
-            <div class="step-body">
-              <div class="step-title">Telegram live checks</div>
-              <div class="step-desc">
-                ${telegramLiveCheckState.available
-                  ? 'The live Telegram channel is ready.'
-                  : telegramLiveCheckState.reason === 'loading'
-                    ? 'Waiting for the status probe to complete.'
-                    : telegramLiveCheckState.reason === 'services-down'
-                      ? 'Telegram checks are blocked because Docker or the gateway is not fully ready.'
-                      : 'Telegram checks are not available yet.'}
-              </div>
-            </div>
-            <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Status</button>
-          </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>System Status</h3>
+          <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Status</button>
         </div>
+        ${renderHelpText('Current dashboard health summary and service checks.', 'margin-top: 0;')}
       </div>
 
       ${sections.length === 0 ? html`
@@ -97,6 +104,21 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
         </div>
       ` : html`
         <div class="status-grid">
+          <div class="status-card">
+            <div class="status-card-header">
+              <h4>
+                <span class="status-indicator status-${telegramStatusClass}"></span>
+                Telegram live checks
+              </h4>
+              <span class="badge">${telegramStatusBadge}</span>
+            </div>
+            <div class="status-content" style="white-space: normal;">
+              ${telegramStatusMessage}
+              <div style="margin-top: 12px;">
+                <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Status</button>
+              </div>
+            </div>
+          </div>
           ${sections.map((section) => html`
             <div class="status-card">
               <div class="status-card-header">
