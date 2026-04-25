@@ -382,6 +382,29 @@ function Normalize-GitStatusSmokeBlock {
     return (($lines -join "`n").Trim())
 }
 
+function Get-SmokeDelimitedBlock {
+    param(
+        [string]$Text,
+        [Parameter(Mandatory = $true)]
+        [string]$BeginMarker,
+        [Parameter(Mandatory = $true)]
+        [string]$EndMarker
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $normalized = (($Text -replace "`r`n", "`n") -replace "`r", "`n")
+    $pattern = "(?is)" + [regex]::Escape($BeginMarker) + "\s*\n?(?<block>.*?)\n?\s*" + [regex]::Escape($EndMarker)
+    $match = [regex]::Match($normalized, $pattern)
+    if (-not $match.Success) {
+        return ""
+    }
+
+    return ([string]$match.Groups["block"].Value).Trim()
+}
+
 function Normalize-SingleLineSmokeReadback {
     param([string]$Text)
 
@@ -431,11 +454,30 @@ function Test-ResearchSmokeSuccess {
     }
 
     $compact = $normalized.Trim()
-    if ($compact -eq "RESEARCH_OK") {
+    if ($compact.IndexOf("RESEARCH_OK", [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
         return $true
     }
 
     return $compact.ToLowerInvariant().Contains("docs.openclaw.ai")
+}
+
+function Test-SmokeReplyContainsMarker {
+    param(
+        [string]$Text,
+        [Parameter(Mandatory = $true)]
+        [string]$Marker
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+
+    $normalized = Normalize-SmokeBlock -Text $Text
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return $false
+    }
+
+    return $normalized.IndexOf($Marker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
 
 function Get-ErrorCategory {
@@ -539,6 +581,22 @@ function New-CheckResult {
         category = $Category
         detail   = $Detail
     }
+}
+
+function Get-SmokeRuntimeDetail {
+    param(
+        [string]$TargetModel,
+        [string]$RuntimeModel,
+        [string]$BaseDetail
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($TargetModel) -and
+        -not [string]::IsNullOrWhiteSpace($RuntimeModel) -and
+        $TargetModel -ne $RuntimeModel) {
+        return "$BaseDetail OpenClaw model fallback/runtime switch observed: configured $TargetModel, ran $RuntimeModel. This usually means the configured model hit a retryable provider issue such as rate limit, quota, capacity, or timeout; check gateway logs for the exact provider error."
+    }
+
+    return $BaseDetail
 }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -650,7 +708,7 @@ try {
                 Write-ProgressLine "[$toolingAgentId] Switching smoke session to $($toolingModelPlan.modelOverrideRef)" Gray
             }
             Write-ProgressLine "[$toolingAgentId] Initializing a real git repo in the shared workspace" Gray
-            $toolingInit = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $toolingRepoName. After the command finishes, reply with exactly INIT_OK and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingInit = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-init-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace: git init $toolingRepoName. After the command finishes, include marker INIT_OK in your visible reply." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingInit
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingInitReply = (Get-AgentReplyText -AgentJson $toolingInit).Trim()
@@ -664,11 +722,11 @@ try {
             $outputLines.Add("Observed model for ${toolingAgentId}: $toolingRuntime")
 
             Write-ProgressLine "[$toolingAgentId] Writing a README inside that repo" Gray
-            $toolingWrite = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$toolingRepoName/README.md with exact file contents shown on the next line and nothing else:`ntooling smoke test`nThen reply with exactly WRITE_OK and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingWrite = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$toolingRepoName/README.md with exact file contents shown on the next line and nothing else:`ntooling smoke test`nThen include marker WRITE_OK in your visible reply." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingWrite
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingWriteReply = (Get-AgentReplyText -AgentJson $toolingWrite).Trim()
-            if ($toolingWriteReply -ne "WRITE_OK" -and $toolingWriteReply -ne "tooling smoke test") {
+            if (-not (Test-SmokeReplyContainsMarker -Text $toolingWriteReply -Marker "WRITE_OK") -and (Normalize-SingleLineSmokeReadback -Text $toolingWriteReply) -ne "tooling smoke test") {
                 throw "Expected WRITE_OK from $toolingAgentId after README write, but got: $toolingWriteReply"
             }
             $readmePath = Join-Path $toolingRepoPath "README.md"
@@ -682,22 +740,28 @@ try {
             $outputLines.Add("PASS: $toolingAgentId wrote README.md in shared workspace")
 
             Write-ProgressLine "[$toolingAgentId] Reading the README back through OpenClaw" Gray
-            $toolingRead = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-read-$suffix" -Message "First use the read tool on /home/node/.openclaw/workspace/$toolingRepoName/README.md. After you receive the file contents, send one visible assistant reply with exact text README_OK if and only if the file contains the exact phrase tooling smoke test. Do not include the path. Do not quote the file. Do not add explanation." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingRead = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-read-$suffix" -Message "First use the read tool on /home/node/.openclaw/workspace/$toolingRepoName/README.md. After you receive the file contents, include marker README_OK in your visible reply if and only if the file contains the exact phrase tooling smoke test. Also include the read file content between these exact delimiter lines:`nBEGIN_SMOKE_README`n<file content here>`nEND_SMOKE_README" -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingRead
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingReadReply = (Get-AgentReplyText -AgentJson $toolingRead).Trim()
-            if ($toolingReadReply -ne "README_OK") {
+            if (-not (Test-SmokeReplyContainsMarker -Text $toolingReadReply -Marker "README_OK")) {
                 throw "Expected README_OK from $toolingAgentId after README readback, but got: $toolingReadReply"
+            }
+            $toolingReadbackBlock = Get-SmokeDelimitedBlock -Text $toolingReadReply -BeginMarker "BEGIN_SMOKE_README" -EndMarker "END_SMOKE_README"
+            if (-not [string]::IsNullOrWhiteSpace($toolingReadbackBlock) -and (Normalize-SingleLineSmokeReadback -Text $toolingReadbackBlock) -ne "tooling smoke test") {
+                throw "Expected README readback block 'tooling smoke test', but got: $toolingReadbackBlock"
             }
             $outputLines.Add("PASS: $toolingAgentId read back README.md content")
 
             Write-ProgressLine "[$toolingAgentId] Running git status inside the repo" Gray
-            $toolingStatus = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${toolingRepoName}: git status --short --branch. Reply with the exact git output and nothing else." -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $toolingStatus = Invoke-AgentTurn -AgentId $toolingAgentId -SessionId "smoke-tooling-status-$suffix" -Message "Run exactly one exec command with workdir /home/node/.openclaw/workspace/${toolingRepoName}: git status --short --branch. Include the exact git output between these exact delimiter lines. You may add brief prose outside the delimiter block if needed.`nBEGIN_SMOKE_GIT_STATUS`n<git status output here>`nEND_SMOKE_GIT_STATUS" -ModelOverrideRef $toolingModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $toolingRuntime = Get-AgentRuntimeRef -AgentJson $toolingStatus
             Add-ToolkitVerificationCleanupModelRef -ModelRef $toolingRuntime | Out-Null
             $toolingStatusReply = (Get-AgentReplyText -AgentJson $toolingStatus).Trim()
             $hostStatus = (Invoke-External -FilePath "git" -Arguments @("-C", $toolingRepoPath, "status", "--short", "--branch")).Output.Trim()
-            if ((Normalize-GitStatusSmokeBlock -Text $hostStatus) -ne (Normalize-GitStatusSmokeBlock -Text $toolingStatusReply)) {
+            $toolingStatusBlock = Get-SmokeDelimitedBlock -Text $toolingStatusReply -BeginMarker "BEGIN_SMOKE_GIT_STATUS" -EndMarker "END_SMOKE_GIT_STATUS"
+            $toolingStatusComparable = if ([string]::IsNullOrWhiteSpace($toolingStatusBlock)) { $toolingStatusReply } else { $toolingStatusBlock }
+            if ((Normalize-GitStatusSmokeBlock -Text $hostStatus) -ne (Normalize-GitStatusSmokeBlock -Text $toolingStatusComparable)) {
                 throw "Expected $toolingAgentId git status to match host status.`nHost: $hostStatus`nAgent: $toolingStatusReply"
             }
             if ($hostStatus -notmatch '^## ') {
@@ -746,7 +810,7 @@ try {
         $researchRuntime = ""
         try {
             $researchReply = ""
-            $researchPrompt = "Use web_search to find the official documentation domain for OpenClaw. If the official documentation domain is docs.openclaw.ai, reply with exactly RESEARCH_OK and nothing else. If you cannot verify that domain, reply with exactly RESEARCH_FAIL and nothing else."
+            $researchPrompt = "Use web_search to find the official documentation domain for OpenClaw. If the official documentation domain is docs.openclaw.ai, include marker RESEARCH_OK in your visible reply. If you cannot verify that domain, include marker RESEARCH_FAIL in your visible reply."
             for ($researchAttempt = 1; $researchAttempt -le 2; $researchAttempt++) {
                 try {
                     if ($researchAttempt -eq 1) {
@@ -788,7 +852,11 @@ try {
                 $outputLines.Add("Configured model for ${researchAgentId}: $researchModelRef")
             }
             $outputLines.Add("Observed model for ${researchAgentId}: $researchRuntime")
-            $checkResults.Add((New-CheckResult -Name "research" -Status "pass" -AgentId $researchAgentId -TargetModel $researchModelRef -Runtime $researchRuntime -Detail "Completed a web-backed research task." ))
+            $researchDetail = Get-SmokeRuntimeDetail -TargetModel $researchModelRef -RuntimeModel $researchRuntime -BaseDetail "Completed a web-backed research task."
+            if ($researchDetail -ne "Completed a web-backed research task.") {
+                $outputLines.Add($researchDetail)
+            }
+            $checkResults.Add((New-CheckResult -Name "research" -Status "pass" -AgentId $researchAgentId -TargetModel $researchModelRef -Runtime $researchRuntime -Detail $researchDetail ))
         }
         catch {
             $message = Get-ErrorMessage -ErrorRecord $_
@@ -832,7 +900,7 @@ try {
         else {
         $reviewRuntime = ""
         try {
-            $reviewPrompt = "First use the read tool on /home/node/.openclaw/workspace/$reviewProbeName. After you receive the file contents, send one visible assistant reply with exact text REVIEW_OK if and only if the file contains the exact phrase review smoke ok. Do not output NO_REPLY. Do not keep the final answer only in hidden reasoning."
+            $reviewPrompt = "First use the read tool on /home/node/.openclaw/workspace/$reviewProbeName. After you receive the file contents, include marker REVIEW_OK in your visible reply if and only if the file contains the exact phrase review smoke ok. Do not output NO_REPLY. Do not keep the marker only in hidden reasoning."
             if ($reviewModelPlan.modelOverrideRef) {
                 $modelsToStop.Add([string]$reviewModelPlan.modelOverrideRef)
                 $outputLines.Add("INFO: $($reviewModelPlan.detail)")
@@ -849,7 +917,7 @@ try {
                 $reviewRuntime = Get-AgentRuntimeRef -AgentJson $reviewTurn
                 Add-ToolkitVerificationCleanupModelRef -ModelRef $reviewRuntime | Out-Null
                 $reviewReply = (Get-AgentReplyText -AgentJson $reviewTurn).Trim()
-                if ($reviewReply -eq "REVIEW_OK") {
+                if (Test-SmokeReplyContainsMarker -Text $reviewReply -Marker "REVIEW_OK") {
                     break
                 }
                 if ($reviewAttempt -ge 2 -or ($reviewReply -ne "NO_REPLY" -and -not [string]::IsNullOrWhiteSpace($reviewReply))) {
@@ -858,7 +926,7 @@ try {
 
                 Start-Sleep -Seconds 2
             }
-            if ($reviewReply -ne "REVIEW_OK") {
+            if (-not (Test-SmokeReplyContainsMarker -Text $reviewReply -Marker "REVIEW_OK")) {
                 $friendlyReviewFailure = Get-FriendlyModelCapabilityFailureMessage -AgentId $reviewAgentId -TargetModelRef $reviewTargetModelRef -Message $reviewReply
                 if ($friendlyReviewFailure -ne $reviewReply) {
                     throw $friendlyReviewFailure
@@ -922,11 +990,11 @@ try {
                 Write-ProgressLine "[$coderAgentId] Switching smoke session to $($coderModelPlan.modelOverrideRef)" Gray
             }
             Write-ProgressLine "[$coderAgentId] Creating a bounded coding artifact in the shared workspace" Gray
-            $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exact file contents shown on the next line and nothing else:`ncoder smoke ok`nThen reply with exactly CODER_WRITE_OK and nothing else." -ModelOverrideRef $coderModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
+            $coderWrite = Invoke-AgentTurn -AgentId $coderAgentId -SessionId "smoke-coder-write-$suffix" -Message "Use the write tool to create /home/node/.openclaw/workspace/$coderProbeName with exact file contents shown on the next line and nothing else:`ncoder smoke ok`nThen include marker CODER_WRITE_OK in your visible reply." -ModelOverrideRef $coderModelPlan.modelOverrideRef -Timeout $TimeoutSeconds
             $coderRuntime = Get-AgentRuntimeRef -AgentJson $coderWrite
             Add-ToolkitVerificationCleanupModelRef -ModelRef $coderRuntime | Out-Null
             $coderReply = (Get-AgentReplyText -AgentJson $coderWrite).Trim()
-            if ($coderReply -ne "CODER_WRITE_OK") {
+            if (-not (Test-SmokeReplyContainsMarker -Text $coderReply -Marker "CODER_WRITE_OK")) {
                 throw "Expected CODER_WRITE_OK from $coderAgentId, but got: $coderReply"
             }
             if (-not (Test-Path $coderProbePath)) {

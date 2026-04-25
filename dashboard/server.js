@@ -119,11 +119,61 @@ function readToolkitConfig() {
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
 
+function isValidAgentId(value) {
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value.trim());
+}
+
+function isValidSessionKey(value) {
+  return typeof value === 'string' && /^agent:[a-z0-9][a-z0-9_-]{0,63}:[a-z0-9:_-]+$/i.test(value.trim());
+}
+
+function callOpenClawGateway(method, params = {}) {
+  const result = spawnSync('docker', [
+    'exec',
+    'openclaw-openclaw-gateway-1',
+    'openclaw',
+    'gateway',
+    'call',
+    method,
+    '--params',
+    JSON.stringify(params)
+  ], {
+    cwd: toolkitDir,
+    encoding: 'utf8',
+    timeout: 30000
+  });
+
+  const stdout = (result.stdout || '').trim();
+  const stderr = (result.stderr || '').trim();
+  if (result.status !== 0) {
+    const detail = stderr || stdout || result.error?.message || `OpenClaw gateway call failed with exit code ${result.status}`;
+    throw new Error(detail);
+  }
+  if (!stdout) {
+    return {};
+  }
+  const jsonStart = stdout.indexOf('{');
+  const jsonText = jsonStart >= 0 ? stdout.slice(jsonStart).trim() : stdout;
+  try {
+    return JSON.parse(jsonText);
+  } catch (err) {
+    throw new Error(`Failed to parse OpenClaw gateway response: ${err.message}. Output: ${stdout}`);
+  }
+}
+
 function expandWindowsEnvVars(value) {
   if (typeof value !== 'string' || value.length === 0) {
     return value;
   }
   return value.replace(/%([^%]+)%/g, (_, name) => process.env[name] ?? `%${name}%`);
+}
+
+function resolveToolkitConfigPath(value, baseDir = toolkitDir) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+  const expanded = expandWindowsEnvVars(value.trim());
+  return path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(baseDir, expanded);
 }
 
 function toPortableRelativeConfigPath(value, baseDir) {
@@ -212,7 +262,59 @@ function readJsonFileIfExists(filePath) {
 
 function getToolkitHostConfigDir(config) {
   const configuredPath = typeof config?.hostConfigDir === 'string' ? config.hostConfigDir.trim() : '';
-  return configuredPath || path.join(os.homedir(), '.openclaw');
+  return configuredPath ? resolveToolkitConfigPath(configuredPath, toolkitDir) : path.join(os.homedir(), '.openclaw');
+}
+
+function readEnvFileValue(filePath, name) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return '';
+  }
+  const prefix = `${name}=`;
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    if (line.startsWith(prefix)) {
+      return line.slice(prefix.length).trim();
+    }
+  }
+  return '';
+}
+
+function getGatewayToken() {
+  const toolkitConfig = readToolkitConfig();
+  const liveConfigPath = path.join(getToolkitHostConfigDir(toolkitConfig), 'openclaw.json');
+  const liveConfig = readJsonFileIfExists(liveConfigPath);
+  const liveToken = typeof liveConfig?.gateway?.auth?.token === 'string' ? liveConfig.gateway.auth.token.trim() : '';
+  if (liveToken) {
+    return liveToken;
+  }
+
+  const envFilePath = resolveToolkitConfigPath(toolkitConfig?.envFilePath || '', toolkitDir);
+  const envToken = readEnvFileValue(envFilePath, 'OPENCLAW_GATEWAY_TOKEN');
+  if (envToken) {
+    return envToken;
+  }
+
+  throw new Error('Gateway auth token not found in openclaw.json or OPENCLAW_GATEWAY_TOKEN.');
+}
+
+function getLiveOpenClawConfig() {
+  const toolkitConfig = readToolkitConfig();
+  const liveConfigPath = path.join(getToolkitHostConfigDir(toolkitConfig), 'openclaw.json');
+  return readJsonFileIfExists(liveConfigPath) || toolkitConfig;
+}
+
+function getAgentThinkingDefault(agentId) {
+  const liveConfig = getLiveOpenClawConfig();
+  const agents = Array.isArray(liveConfig?.agents?.list) ? liveConfig.agents.list : [];
+  const agent = agents.find((entry) => String(entry?.id || '').trim() === agentId);
+  const agentThinking = typeof agent?.thinkingDefault === 'string' ? agent.thinkingDefault.trim() : '';
+  if (agentThinking) {
+    return agentThinking;
+  }
+  const defaultThinking = typeof liveConfig?.agents?.defaults?.thinkingDefault === 'string'
+    ? liveConfig.agents.defaults.thinkingDefault.trim()
+    : '';
+  return defaultThinking;
 }
 
 function hasDirectTelegramCredentials(value) {
@@ -559,6 +661,96 @@ app.get('/api/telegram-setup-status', (req, res) => {
 app.get('/api/voice-models', (req, res) => {
   const result = getWhisperModels();
   res.json(result);
+});
+
+app.get('/api/gateway-auth', (req, res) => {
+  try {
+    res.json({ token: getGatewayToken() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read OpenClaw gateway auth token', details: err.message });
+  }
+});
+
+app.post('/api/agent-sessions', (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const agentId = String(payload.agentId || '').trim();
+    if (!isValidAgentId(agentId)) {
+      res.status(400).json({ error: 'Invalid agentId' });
+      return;
+    }
+
+    const label = typeof payload.label === 'string' && payload.label.trim()
+      ? payload.label.trim().slice(0, 120)
+      : `Dashboard ${agentId}`;
+    const created = callOpenClawGateway('sessions.create', { agentId, label });
+    const thinkingLevel = getAgentThinkingDefault(agentId);
+    if (created?.key && thinkingLevel) {
+      try {
+        callOpenClawGateway('sessions.patch', { key: created.key, thinkingLevel });
+        res.json({
+          ...created,
+          thinkingLevel,
+          entry: created.entry && typeof created.entry === 'object'
+            ? { ...created.entry, thinkingLevel }
+            : created.entry
+        });
+        return;
+      } catch (err) {
+        console.warn(`Failed to set thinking level for session ${created.key}: ${err.message}`);
+      }
+    }
+    res.json(created);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create OpenClaw agent session', details: err.message });
+  }
+});
+
+app.delete('/api/agent-sessions', (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const key = String(payload.key || '').trim();
+    if (!isValidSessionKey(key)) {
+      res.status(400).json({ error: 'Invalid session key' });
+      return;
+    }
+
+    try {
+      callOpenClawGateway('sessions.abort', { key });
+    } catch (err) {
+      console.warn(`Failed to abort session ${key}: ${err.message}`);
+    }
+    const deleted = callOpenClawGateway('sessions.delete', { key, deleteTranscript: true });
+    res.json(deleted);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete OpenClaw agent session', details: err.message });
+  }
+});
+
+app.post('/api/agent-sessions/close', (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const key = String(payload.key || '').trim();
+    if (!isValidSessionKey(key)) {
+      res.status(400).json({ error: 'Invalid session key' });
+      return;
+    }
+
+    try {
+      callOpenClawGateway('sessions.abort', { key });
+    } catch (err) {
+      console.warn(`Failed to abort session ${key}: ${err.message}`);
+    }
+    try {
+      callOpenClawGateway('sessions.delete', { key, deleteTranscript: true });
+      res.json({ ok: true });
+    } catch (err) {
+      console.warn(`Failed to delete session ${key}: ${err.message}`);
+      res.status(500).json({ error: 'Failed to delete OpenClaw agent session', details: err.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to close OpenClaw agent session', details: err.message });
+  }
 });
 
 // Fallback for SPA routing: serve index.html for any other GET requests that weren't matched

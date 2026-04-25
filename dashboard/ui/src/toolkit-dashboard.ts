@@ -107,6 +107,9 @@ export class ToolkitDashboard extends LitElement {
   @state() private topologyEdges: any[] = [];
   @state() private topologyShowAllArrows: boolean = false;
   @state() private topologyInspectorMarkdownFile: string = 'AGENTS.md';
+  @state() private topologyAgentSessions: Array<{ key: string; sessionId?: string; agentId: string; label: string; url: string; createdAt: number }> = [];
+  @state() private topologyAgentSessionBusyKey: string | null = null;
+  @state() private topologyAgentSessionError: string = '';
   @state() private showModelSelector: boolean = false;
   @state() private selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   private ws: WebSocket | null = null;
@@ -116,11 +119,27 @@ export class ToolkitDashboard extends LitElement {
   private pendingSocketAction: string | null = null;
   private pendingSocketRetryTimer: number | null = null;
   private topologyMeasureFrame: number | null = null;
+  private topologyAgentSessionWindows = new Map<string, Window>();
+  private topologyAgentSessionPollTimers = new Map<string, number>();
+  private gatewayAuthTokenPromise: Promise<string> | null = null;
 
   // Helper for API URL construction
   private getBaseUrl() {
       // If we are served under /toolkit/, API calls must be prefixed.
       return window.location.pathname.startsWith('/toolkit') ? '/toolkit' : '';
+  }
+
+  private getOpenClawChatBaseUrl() {
+    const basePath = this.getBaseUrl();
+    if (basePath === '/toolkit') {
+      return `${window.location.origin}/chat`;
+    }
+    const url = new URL(window.location.href);
+    url.port = '18789';
+    url.pathname = '/chat';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
   }
 
   static styles = css`
@@ -292,6 +311,14 @@ export class ToolkitDashboard extends LitElement {
     .topology-agent-workspace select { min-width: 0; flex: 1 1 auto; margin: 0; font-size: 0.74rem; padding: 6px 8px; }
     .topology-agent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 0; }
     .topology-agent-actions .btn { flex: 1 1 120px; padding: 7px 10px; font-size: 0.75rem; min-width: 0; }
+    .topology-agent-session-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .topology-agent-session-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 6px 8px; border-radius: 999px; border: 1px solid #284653; background: rgba(0, 188, 212, 0.08); color: #ccebf2; font-size: 0.72rem; }
+    .topology-agent-session-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .topology-agent-session-chip button { border: 0; background: transparent; color: #ffb4ad; cursor: pointer; padding: 0 2px; font-size: 0.86rem; }
+    .topology-agent-session-panel { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+    .topology-agent-session-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid #333; border-radius: 10px; background: #171717; }
+    .topology-agent-session-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dbe9ee; font-size: 0.8rem; }
+    .topology-agent-session-row-meta { color: #7f929b; font-size: 0.7rem; }
     .topology-card-link-hint { margin-top: 8px; color: #00bcd4; font-size: 0.72rem; }
     .topology-hover-preview { border-color: #5b6f79; box-shadow: 0 0 0 1px rgba(110,198,255,0.22), 0 8px 18px rgba(0,0,0,0.2); }
     .topology-inspector-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid #333; }
@@ -3967,6 +3994,7 @@ export class ToolkitDashboard extends LitElement {
                             const hasSubagentsDisabled = entry.agent?.subagents?.enabled === false;
                             const primaryWorkspace = this.getWorkspaceForAgentId(entry.id);
                             const workspaceOptions = this.getWorkspaceAssignmentOptions(entry.id);
+                            const dashboardSessions = this.getTopologySessionsForAgent(entry.id);
                             const columnIndex = slot.columnCount > 1 ? (index % slot.columnCount) : 0;
                             const isSelected = selectedTopologyAgentId === entry.id;
                             return html`
@@ -4055,6 +4083,12 @@ export class ToolkitDashboard extends LitElement {
                                 </div>
 
                                 <div class="topology-agent-actions">
+                                  <button class="btn btn-primary" ?disabled=${this.topologyAgentSessionBusyKey !== null || !entry.enabled} @click=${(event: Event) => {
+                                    event.stopPropagation();
+                                    this.createTopologyAgentSession(entry.id);
+                                  }}>
+                                    New Chat
+                                  </button>
                                   <button class="btn btn-ghost" @click=${(event: Event) => {
                                     event.stopPropagation();
                                     this.selectTopologyDelegationSource(entry.id);
@@ -4074,6 +4108,24 @@ export class ToolkitDashboard extends LitElement {
                                     Details
                                   </button>
                                 </div>
+
+                                ${dashboardSessions.length > 0 ? html`
+                                  <div class="topology-agent-session-strip">
+                                    ${dashboardSessions.slice(0, 3).map((session) => html`
+                                      <div class="topology-agent-session-chip" title=${session.key}>
+                                        <span>${session.label}</span>
+                                        <button
+                                          type="button"
+                                          title="Close and delete session"
+                                          ?disabled=${this.topologyAgentSessionBusyKey !== null}
+                                          @click=${(event: Event) => {
+                                            event.stopPropagation();
+                                            this.closeTopologyAgentSession(session.key);
+                                          }}>×</button>
+                                      </div>
+                                    `)}
+                                  </div>
+                                ` : ''}
 
                                 ${this.topologyLinkSourceAgentId && this.topologyLinkSourceAgentId !== entry.id ? html`
                                   <div class="topology-card-link-hint">
@@ -4164,6 +4216,7 @@ export class ToolkitDashboard extends LitElement {
     const workspaceOptions = this.getWorkspaceAssignmentOptions(agent.id);
     const appliedToolsets = this.getAgentAppliedToolsets(agent);
     const effectiveToolState = this.getEffectiveAgentToolState(agent);
+    const dashboardSessions = this.getTopologySessionsForAgent(selectedEntry.id);
     const selectedMarkdownFile = VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.includes(this.topologyInspectorMarkdownFile as any)
       ? this.topologyInspectorMarkdownFile
       : 'AGENTS.md';
@@ -4204,6 +4257,41 @@ export class ToolkitDashboard extends LitElement {
 
         <div class="help-text" style="margin-top: 10px;">
           Switching the home workspace here updates the same primary workspace assignment used by the full agent editor.
+        </div>
+
+        <div class="topology-inspector-section">
+          <div class="card-header" style="padding: 0 0 10px; margin-bottom: 0; border-bottom: none;">
+            <h3 style="font-size: 1rem;">Interactive Agent Sessions</h3>
+            <button
+              class="btn btn-primary"
+              ?disabled=${this.topologyAgentSessionBusyKey !== null || !selectedEntry.enabled}
+              @click=${() => this.createTopologyAgentSession(selectedEntry.id)}>
+              New Persistent Chat
+            </button>
+          </div>
+          <div class="topology-help">
+            Opens this agent directly in a persistent OpenClaw chat session. Keep this dashboard open and it will best-effort abort and delete dashboard-created sessions when their chat tabs close.
+          </div>
+          ${this.topologyAgentSessionError ? html`<div class="error" style="margin-top: 10px;">${this.topologyAgentSessionError}</div>` : ''}
+          <div class="topology-agent-session-panel">
+            ${dashboardSessions.length === 0
+              ? html`<div class="toolset-preview-empty">No dashboard-created sessions for this agent yet.</div>`
+              : dashboardSessions.map((session) => html`
+                  <div class="topology-agent-session-row">
+                    <div>
+                      <div class="topology-agent-session-row-title">${session.label}</div>
+                      <div class="topology-agent-session-row-meta">${session.key}</div>
+                    </div>
+                    <button class="btn btn-ghost" @click=${() => this.openTopologyAgentSession(session.key, session.url)}>Open</button>
+                    <button
+                      class="btn btn-danger"
+                      ?disabled=${this.topologyAgentSessionBusyKey !== null}
+                      @click=${() => this.closeTopologyAgentSession(session.key)}>
+                      Close
+                    </button>
+                  </div>
+                `)}
+          </div>
         </div>
 
         <div class="topology-inspector-section">
@@ -5664,6 +5752,160 @@ export class ToolkitDashboard extends LitElement {
 
   clearTopologyNotice() {
     this.topologyNotice = '';
+  }
+
+  getTopologySessionsForAgent(agentId: string) {
+    return this.topologyAgentSessions.filter((session) => session.agentId === agentId);
+  }
+
+  async getGatewayAuthToken() {
+    if (!this.gatewayAuthTokenPromise) {
+      this.gatewayAuthTokenPromise = fetch(this.getBaseUrl() + '/api/gateway-auth', { cache: 'no-store' })
+        .then(async (response) => {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload.details || payload.error || `Gateway auth lookup failed (${response.status})`);
+          }
+          const token = String(payload.token || '').trim();
+          if (!token) {
+            throw new Error('OpenClaw gateway token is empty.');
+          }
+          return token;
+        });
+    }
+    return this.gatewayAuthTokenPromise;
+  }
+
+  async getTopologyAgentSessionUrl(sessionKey: string) {
+    const token = await this.getGatewayAuthToken();
+    const chatUrl = new URL(this.getOpenClawChatBaseUrl());
+    chatUrl.searchParams.set('session', sessionKey);
+    chatUrl.hash = `token=${encodeURIComponent(token)}`;
+    return chatUrl.toString();
+  }
+
+  openTopologyAgentSession(sessionKey: string, url: string) {
+    const opened = window.open(url, '_blank');
+    if (opened) {
+      this.monitorTopologyAgentSessionWindow(sessionKey, opened);
+    }
+    return opened;
+  }
+
+  monitorTopologyAgentSessionWindow(sessionKey: string, opened: Window) {
+    const existingTimer = this.topologyAgentSessionPollTimers.get(sessionKey);
+    if (existingTimer) {
+      window.clearInterval(existingTimer);
+    }
+    this.topologyAgentSessionWindows.set(sessionKey, opened);
+    const timer = window.setInterval(() => {
+      if (!opened.closed) {
+        return;
+      }
+      window.clearInterval(timer);
+      this.topologyAgentSessionPollTimers.delete(sessionKey);
+      this.topologyAgentSessionWindows.delete(sessionKey);
+      if (this.topologyAgentSessions.some((session) => session.key === sessionKey)) {
+        this.closeTopologyAgentSession(sessionKey, false);
+      }
+    }, 1500);
+    this.topologyAgentSessionPollTimers.set(sessionKey, timer);
+  }
+
+  async createTopologyAgentSession(agentId: string) {
+    const entry = this.getTopologyAgentEntryById(agentId);
+    if (!entry || this.topologyAgentSessionBusyKey) {
+      return;
+    }
+    this.topologyAgentSessionError = '';
+    this.topologyAgentSessionBusyKey = `create:${agentId}`;
+    const pendingWindow = window.open('about:blank', '_blank');
+    if (pendingWindow) {
+      pendingWindow.document.title = `${entry.name} - OpenClaw`;
+      pendingWindow.document.body.innerHTML = '<p style="font-family: sans-serif; padding: 16px;">Creating OpenClaw agent session...</p>';
+    }
+    try {
+      const label = `${entry.name} dashboard chat ${new Date().toLocaleTimeString()}`;
+      const response = await fetch(this.getBaseUrl() + '/api/agent-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, label })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.details || payload.error || `Session create failed (${response.status})`);
+      }
+      const key = String(payload.key || '').trim();
+      if (!key) {
+        throw new Error('OpenClaw did not return a session key.');
+      }
+      const chatUrl = await this.getTopologyAgentSessionUrl(key);
+      let opened = pendingWindow;
+      if (opened && !opened.closed) {
+        opened.location.href = chatUrl;
+        this.monitorTopologyAgentSessionWindow(key, opened);
+      } else {
+        opened = this.openTopologyAgentSession(key, chatUrl);
+      }
+      this.topologyAgentSessions = [
+        {
+          key,
+          sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
+          agentId,
+          label,
+          url: chatUrl,
+          createdAt: Date.now()
+        },
+        ...this.topologyAgentSessions
+      ];
+      this.setTopologyNotice(opened
+        ? `Opened a persistent ${entry.name} session. Closing that chat tab will best-effort delete it.`
+        : `Created ${entry.name} session. Popup was blocked; use the session chip/link to open it.`);
+    } catch (err: any) {
+      if (pendingWindow && !pendingWindow.closed) {
+        pendingWindow.close();
+      }
+      this.topologyAgentSessionError = String(err?.message || err);
+      this.setTopologyNotice(`Could not create agent session: ${this.topologyAgentSessionError}`);
+    } finally {
+      this.topologyAgentSessionBusyKey = null;
+    }
+  }
+
+  async closeTopologyAgentSession(sessionKey: string, closeWindow = true) {
+    if (!sessionKey || this.topologyAgentSessionBusyKey) {
+      return;
+    }
+    this.topologyAgentSessionError = '';
+    this.topologyAgentSessionBusyKey = `close:${sessionKey}`;
+    const timer = this.topologyAgentSessionPollTimers.get(sessionKey);
+    if (timer) {
+      window.clearInterval(timer);
+      this.topologyAgentSessionPollTimers.delete(sessionKey);
+    }
+    const opened = this.topologyAgentSessionWindows.get(sessionKey);
+    this.topologyAgentSessionWindows.delete(sessionKey);
+    if (closeWindow && opened && !opened.closed) {
+      opened.close();
+    }
+    try {
+      const response = await fetch(this.getBaseUrl() + '/api/agent-sessions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: sessionKey })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.details || payload.error || `Session delete failed (${response.status})`);
+      }
+      this.topologyAgentSessions = this.topologyAgentSessions.filter((session) => session.key !== sessionKey);
+      this.setTopologyNotice('Closed and deleted the dashboard-created agent session.');
+    } catch (err: any) {
+      this.topologyAgentSessionError = String(err?.message || err);
+      this.setTopologyNotice(`Could not delete agent session: ${this.topologyAgentSessionError}`);
+    } finally {
+      this.topologyAgentSessionBusyKey = null;
+    }
   }
 
   selectTopologyAgent(agentId: string) {

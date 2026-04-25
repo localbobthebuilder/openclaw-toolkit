@@ -460,6 +460,9 @@
       "minimumContextWindow": 24576,
       "contextWindow": 106496,
       "maxTokens": 8192
+    },
+    {
+      "modelRef": "google/gemini-3-flash-preview"
     }
   ],
   "endpoints": [
@@ -495,6 +498,9 @@
           "fallbackModelIds": [
             "qwen3:4b"
           ]
+        },
+        {
+          "modelRef": "google/gemini-3-flash-preview"
         }
       ],
       "ollama": {
@@ -889,10 +895,11 @@
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "google/gemini-3.1-flash-lite-preview",
+        "modelRef": "google/gemini-3-flash-preview",
         "thinkingDefault": "high",
         "candidateModelRefs": [
-          "google/gemini-3.1-flash-lite-preview"
+          "google/gemini-3.1-flash-lite-preview",
+          "google/gemini-3-flash-preview"
         ]
       },
       {
