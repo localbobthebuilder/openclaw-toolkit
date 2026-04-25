@@ -1537,11 +1537,29 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
     const telegramConfig = this.config?.telegram && typeof this.config.telegram === 'object'
       ? this.config.telegram
       : { enabled: true, defaultAccount: '', accounts: [] };
+    const defaultTelegramAccountId = String(telegramConfig.defaultAccount || '').trim() || 'default';
     const telegramAccounts = Array.isArray(telegramConfig.accounts) ? telegramConfig.accounts : [];
-    const telegramSetupStatus = this.telegramSetupStatus && typeof this.telegramSetupStatus === 'object' ? this.telegramSetupStatus : null;
-    const telegramConfigured = !!telegramSetupStatus?.configured || (
+    const telegramSetupRecords: any[] = [];
+    if (typeof this.getTelegramSetupStatusRecord === 'function') {
+      const defaultTelegramSetupStatus = this.getTelegramSetupStatusRecord(defaultTelegramAccountId, true);
+      if (defaultTelegramSetupStatus) {
+        telegramSetupRecords.push(defaultTelegramSetupStatus);
+      }
+      for (const account of telegramAccounts) {
+        const accountId = String(account?.id || '').trim();
+        if (!accountId) {
+          continue;
+        }
+        const accountSetupStatus = this.getTelegramSetupStatusRecord(accountId, false);
+        if (accountSetupStatus) {
+          telegramSetupRecords.push(accountSetupStatus);
+        }
+      }
+    }
+    const telegramConfiguredByStatus = telegramSetupRecords.some((record: any) => !!record?.configured);
+    const telegramConfigured = telegramConfiguredByStatus || (
       telegramConfig.enabled !== false &&
-      String(telegramConfig.defaultAccount || '').trim().length > 0 &&
+      defaultTelegramAccountId.length > 0 &&
       telegramAccounts.length > 0
     );
     const voiceNotes = this.config?.voiceNotes && typeof this.config.voiceNotes === 'object'
@@ -1624,7 +1642,9 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
         label: 'Telegram routing configured',
         complete: telegramConfigured,
         note: telegramConfigured
-          ? 'Telegram has a default account and setup data.'
+          ? telegramConfiguredByStatus
+            ? 'Telegram setup status reports a configured live account.'
+            : 'Telegram has a default account and at least one configured account.'
           : 'Optional. Configure this only if you want Telegram routing.'
       },
       {
