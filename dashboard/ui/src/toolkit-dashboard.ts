@@ -270,6 +270,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .topology-expander summary::-webkit-details-marker { display: none; }
     .topology-expander[open] summary { border-bottom: 1px solid #333; }
     .topology-expander-body { padding: 12px; }
+    .status-checklist-panel { margin-bottom: 20px; }
     .status-checklist-group { margin-top: 14px; }
     .status-checklist-group h4 { margin: 0 0 10px; color: #d6e0e5; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
     .status-checklist { display: flex; flex-direction: column; gap: 10px; }

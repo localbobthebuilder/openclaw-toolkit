@@ -70,7 +70,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
     `;
 
     return html`
-      <details class="topology-expander" open>
+      <details class="topology-expander status-checklist-panel" open>
         <summary>
           Configuration checklist
           <span class="badge">${checklist.ready ? 'minimal ready' : `${checklist.missingRequired} required missing`}</span>
