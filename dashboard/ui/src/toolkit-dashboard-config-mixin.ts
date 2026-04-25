@@ -1518,7 +1518,15 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
 
     const endpoints = Array.isArray(this.config.endpoints) ? this.config.endpoints : [];
     const workspaces = Array.isArray(this.config.workspaces) ? this.config.workspaces : [];
-    const agents = Array.isArray(this.config?.agents?.list) ? this.config.agents.list : [];
+    const agents = typeof this.getManagedAgentEntries === 'function'
+      ? this.getManagedAgentEntries()
+      : (Array.isArray(this.config?.agents?.list) ? this.config.agents.list.map((agent: any, idx: number) => ({
+          key: typeof agent?.key === 'string' && agent.key.trim().length > 0 ? agent.key : `agent:${idx}`,
+          agent
+        })).filter((entry: any) => entry.agent?.id) : []);
+    const agentIds = agents
+      .map(({ agent }: any) => String(agent?.id || '').trim())
+      .filter((agentId: string) => agentId.length > 0);
     const endpointAgentIds = new Set(
       endpoints.flatMap((endpoint: any) => Array.isArray(endpoint?.agents) ? endpoint.agents : [])
         .map((agentId: any) => String(agentId || '').trim())
@@ -1533,7 +1541,7 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
       const agentId = String(agent?.id || '').trim();
       return !!agentId && workspaces.some((workspace: any) => Array.isArray(workspace?.agents) && workspace.agents.includes(agentId));
     });
-    const agentsWithEndpoint = agents.filter(({ agent }: any) => endpointAgentIds.has(String(agent?.id || '')));
+    const agentsWithEndpoint = agents.filter(({ agent }: any) => endpointAgentIds.has(String(agent?.id || '').trim()));
     const telegramConfig = this.config?.telegram && typeof this.config.telegram === 'object'
       ? this.config.telegram
       : { enabled: true, defaultAccount: '', accounts: [] };
@@ -1612,27 +1620,27 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
       },
       {
         label: 'At least one agent configured',
-        complete: agents.length > 0,
-        note: agents.length > 0
-          ? `${agents.length} managed agent${agents.length === 1 ? '' : 's'} configured.`
+        complete: agentIds.length > 0,
+        note: agentIds.length > 0
+          ? `${agentIds.length} managed agent${agentIds.length === 1 ? '' : 's'} configured.`
           : 'Add your first managed agent in Configuration > Agents.'
       },
       {
         label: 'Agents assigned to workspaces',
-        complete: agents.length > 0 && agentsWithWorkspace.length === agents.length,
-        note: agents.length > 0
-          ? agentsWithWorkspace.length === agents.length
+        complete: agentIds.length > 0 && agentsWithWorkspace.length === agentIds.length,
+        note: agentIds.length > 0
+          ? agentsWithWorkspace.length === agentIds.length
             ? 'Every agent has a workspace home base.'
-            : `${agents.length - agentsWithWorkspace.length} agent${agents.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace assignment.`
+            : `${agentIds.length - agentsWithWorkspace.length} agent${agentIds.length - agentsWithWorkspace.length === 1 ? ' is' : 's are'} still missing a workspace assignment.`
           : 'Add a managed agent first.'
       },
       {
         label: 'Agents assigned to endpoints',
-        complete: agents.length > 0 && agentsWithEndpoint.length === agents.length,
-        note: agents.length > 0
-          ? agentsWithEndpoint.length === agents.length
+        complete: agentIds.length > 0 && agentsWithEndpoint.length === agentIds.length,
+        note: agentIds.length > 0
+          ? agentsWithEndpoint.length === agentIds.length
             ? 'Every agent is placed on an endpoint.'
-            : `${agents.length - agentsWithEndpoint.length} agent${agents.length - agentsWithEndpoint.length === 1 ? ' is' : 's are'} still missing endpoint placement.`
+            : `${agentIds.length - agentsWithEndpoint.length} agent${agentIds.length - agentsWithEndpoint.length === 1 ? ' is' : 's are'} still missing endpoint placement.`
           : 'Add a managed agent first.'
       }
     ];

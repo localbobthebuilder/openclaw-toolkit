@@ -91,6 +91,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     header > div { min-width: 0; }
     h1 { margin: 0; font-size: 1.4rem; color: #fff; display: flex; align-items: center; gap: 10px; }
     .badge { background: #00bcd4; color: #000; font-size: 0.7rem; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
+    .badge-warning { background: #ff9800; color: #000; }
     .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; min-width: 0; }
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
     .card-header h3 { margin: 0; font-size: 1.1rem; color: #00bcd4; }
@@ -166,6 +167,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .status-card-header h4 { margin: 0; color: #fff; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; }
     .status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .status-online { background: #4caf50; box-shadow: 0 0 8px rgba(76, 175, 80, 0.5); }
+    .status-warning { background: #ff9800; box-shadow: 0 0 8px rgba(255, 152, 0, 0.5); }
     .status-offline { background: #f44336; box-shadow: 0 0 8px rgba(244, 67, 54, 0.5); }
     .status-content { font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.72rem; color: #bbb; white-space: pre; overflow-x: auto; line-height: 1.6; padding: 15px; background: #0f0f0f; flex-grow: 1; }
     .status-content::-webkit-scrollbar { height: 6px; }
@@ -274,7 +276,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .status-checklist-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #333; border-radius: 10px; background: #171717; }
     .status-checklist-item.done { border-color: #4caf50; }
     .status-checklist-item.active { border-color: #00bcd4; }
-    .status-checklist-item.optional { border-style: dashed; }
+    .status-checklist-item.optional { border-style: dashed; border-color: #7a5a1d; }
     .status-checklist-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .status-checklist-title { display: flex; align-items: center; gap: 8px; color: #fff; font-weight: 600; }
     .status-checklist-note { color: #8a8a8a; font-size: 0.8rem; line-height: 1.45; }

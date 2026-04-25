@@ -52,12 +52,12 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
       <div class="status-checklist-item ${item.complete ? 'done' : 'active'} ${optional ? 'optional' : 'required'}">
         <div class="status-checklist-copy">
           <div class="status-checklist-title">
-            <span class="status-indicator ${item.complete ? 'status-online' : 'status-offline'}"></span>
+            <span class="status-indicator ${item.complete ? 'status-online' : optional ? 'status-warning' : 'status-offline'}"></span>
             <span>${item.label}</span>
           </div>
           <div class="status-checklist-note">${item.note}</div>
         </div>
-        <span class="badge">${item.complete ? 'configured' : optional ? 'optional' : 'needs setup'}</span>
+        <span class="badge ${!item.complete && optional ? 'badge-warning' : ''}">${item.complete ? 'configured' : optional ? 'optional' : 'needs setup'}</span>
       </div>
     `;
 
