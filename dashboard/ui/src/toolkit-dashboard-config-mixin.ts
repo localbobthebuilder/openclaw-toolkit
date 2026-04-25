@@ -1581,6 +1581,11 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
       String(voiceNotes.mode || '').trim().length > 0 &&
       String(voiceNotes.whisperModel || '').trim().length > 0
     );
+    const toolsets = typeof this.getToolsetsList === 'function'
+      ? this.getToolsetsList()
+      : (Array.isArray(this.config?.toolsets?.list) ? this.config.toolsets.list : []);
+    const customToolsetCount = toolsets.filter((toolset: any) => String(toolset?.key || '').trim() && String(toolset?.key || '').trim() !== 'minimal').length;
+    const toolsetsConfigured = customToolsetCount > 0;
 
     const required = [
       {
@@ -1674,6 +1679,13 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
             ? `Voice notes are enabled with ${voiceNotes.mode} and ${voiceNotes.whisperModel}.`
             : 'Voice notes are disabled, which is fine if you do not need them.'
           : 'Voice notes are enabled, but mode or model still needs attention.'
+      },
+      {
+        label: 'Additional toolsets defined',
+        complete: toolsetsConfigured,
+        note: toolsetsConfigured
+          ? `${customToolsetCount} custom toolset${customToolsetCount === 1 ? '' : 's'} defined beyond the built-in minimal baseline.`
+          : 'Only the built-in minimal toolset exists. Add custom toolsets if you want more specific allow/deny layers.'
       }
     ];
 
