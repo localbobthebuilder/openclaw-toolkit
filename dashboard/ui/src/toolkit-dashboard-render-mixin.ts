@@ -3,7 +3,9 @@ import { ToolkitDashboardAgentsWorkspacesMixin } from './toolkit-dashboard-agent
 import { ToolkitDashboardConfigMixin } from './toolkit-dashboard-config-mixin';
 import { ToolkitDashboardManagementMixin } from './toolkit-dashboard-management-mixin';
 import { ToolkitDashboardTelegramMixin } from './toolkit-dashboard-telegram-mixin';
+import { ToolkitDashboardTopologyCatalogMixin } from './toolkit-dashboard-topology-catalog-mixin';
 import { ToolkitDashboardTopologyMixin } from './toolkit-dashboard-topology-mixin';
+import { ToolkitDashboardTopologyAssignmentMixin } from './toolkit-dashboard-topology-assignment-mixin';
 import { ToolkitDashboardTopologyGraphMixin } from './toolkit-dashboard-topology-graph-mixin';
 import { ToolkitDashboardTopologySessionMixin } from './toolkit-dashboard-topology-session-mixin';
 import { ToolkitDashboardTopologyViewMixin } from './toolkit-dashboard-topology-view-mixin';
@@ -17,9 +19,11 @@ export const ToolkitDashboardRenderMixin = <TBase extends Constructor<LitElement
     const WithTelegram = ToolkitDashboardTelegramMixin(Base);
     const WithConfig = ToolkitDashboardConfigMixin(WithTelegram);
     const WithTopology = ToolkitDashboardTopologyMixin(WithConfig);
-    const WithGraph = ToolkitDashboardTopologyGraphMixin(WithTopology);
+    const WithCatalog = ToolkitDashboardTopologyCatalogMixin(WithTopology);
+    const WithGraph = ToolkitDashboardTopologyGraphMixin(WithCatalog);
     const WithSession = ToolkitDashboardTopologySessionMixin(WithGraph);
-    const WithShell = ToolkitDashboardShellViewMixin(WithSession);
+    const WithAssignment = ToolkitDashboardTopologyAssignmentMixin(WithSession);
+    const WithShell = ToolkitDashboardShellViewMixin(WithAssignment);
     const WithTopologyView = ToolkitDashboardTopologyViewMixin(WithShell);
     const WithWorkspaces = ToolkitDashboardWorkspacesMixin(WithTopologyView);
     const WithAgents = ToolkitDashboardAgentsWorkspacesMixin(WithWorkspaces);
