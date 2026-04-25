@@ -1,6 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
+import { renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -25,20 +26,17 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
         ${repeat(endpoints, (ep: any) => ep.key, (ep: any) => {
           const runtime = this.getEndpointOllama(ep);
           const assignedAgentCount = this.getEndpointAgentIds(ep).length;
-          return html`
-          <div class="item-row">
-            <div class="item-info">
-              <span class="item-title">${ep.key} ${ep.default ? html`<span class="badge" style="background: #ffc107;">Default</span>` : ''}</span>
-              <span class="item-sub">${runtime?.hostBaseUrl || 'Hosted-only endpoint'} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted | ${assignedAgentCount} assigned</span>
-            </div>
-            <div style="display: flex; gap: 8px;">
+          return renderSummaryRow({
+            title: html`${ep.key} ${ep.default ? html`<span class="badge" style="background: #ffc107;">Default</span>` : ''}`,
+            subtitle: `${runtime?.hostBaseUrl || 'Hosted-only endpoint'} | ${this.getEndpointModels(ep).length} local, ${this.getEndpointHostedModels(ep).length} hosted | ${assignedAgentCount} assigned`,
+            actions: html`
               <button class="btn btn-secondary" @click=${() => this.editingEndpointKey = ep.key}>Configure Endpoint</button>
               ${this.canRemoveEndpoint(ep) ? html`
                 <button class="btn btn-danger" @click=${() => this.removeEndpointByKey(ep.key)}>Remove</button>
               ` : ''}
-            </div>
-          </div>
-        `})}
+            `
+          });
+        })}
       </div>
     `;
   }
@@ -108,31 +106,33 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
 
             <h4 style="color: #666; margin-top: 24px;">Assigned Agents</h4>
             <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Endpoints now own agent placement. Agents listed here belong to this machine/workbench.</p>
-            <div class="tag-list">
-                ${assignedAgents.map(({ agent }: any) => html`
-                    <div class="tag">
-                        ${agent.name ? `${agent.name} (${agent.id})` : agent.id}
-                        <span class="tag-remove" @click=${() => {
-                            this.setAgentEndpointAssignment(agent, null);
-                            this.requestUpdate();
-                        }}>×</span>
-                    </div>
-                `)}
-            </div>
-            <div style="margin-top: 10px; margin-bottom: 20px;">
-                <select @change=${(e: any) => {
-                    const agentId = e.target.value;
-                    const entry = this.getManagedAgentEntries().find((candidate: any) => String(candidate?.agent?.id || '') === agentId);
-                    if (entry) {
-                        this.setAgentEndpointAssignment(entry.agent, ep.key);
-                        this.requestUpdate();
-                    }
-                    e.target.value = '';
-                }}>
-                    <option value="">${availableAgents.length === 0 ? 'All configured agents are already assigned' : '+ Add Agent to Endpoint'}</option>
-                    ${availableAgents.map(({ agent }: any) => html`<option value=${agent.id}>${agent.name ? `${agent.name} (${agent.id})` : agent.id}</option>`)}
-                </select>
-            </div>
+            ${renderSelectableTagList(
+              assignedAgents,
+              ({ agent }: any) => html`
+                <div class="tag">
+                  ${agent.name ? `${agent.name} (${agent.id})` : agent.id}
+                  <span class="tag-remove" @click=${() => {
+                    this.setAgentEndpointAssignment(agent, null);
+                    this.requestUpdate();
+                  }}>×</span>
+                </div>
+              `,
+              availableAgents.map(({ agent }: any) => ({
+                value: agent.id,
+                label: agent.name ? `${agent.name} (${agent.id})` : agent.id
+              })),
+              (agentId) => {
+                const entry = this.getManagedAgentEntries().find((candidate: any) => String(candidate?.agent?.id || '') === agentId);
+                if (entry) {
+                  this.setAgentEndpointAssignment(entry.agent, ep.key);
+                  this.requestUpdate();
+                }
+              },
+              availableAgents.length === 0 ? 'All configured agents are already assigned' : '+ Add Agent to Endpoint',
+              undefined,
+              availableAgents.length === 0,
+              'margin-top: 10px; margin-bottom: 20px;'
+            )}
 
             ${runtime ? html`
             <div class="grid-2">

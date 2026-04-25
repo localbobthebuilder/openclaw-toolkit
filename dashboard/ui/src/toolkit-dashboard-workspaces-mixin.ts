@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
 import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
-import { renderSelectableTagList } from './toolkit-dashboard-ui-helpers';
+import { renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -47,21 +47,17 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
                   .filter(Boolean)
                   .map((candidate: any) => candidate.name || candidate.id)
               : [];
-            return html`
-              <div class="item-row">
-                <div class="item-info">
-                  <span class="item-title">${workspace.name || workspace.id}</span>
-                  <span class="item-sub">
-                    ID: ${workspace.id} | Mode: ${workspace.mode} | Home Base Path: ${workspace.path || '(unset)'} | Occupants: ${occupants.length > 0 ? occupants.map(({ agent }: any) => agent.name || agent.id).join(', ') : 'none'}
-                    ${workspace.mode === 'private' ? ` | Shared access: ${sharedAccessLabels.length > 0 ? sharedAccessLabels.join(', ') : 'none'}` : ''}
-                  </span>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <button class="btn btn-secondary" @click=${() => this.editingWorkspaceId = workspace.id}>Configure</button>
-                  <button class="btn btn-danger" @click=${() => this.removeWorkspaceById(workspace.id)}>Remove</button>
-                </div>
-              </div>
-            `;
+            return renderSummaryRow({
+              title: workspace.name || workspace.id,
+              subtitle: html`
+                ID: ${workspace.id} | Mode: ${workspace.mode} | Home Base Path: ${workspace.path || '(unset)'} | Occupants: ${occupants.length > 0 ? occupants.map(({ agent }: any) => agent.name || agent.id).join(', ') : 'none'}
+                ${workspace.mode === 'private' ? ` | Shared access: ${sharedAccessLabels.length > 0 ? sharedAccessLabels.join(', ') : 'none'}` : ''}
+              `,
+              actions: html`
+                <button class="btn btn-secondary" @click=${() => this.editingWorkspaceId = workspace.id}>Configure</button>
+                <button class="btn btn-danger" @click=${() => this.removeWorkspaceById(workspace.id)}>Remove</button>
+              `
+            });
           })}
         </div>
       `;

@@ -69,6 +69,22 @@ export function renderSelectableTagList<T>(
   `;
 }
 
+export function renderSummaryRow(params: {
+  title: MaybeTemplate;
+  subtitle: MaybeTemplate;
+  actions?: MaybeTemplate;
+}) {
+  return html`
+    <div class="item-row">
+      <div class="item-info">
+        <span class="item-title">${params.title}</span>
+        <span class="item-sub">${params.subtitle}</span>
+      </div>
+      ${params.actions !== undefined ? html`<div style="display: flex; gap: 8px;">${params.actions}</div>` : nothing}
+    </div>
+  `;
+}
+
 export function renderTwoColumnGrid(left: MaybeTemplate, right: MaybeTemplate) {
   return html`
     <div class="grid-2">
