@@ -1,4 +1,5 @@
 import { LitElement, html } from 'lit';
+import { renderCardSection, renderHelpText, renderPreviewCard, renderTagList } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -11,35 +12,24 @@ export const ToolkitDashboardAgentTelegramRoutingMixin = <TBase extends Construc
         return html``;
       }
 
-      return html`
-        <div class="card" style="margin-bottom: 20px; border-color: #5c6bc0;">
-          <div class="card-header">
-            <h3>Telegram Routing</h3>
-            <span class="badge">Inbound</span>
-          </div>
-          <div class="help-text" style="margin-top: 0; margin-bottom: 10px;">This agent is currently the managed Telegram target for:</div>
-          ${telegramRoutesForAgent.map((route: any) => html`
-            <div class="applied-toolset-card" style="margin-bottom: 10px;">
-              <div class="applied-toolset-header">
-                <strong>${String(route?.accountId || this.getDefaultTelegramAccountId())}</strong>
-                <span class="badge">Telegram</span>
-              </div>
-              <div class="toolset-preview-rows">
-                <div class="toolset-preview-row">
-                  <div class="toolset-preview-label">Route</div>
-                  <div class="toolset-preview-tags">
-                    ${String(route?.matchType || '').toLowerCase() === 'trusted-dms' ? html`<div class="tag">Trusted DMs</div>` : ''}
-                    ${String(route?.matchType || '').toLowerCase() === 'trusted-groups' ? html`<div class="tag">Trusted Groups</div>` : ''}
-                    ${String(route?.matchType || '').toLowerCase() === 'group' ? html`<div class="tag">Group ${route?.peerId || '(missing id)'}</div>` : ''}
-                    ${String(route?.matchType || '').toLowerCase() === 'direct' ? html`<div class="tag">DM ${route?.peerId || '(missing id)'}</div>` : ''}
-                    ${!route?.matchType ? html`<div class="toolset-preview-empty">No inbound Telegram route details available.</div>` : ''}
-                  </div>
-                </div>
-              </div>
-            </div>
-          `)}
-          <div class="help-text" style="margin-top: 8px;">Change these routes on <strong>Configuration -&gt; Features -&gt; Telegram</strong>.</div>
-        </div>
-      `;
+      return renderCardSection('Telegram Routing', html`
+        ${renderHelpText('This agent is currently the managed Telegram target for:', 'margin-top: 0; margin-bottom: 10px;')}
+        ${telegramRoutesForAgent.map((route: any) => renderPreviewCard(
+          String(route?.accountId || this.getDefaultTelegramAccountId()),
+          [{
+            label: 'Route',
+            body: renderTagList([
+              String(route?.matchType || '').toLowerCase() === 'trusted-dms' ? 'Trusted DMs' : null,
+              String(route?.matchType || '').toLowerCase() === 'trusted-groups' ? 'Trusted Groups' : null,
+              String(route?.matchType || '').toLowerCase() === 'group' ? `Group ${route?.peerId || '(missing id)'}` : null,
+              String(route?.matchType || '').toLowerCase() === 'direct' ? `DM ${route?.peerId || '(missing id)'}` : null
+            ].filter((entry): entry is string => !!entry), (item) => html`<div class="tag">${item}</div>`, html`<div class="toolset-preview-empty">No inbound Telegram route details available.</div>`)
+          }],
+          undefined,
+          html`<span class="badge">Telegram</span>`,
+          'margin-bottom: 10px;'
+        ))}
+        ${renderHelpText(html`Change these routes on <strong>Configuration -&gt; Features -&gt; Telegram</strong>.`, 'margin-top: 8px;')}
+      `, html`<span class="badge">Inbound</span>`, '', 'margin-bottom: 20px; border-color: #5c6bc0;');
     }
   };
