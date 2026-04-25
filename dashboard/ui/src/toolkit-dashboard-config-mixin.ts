@@ -1612,11 +1612,11 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
           : 'Pick a default endpoint first.'
       },
       {
-        label: 'At least one workspace configured',
+        label: 'Workspaces defined',
         complete: workspaces.length > 0,
         note: workspaces.length > 0
-          ? `${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} configured.`
-          : 'Add a shared or private workspace in Configuration > Workspaces.'
+          ? `${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} defined.`
+          : 'Create at least one shared or private workspace in Configuration > Workspaces.'
       },
       {
         label: 'Workspace paths filled in',
