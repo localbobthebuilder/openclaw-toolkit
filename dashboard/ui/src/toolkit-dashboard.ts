@@ -143,17 +143,19 @@ export class ToolkitDashboard extends LitElement {
   }
 
   static styles = css`
-    :host { display: block; width: 100%; min-height: 100vh; background-color: #0f0f0f; }
-    .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; width: 100vw; }
+    :host { display: block; width: 100%; min-height: 100vh; background-color: #0f0f0f; overflow-x: clip; }
+    .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; width: 100%; }
     aside { background: #1a1a1a; border-right: 1px solid #333; padding: 20px 0; display: flex; flex-direction: column; }
+    .brand { padding: 0 24px 20px; }
     .nav-item { padding: 12px 24px; cursor: pointer; color: #aaa; transition: all 0.2s; border-left: 3px solid transparent; display: flex; align-items: center; gap: 10px; }
     .nav-item:hover { background: #252525; color: #fff; }
     .nav-item.active { background: #2a2a2a; color: #00bcd4; border-left-color: #00bcd4; }
-    main { padding: 30px; overflow-y: auto; max-height: 100vh; }
-    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+    main { min-width: 0; padding: 30px; overflow-y: auto; max-height: 100vh; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 30px; }
+    header > div { min-width: 0; }
     h1 { margin: 0; font-size: 1.4rem; color: #fff; display: flex; align-items: center; gap: 10px; }
     .badge { background: #00bcd4; color: #000; font-size: 0.7rem; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
-    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; min-width: 0; }
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
     .card-header h3 { margin: 0; font-size: 1.1rem; color: #00bcd4; }
     .form-group { margin-bottom: 15px; }
@@ -168,7 +170,7 @@ export class ToolkitDashboard extends LitElement {
     input, select, textarea { width: 100%; box-sizing: border-box; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
     input:focus, select:focus, textarea:focus { border-color: #00bcd4; outline: none; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .btn { padding: 10px 18px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: opacity 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn { padding: 10px 18px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: opacity 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; }
     .btn-primary { background: #00bcd4; color: #000; }
     .btn-secondary { background: #333; color: #fff; }
     .btn-danger { background: #f44336; color: #fff; }
@@ -177,7 +179,7 @@ export class ToolkitDashboard extends LitElement {
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .log-container { background: #000; height: 500px; overflow-y: auto; padding: 15px; border-radius: 6px; font-family: monospace; border: 1px solid #333; }
     .log-entry { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
-    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #252525; border: 1px solid #333; border-radius: 4px; margin-bottom: 8px; }
+    .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; background: #252525; border: 1px solid #333; border-radius: 4px; margin-bottom: 8px; min-width: 0; }
     .item-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
     .item-title { font-weight: bold; color: #fff; }
     .item-sub { font-size: 0.75rem; color: #777; }
@@ -196,15 +198,15 @@ export class ToolkitDashboard extends LitElement {
     .model-catalog-help-card { background: #161616; border: 1px solid #2e2e2e; border-radius: 8px; padding: 12px; }
     .model-catalog-help-card strong { color: #fff; display: block; margin-bottom: 6px; }
     .model-catalog-help-card span { color: #9a9a9a; font-size: 0.8rem; line-height: 1.45; }
-    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
     .tab { padding: 10px 20px; cursor: pointer; border: 1px solid #333; background: #1a1a1a; border-radius: 4px; font-size: 0.9rem; color: #888; transition: all 0.2s; }
     .tab:hover { background: #252525; color: #fff; border-color: #444; }
     .tab.active { background: #00bcd4; color: #000; border-color: #00bcd4; font-weight: 600; }
-    .unsaved-banner { background: #ff9800; color: #000; padding: 10px 20px; border-radius: 4px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+    .unsaved-banner { background: #ff9800; color: #000; padding: 10px 20px; border-radius: 4px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: bold; }
     .toggle-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
     .toggle-switch input { width: auto; }
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-    .modal { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; width: 500px; max-height: 80vh; display: flex; flex-direction: column; }
+    .modal { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; width: min(500px, calc(100vw - 32px)); max-height: 80vh; display: flex; flex-direction: column; }
     .modal-body { padding: 20px; overflow-y: auto; }
     .selectable-item { padding: 10px; background: #252525; border: 1px solid #333; border-radius: 4px; margin-bottom: 8px; cursor: pointer; }
     .selectable-item:hover { border-color: #00bcd4; }
@@ -343,6 +345,103 @@ export class ToolkitDashboard extends LitElement {
       .model-catalog-header { flex-direction: column; }
       .model-catalog-actions { justify-content: stretch; }
       .model-catalog-actions .btn { flex: 1 1 180px; }
+    }
+    @media (max-width: 820px) {
+      .layout { display: flex; flex-direction: column; min-height: 100vh; }
+      aside {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        padding: 12px;
+        border-right: 0;
+        border-bottom: 1px solid #333;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+      }
+      .brand { padding: 0; }
+      .brand h1 { font-size: 1.05rem; }
+      .nav-item {
+        border-left: 0;
+        border-bottom: 3px solid transparent;
+        border-radius: 10px;
+        padding: 10px 12px;
+        white-space: nowrap;
+        justify-content: center;
+      }
+      aside > .nav-item,
+      aside > div:not(.brand) { min-width: 0; }
+      aside {
+        grid-template-columns: repeat(5, minmax(max-content, 1fr));
+        overflow-x: auto;
+        scrollbar-width: thin;
+      }
+      .brand { grid-column: 1 / -1; }
+      .nav-item.active { border-left-color: transparent; border-bottom-color: #00bcd4; }
+      main { max-height: none; overflow: visible; padding: 18px; }
+      header { align-items: flex-start; flex-direction: column; margin-bottom: 18px; }
+      header > div { width: 100%; flex-wrap: wrap; }
+      header .btn { flex: 0 1 auto; }
+      .card { padding: 16px; border-radius: 12px; }
+      .card-header { align-items: flex-start; flex-direction: column; gap: 10px; }
+      .card-header .btn { width: 100%; }
+      .grid-2,
+      .status-grid,
+      .model-catalog-help,
+      .model-catalog-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+      .status-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .item-row,
+      .setup-step,
+      .unsaved-banner { align-items: stretch; flex-direction: column; }
+      .item-row .btn,
+      .setup-step .btn,
+      .unsaved-banner .btn { width: 100%; }
+      .unsaved-banner > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+      .tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+      .tab { white-space: nowrap; flex: 0 0 auto; }
+      .log-container { height: 48vh; min-height: 320px; }
+      .modal-overlay { align-items: stretch; padding: 12px; }
+      .modal { width: 100%; max-height: calc(100vh - 24px); }
+      .modal-body { padding: 14px; }
+      .fallback-row,
+      .topology-agent-session-row { grid-template-columns: minmax(0, 1fr); }
+      .fallback-actions,
+      .topology-agent-session-row .btn { width: 100%; }
+      .topology-toolbar,
+      .topology-toolbar-controls { align-items: stretch; flex-direction: column; }
+      .topology-legend,
+      .topology-legend-item { width: 100%; box-sizing: border-box; }
+      .topology-scroll {
+        margin: 0 -16px;
+        padding: 0 16px 12px;
+        scroll-snap-type: x proximity;
+      }
+      .topology-board { min-width: 760px !important; }
+      .topology-slot { scroll-snap-align: start; }
+      .topology-agent-header,
+      .topology-agent-workspace { align-items: stretch; flex-direction: column; }
+      .topology-agent-header-actions { justify-content: space-between; }
+      .topology-agent-actions .btn { flex-basis: 100%; }
+      .topology-inspector-meta div { overflow-wrap: anywhere; }
+      .topology-inspector-meta select { width: 100%; margin: 8px 0 0 !important; min-width: 0 !important; }
+    }
+    @media (max-width: 520px) {
+      main { padding: 12px; }
+      aside { grid-template-columns: repeat(5, max-content); }
+      .nav-item { font-size: 0.82rem; padding: 9px 10px; }
+      .card { padding: 12px; }
+      h1 { font-size: 1rem; }
+      h2 { font-size: 1.2rem; }
+      .btn { padding: 10px 12px; }
+      .model-catalog-card { padding: 12px; }
+      .model-catalog-actions .btn { flex-basis: 100%; }
+      .setup-guide { padding: 18px; }
+      .status-card-header { align-items: flex-start; flex-direction: column; gap: 8px; }
+      .status-card-header .btn { width: 100%; }
+      .topology-board { min-width: 680px !important; }
+      .topology-agent { min-height: 150px; }
+      .topology-agent-session-chip { width: 100%; box-sizing: border-box; }
     }
   `;
 
@@ -1155,7 +1254,7 @@ export class ToolkitDashboard extends LitElement {
     return html`
       <div class="layout">
         <aside>
-          <div style="padding: 0 24px 20px;">
+          <div class="brand">
             <h1>OpenClaw <span class="badge">Toolkit</span></h1>
           </div>
           
