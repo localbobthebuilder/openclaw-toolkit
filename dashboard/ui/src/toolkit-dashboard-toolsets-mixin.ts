@@ -7,6 +7,20 @@ export const ToolkitDashboardToolsetsMixin = <TBase extends Constructor<LitEleme
   class ToolkitDashboardToolsetsMixin extends Base {
     [key: string]: any;
 
+    addToolset() {
+      const nextToolsets = [...this.getToolsetsList()];
+      let counter = nextToolsets.length + 1;
+      let key = `toolset-${counter}`;
+      while (this.getToolsetByKey(key)) {
+        counter += 1;
+        key = `toolset-${counter}`;
+      }
+      nextToolsets.push(this.createToolsetRecord({ key, name: `Toolset ${counter}`, allow: [], deny: [] }));
+      this.ensureToolsetsConfig(this.config);
+      this.config.toolsets.list = nextToolsets;
+      this.requestUpdate();
+    }
+
     renderToolsetsConfig() {
       const toolsets = this.getToolsetsList();
 
