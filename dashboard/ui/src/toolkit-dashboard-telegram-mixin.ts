@@ -45,6 +45,76 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
   }
 
 
+  renderStatus() {
+    const telegramLiveCheckState = this.getTelegramLiveCheckState();
+    const sections = this.parseStatusOutput(this.statusOutput);
+
+    if (!this.statusLoaded && sections.length === 0) {
+      return html`
+        <div class="setup-guide">
+          <h2>System Status</h2>
+          <p class="subtitle">Loading dashboard health checks...</p>
+          <div class="setup-steps">
+            <div class="setup-step active">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Collecting service status</div>
+                <div class="step-desc">The dashboard is fetching Docker, gateway, and bootstrap state from the local toolkit backend.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="setup-guide">
+        <h2>System Status</h2>
+        <p class="subtitle">Current dashboard health summary and service checks.</p>
+        <div class="setup-steps">
+          <div class="setup-step ${telegramLiveCheckState.available ? 'done' : 'active'}">
+            <div class="step-num">${telegramLiveCheckState.available ? '✓' : '!'}</div>
+            <div class="step-body">
+              <div class="step-title">Telegram live checks</div>
+              <div class="step-desc">
+                ${telegramLiveCheckState.available
+                  ? 'The live Telegram channel is ready.'
+                  : telegramLiveCheckState.reason === 'loading'
+                    ? 'Waiting for the status probe to complete.'
+                    : telegramLiveCheckState.reason === 'services-down'
+                      ? 'Telegram checks are blocked because Docker or the gateway is not fully ready.'
+                      : 'Telegram checks are not available yet.'}
+              </div>
+            </div>
+            <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Status</button>
+          </div>
+        </div>
+      </div>
+
+      ${sections.length === 0 ? html`
+        <div class="card">
+          <div class="help-text">No status output is available yet. Try refreshing the status probe.</div>
+        </div>
+      ` : html`
+        <div class="status-grid">
+          ${sections.map((section) => html`
+            <div class="status-card">
+              <div class="status-card-header">
+                <h4>
+                  <span class="status-indicator status-${section.status}"></span>
+                  ${section.title}
+                </h4>
+                <span class="badge">${section.status}</span>
+              </div>
+              <div class="status-content">${section.content}</div>
+            </div>
+          `)}
+        </div>
+      `}
+    `;
+  }
+
+
   renderContent() {
     switch (this.activeTab) {
       case 'status': return this.renderStatus();
