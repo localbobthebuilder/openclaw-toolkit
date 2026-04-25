@@ -1,4 +1,4 @@
-import { LitElement, html } from 'lit';
+import { LitElement } from 'lit';
 import {
   AVAILABLE_TOOL_OPTIONS,
   MINIMAL_CHAT_ONLY_ALLOW,
@@ -353,20 +353,6 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
       return toolId;
     }
     return tool.note ? `${tool.id} (${tool.note})` : tool.id;
-  }
-
-  renderToolLabel(toolId: string) {
-    const tool = this.getToolOption(toolId);
-    if (!tool) {
-      return html`${toolId}`;
-    }
-
-    return html`
-      <span class="tool-label">
-        <span>${tool.id}</span>
-        ${tool.note ? html`<span class="tool-note-badge">${tool.note}</span>` : ''}
-      </span>
-    `;
   }
 
   formatToolIdList(toolIds: string[], emptyLabel = 'none') {

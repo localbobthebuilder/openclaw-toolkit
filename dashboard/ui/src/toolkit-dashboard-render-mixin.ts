@@ -6,8 +6,10 @@ import { ToolkitDashboardTelegramMixin } from './toolkit-dashboard-telegram-mixi
 import { ToolkitDashboardTopologyCatalogMixin } from './toolkit-dashboard-topology-catalog-mixin';
 import { ToolkitDashboardTopologyAgentsMixin } from './toolkit-dashboard-topology-agents-mixin';
 import { ToolkitDashboardTopologyModelsMixin } from './toolkit-dashboard-topology-models-mixin';
+import { ToolkitDashboardTopologyModelsViewMixin } from './toolkit-dashboard-topology-models-view-mixin';
 import { ToolkitDashboardStatusLogicMixin } from './toolkit-dashboard-status-logic-mixin';
 import { ToolkitDashboardTelegramLogicMixin } from './toolkit-dashboard-telegram-logic-mixin';
+import { ToolkitDashboardStatusViewMixin } from './toolkit-dashboard-status-view-mixin';
 import { ToolkitDashboardTopologyMixin } from './toolkit-dashboard-topology-mixin';
 import { ToolkitDashboardTopologyAssignmentMixin } from './toolkit-dashboard-topology-assignment-mixin';
 import { ToolkitDashboardTopologyGraphMixin } from './toolkit-dashboard-topology-graph-mixin';
@@ -24,11 +26,13 @@ export const ToolkitDashboardRenderMixin = <TBase extends Constructor<LitElement
     const WithConfig = ToolkitDashboardConfigMixin(WithTelegram);
     const WithTopology = ToolkitDashboardTopologyMixin(WithConfig);
     const WithModels = ToolkitDashboardTopologyModelsMixin(WithTopology);
-    const WithCatalog = ToolkitDashboardTopologyCatalogMixin(WithModels);
+    const WithModelsView = ToolkitDashboardTopologyModelsViewMixin(WithModels);
+    const WithCatalog = ToolkitDashboardTopologyCatalogMixin(WithModelsView);
     const WithAgents = ToolkitDashboardTopologyAgentsMixin(WithCatalog);
     const WithStatusLogic = ToolkitDashboardStatusLogicMixin(WithAgents);
     const WithTelegramLogic = ToolkitDashboardTelegramLogicMixin(WithStatusLogic);
-    const WithGraph = ToolkitDashboardTopologyGraphMixin(WithTelegramLogic);
+    const WithStatusView = ToolkitDashboardStatusViewMixin(WithTelegramLogic);
+    const WithGraph = ToolkitDashboardTopologyGraphMixin(WithStatusView);
     const WithSession = ToolkitDashboardTopologySessionMixin(WithGraph);
     const WithAssignment = ToolkitDashboardTopologyAssignmentMixin(WithSession);
     const WithShell = ToolkitDashboardShellViewMixin(WithAssignment);

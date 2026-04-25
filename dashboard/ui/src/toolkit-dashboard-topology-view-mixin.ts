@@ -2,7 +2,7 @@ import { LitElement, html } from 'lit';
 import {
   VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES
 } from './toolkit-dashboard-constants';
-import { renderPreviewCard, renderPreviewRows, renderPreviewTags } from './toolkit-dashboard-ui-helpers';
+import { renderPreviewCard, renderPreviewRows, renderPreviewTags, renderToolLabel } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -483,7 +483,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                         label: 'Allow',
                         body: renderPreviewTags(
                           allowedTools,
-                          (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                          (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                           html`No allowed tools.`
                         )
                       },
@@ -491,7 +491,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                         label: 'Deny',
                         body: renderPreviewTags(
                           deniedTools,
-                          (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                          (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                           html`No denied tools.`
                         )
                       }
@@ -505,7 +505,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                 label: 'Final Allow',
                 body: renderPreviewTags(
                   effectiveToolState.allowedTools,
-                  (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                  (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                   html`No allowed tools.`
                 )
               },
@@ -513,7 +513,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                 label: 'Final Deny',
                 body: renderPreviewTags(
                   effectiveToolState.deniedTools,
-                  (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                  (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                   html`No denied tools.`
                 )
               }

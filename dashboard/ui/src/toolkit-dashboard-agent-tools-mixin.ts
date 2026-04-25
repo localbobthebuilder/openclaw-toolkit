@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
-import { renderHelpText, renderPreviewCard, renderPreviewTags, renderSelectableTagList } from './toolkit-dashboard-ui-helpers';
+import { renderHelpText, renderPreviewCard, renderPreviewTags, renderSelectableTagList, renderToolLabel } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -70,7 +70,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                     label: 'Allow',
                     body: renderPreviewTags(
                       allowedTools,
-                      (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                      (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                       html`No allowed tools.`
                     )
                   },
@@ -78,7 +78,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                     label: 'Deny',
                     body: renderPreviewTags(
                       deniedTools,
-                      (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                      (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                       html`No denied tools.`
                     )
                   }
@@ -115,7 +115,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                     directAllowedTools,
                     (toolId: string) => html`
                       <div class="tag">
-                        ${this.renderToolLabel(toolId)}
+                        ${renderToolLabel(this.getToolOption(toolId), toolId)}
                         <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'allow', toolId)}>×</span>
                       </div>
                     `,
@@ -138,7 +138,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                     directDeniedTools,
                     (toolId: string) => html`
                       <div class="tag">
-                        ${this.renderToolLabel(toolId)}
+                        ${renderToolLabel(this.getToolOption(toolId), toolId)}
                         <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'deny', toolId)}>×</span>
                       </div>
                     `,
@@ -165,7 +165,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                 label: 'Allow',
                 body: renderPreviewTags(
                   effectiveToolState.allowedTools,
-                  (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                  (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                   html`No tools allowed yet.`
                 )
               },
@@ -173,7 +173,7 @@ export const ToolkitDashboardAgentToolsMixin = <TBase extends Constructor<LitEle
                 label: 'Deny',
                 body: renderPreviewTags(
                   effectiveToolState.deniedTools,
-                  (toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`,
+                  (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
                   html`No explicit denies.`
                 )
               }

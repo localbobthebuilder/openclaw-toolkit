@@ -18,6 +18,19 @@ export function renderHelpText(content: MaybeTemplate, style = '') {
   return html`<div class="help-text" style=${style}>${content}</div>`;
 }
 
+export function renderToolLabel(tool: { id?: string; note?: string } | null | undefined, fallbackId: string) {
+  if (!tool) {
+    return html`${fallbackId}`;
+  }
+
+  return html`
+    <span class="tool-label">
+      <span>${tool.id}</span>
+      ${tool.note ? html`<span class="tool-note-badge">${tool.note}</span>` : ''}
+    </span>
+  `;
+}
+
 export function renderToggleSwitch(label: string, checked: boolean, onChange: (checked: boolean) => void, description?: MaybeTemplate, extraStyle = '') {
   return html`
     <label class="toggle-switch" style=${extraStyle}>

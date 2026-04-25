@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
+import { renderToolLabel } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -78,7 +79,7 @@ export const ToolkitDashboardToolsetsMixin = <TBase extends Constructor<LitEleme
                     <div class="tag-list">
                       ${this.normalizeToolNameList(toolset.allow).map((toolId: string) => html`
                         <div class="tag">
-                          ${this.renderToolLabel(toolId)}
+                          ${renderToolLabel(this.getToolOption(toolId), toolId)}
                           <span class="tag-remove" @click=${() => this.removeToolFromToolset(toolset, 'allow', toolId)}>×</span>
                         </div>
                       `)}
@@ -100,7 +101,7 @@ export const ToolkitDashboardToolsetsMixin = <TBase extends Constructor<LitEleme
                     <div class="tag-list">
                       ${this.normalizeToolNameList(toolset.deny).map((toolId: string) => html`
                         <div class="tag">
-                          ${this.renderToolLabel(toolId)}
+                          ${renderToolLabel(this.getToolOption(toolId), toolId)}
                           <span class="tag-remove" @click=${() => this.removeToolFromToolset(toolset, 'deny', toolId)}>×</span>
                         </div>
                       `)}
