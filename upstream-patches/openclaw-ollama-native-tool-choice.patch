@@ -1,0 +1,141 @@
+diff --git a/extensions/ollama/src/stream-runtime.test.ts b/extensions/ollama/src/stream-runtime.test.ts
+index 8597d6b53..b83fa31c7 100644
+--- a/extensions/ollama/src/stream-runtime.test.ts
++++ b/extensions/ollama/src/stream-runtime.test.ts
+@@ -56,6 +56,29 @@ describe("buildOllamaChatRequest", () => {
+       model: "qwen3:14b-q8_0",
+     });
+   });
++
++  it("forwards tool choice when provided", () => {
++    expect(
++      buildOllamaChatRequest({
++        modelId: "qwen3.5:9b",
++        messages: [{ role: "user", content: "hello" }],
++        tools: [
++          {
++            type: "function",
++            function: {
++              name: "read",
++              description: "Read a file",
++              parameters: { type: "object" },
++            },
++          },
++        ],
++        toolChoice: "required",
++      }),
++    ).toMatchObject({
++      tools: expect.any(Array),
++      tool_choice: "required",
++    });
++  });
+ });
+ 
+ describe("createConfiguredOllamaCompatStreamWrapper", () => {
+@@ -202,6 +225,54 @@ describe("createConfiguredOllamaCompatStreamWrapper", () => {
+       },
+     );
+   });
++
++  it("forwards toolChoice on native Ollama chat requests when configured", async () => {
++    await withMockNdjsonFetch(
++      [
++        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"read","arguments":{"path":"/tmp/a"}}}]},"done":false}',
++        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
++      ],
++      async (fetchMock) => {
++        const baseStreamFn = createOllamaStreamFn("http://ollama-host:11434");
++        const model = {
++          api: "ollama",
++          provider: "ollama",
++          id: "qwen3:32b",
++          contextWindow: 131072,
++        };
++
++        const stream = await Promise.resolve(
++          baseStreamFn(
++            model as never,
++            {
++              messages: [{ role: "user", content: "hello" }],
++              tools: [
++                {
++                  name: "read",
++                  description: "Read a file",
++                  parameters: { type: "object" },
++                },
++              ],
++            } as never,
++            { toolChoice: "required" } as never,
++          ),
++        );
++
++        await collectStreamEvents(stream);
++
++        const requestInit = getGuardedFetchCall(fetchMock).init ?? {};
++        if (typeof requestInit.body !== "string") {
++          throw new Error("Expected string request body");
++        }
++        const requestBody = JSON.parse(requestInit.body) as {
++          tool_choice?: string;
++          tools?: unknown[];
++        };
++        expect(requestBody.tool_choice).toBe("required");
++        expect(requestBody.tools?.length).toBe(1);
++      },
++    );
++  });
+ });
+ 
+ describe("convertToOllamaMessages", () => {
+diff --git a/extensions/ollama/src/stream.ts b/extensions/ollama/src/stream.ts
+index 62aa4d865..265c56577 100644
+--- a/extensions/ollama/src/stream.ts
++++ b/extensions/ollama/src/stream.ts
+@@ -228,6 +228,7 @@ export function buildOllamaChatRequest(params: {
+   modelId: string;
+   messages: OllamaChatMessage[];
+   tools?: OllamaTool[];
++  toolChoice?: OllamaToolChoice;
+   options?: Record<string, unknown>;
+   stream?: boolean;
+ }): OllamaChatRequest {
+@@ -236,6 +237,7 @@ export function buildOllamaChatRequest(params: {
+     messages: params.messages,
+     stream: params.stream ?? true,
+     ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
++    ...(params.toolChoice !== undefined ? { tool_choice: params.toolChoice } : {}),
+     ...(params.options ? { options: params.options } : {}),
+   };
+ }
+@@ -309,10 +311,23 @@ interface OllamaChatRequest {
+   messages: OllamaChatMessage[];
+   stream: boolean;
+   tools?: OllamaTool[];
++  tool_choice?: OllamaToolChoice;
+   options?: Record<string, unknown>;
+   think?: boolean;
+ }
+ 
++type OllamaToolChoice =
++  | "auto"
++  | "none"
++  | "any"
++  | "required"
++  | {
++      type: "function";
++      function: {
++        name: string;
++      };
++    };
++
+ interface OllamaChatMessage {
+   role: "system" | "user" | "assistant" | "tool";
+   content: string;
+@@ -636,6 +651,7 @@ export function createOllamaStreamFn(
+           messages: ollamaMessages,
+           stream: true,
+           tools: ollamaTools,
++          toolChoice: (options as { toolChoice?: OllamaToolChoice } | undefined)?.toolChoice,
+           options: ollamaOptions,
+         });
+         options?.onPayload?.(body, model);

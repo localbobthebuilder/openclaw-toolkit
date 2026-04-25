@@ -1438,7 +1438,7 @@ function Get-ManagedDockerImageTags {
         $tags.Add($sandboxImage)
     }
 
-    $voiceNotesEnabled = $true
+    $voiceNotesEnabled = $false
     $voiceNotesMode = "local-whisper"
     $voiceGatewayImageTag = "openclaw:local-voice"
     if ($null -ne $BootstrapConfig -and $BootstrapConfig.PSObject.Properties.Name -contains "voiceNotes" -and $null -ne $BootstrapConfig.voiceNotes) {
@@ -1885,7 +1885,7 @@ $modelsList = New-SkippedExternalResult
 $modelsStatus = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("models")) {
     $modelsList = Invoke-LoggedToolkitModelSummary -Config $config -LiveConfig $liveConfig
-    $modelsStatus = Invoke-LoggedExternal -Label "OpenClaw model provider status" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "models", "status") -AllowFailure -SuccessSummary "Collected model provider status." -FailureSummary "Could not collect model provider status."
+    $modelsStatus = Invoke-LoggedExternal -Label "OpenClaw model provider status" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "openclaw", "models", "status") -AllowFailure -SuccessSummary "Collected model provider status." -FailureSummary "Could not collect model provider status."
 }
 $telegramConfig = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("telegram")) {
@@ -1949,11 +1949,11 @@ $localModelSmokeStructured = Get-SmokeStructuredResult -Output $localModelSmokeT
 $agentCapabilitiesSmokeStructured = Get-SmokeStructuredResult -Output $agentCapabilitiesSmokeTestOutput
 $sandboxExplain = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("sandbox")) {
-    $sandboxExplain = Invoke-LoggedExternal -Label "Sandbox runtime summary" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "sandbox", "explain", "--json") -AllowFailure -SuccessSummary "Collected sandbox runtime summary." -FailureSummary "Could not collect sandbox runtime summary."
+    $sandboxExplain = Invoke-LoggedExternal -Label "Sandbox runtime summary" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "openclaw", "sandbox", "explain", "--json") -AllowFailure -SuccessSummary "Collected sandbox runtime summary." -FailureSummary "Could not collect sandbox runtime summary."
 }
 $audit = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("audit")) {
-    $audit = Invoke-LoggedExternal -Label "Security audit" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "node", "dist/index.js", "security", "audit", "--deep") -AllowFailure -SuccessSummary "Security audit completed." -FailureSummary "Security audit reported a command failure."
+    $audit = Invoke-LoggedExternal -Label "Security audit" -FilePath "docker" -Arguments @("exec", "openclaw-openclaw-gateway-1", "openclaw", "security", "audit", "--deep") -AllowFailure -SuccessSummary "Security audit completed." -FailureSummary "Security audit reported a command failure."
 }
 $gitStatus = New-SkippedExternalResult
 if (Test-CheckRequested -Names @("git")) {

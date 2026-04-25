@@ -197,7 +197,7 @@
     "accounts": []
   },
   "voiceNotes": {
-    "enabled": true,
+    "enabled": false,
     "mode": "local-whisper",
     "gatewayImageTag": "openclaw:local-voice",
     "whisperModel": "base",
@@ -260,6 +260,15 @@
         "src/agents/pi-embedded-runner/run/attempt.ts",
         "src/agents/pi-embedded-runner/run/types.ts",
         "src/agents/pi-embedded-runner/types.ts"
+      ]
+    },
+    {
+      "enabled": true,
+      "name": "ollama-native-tool-choice",
+      "path": ".\\upstream-patches\\openclaw-ollama-native-tool-choice.patch",
+      "managedPaths": [
+        "extensions/ollama/src/stream.ts",
+        "extensions/ollama/src/stream-runtime.test.ts"
       ]
     }
   ],

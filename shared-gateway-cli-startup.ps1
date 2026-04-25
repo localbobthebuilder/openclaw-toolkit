@@ -51,5 +51,6 @@ function Get-ToolkitGatewayNodeDockerExecArgs {
         [switch]$Interactive
     )
 
-    return Get-ToolkitGatewayDockerExecArgs -ContainerName $ContainerName -Interactive:$Interactive -Command (@("node", "dist/index.js") + @($Arguments))
+    # Legacy helper name retained for callers; run through the installed OpenClaw CLI.
+    return Get-ToolkitGatewayDockerExecArgs -ContainerName $ContainerName -Interactive:$Interactive -IncludeOpenClawNoRespawn -Command (@("openclaw") + @($Arguments))
 }

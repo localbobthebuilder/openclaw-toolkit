@@ -1171,7 +1171,7 @@ function Normalize-ToolkitConfigDefaults {
     }
 
     if ($Config.PSObject.Properties.Name -contains "voiceNotes" -and $null -ne $Config.voiceNotes) {
-        Set-ToolkitBooleanDefaultProperty -Object $Config.voiceNotes -PropertyName "enabled" -DefaultValue $true
+        Set-ToolkitBooleanDefaultProperty -Object $Config.voiceNotes -PropertyName "enabled" -DefaultValue $false
     }
 
     Ensure-ToolkitToolsetsConfig -Config $Config | Out-Null

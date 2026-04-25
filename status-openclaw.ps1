@@ -218,7 +218,7 @@ function Get-ManagedDockerImageTags {
         $tags.Add($sandboxImage)
     }
 
-    $voiceNotesEnabled = $true
+    $voiceNotesEnabled = $false
     $voiceNotesMode = "local-whisper"
     $voiceGatewayImageTag = "openclaw:local-voice"
     if ($null -ne $BootstrapConfig -and $BootstrapConfig.PSObject.Properties.Name -contains "voiceNotes" -and $null -ne $BootstrapConfig.voiceNotes) {

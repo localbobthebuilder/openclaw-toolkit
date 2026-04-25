@@ -294,7 +294,7 @@ try {
     Write-ProgressLine "Resetting agent session state" Gray
     $null = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $sessionId,
@@ -307,7 +307,7 @@ try {
         Write-ProgressLine $modelPlan.detail DarkGray
         $null = Invoke-External -FilePath "docker" -Arguments @(
             "exec", $ContainerName,
-            "node", "dist/index.js",
+            "openclaw",
             "agent",
             "--agent", $AgentId,
             "--session-id", $sessionId,
@@ -321,7 +321,7 @@ try {
     Write-ProgressLine "Prompting agent to create a file in its workspace" Gray
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $sessionId,

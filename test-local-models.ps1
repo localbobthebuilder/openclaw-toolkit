@@ -399,7 +399,7 @@ try {
     Write-ProgressLine "Resetting session state" Gray
     $null = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $sessionId,
@@ -411,7 +411,7 @@ try {
     Write-ProgressLine "Switching agent to $targetModelRef" Gray
     $null = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $sessionId,
@@ -423,7 +423,7 @@ try {
     Write-ProgressLine "Sending exact-match reply check to the agent" Gray
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $sessionId,

@@ -190,7 +190,7 @@ try {
 
     $mainResult = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $RequesterAgentId,
         "--session-id", $mainSessionId,

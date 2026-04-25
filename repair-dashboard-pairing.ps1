@@ -211,7 +211,7 @@ function Approve-Requests {
             $requestId = [string]$request.requestId
             $approve = Invoke-External -FilePath "docker" -Arguments @(
                 "exec", $ContainerName,
-                "node", "dist/index.js",
+                "openclaw",
                 "devices", "approve", $requestId
             ) -AllowFailure
             if ($approve.Output) { Write-LogBlock -Text $approve.Output }

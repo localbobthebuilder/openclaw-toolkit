@@ -115,7 +115,7 @@
     "accounts": []
   },
   "voiceNotes": {
-    "enabled": true,
+    "enabled": false,
     "mode": "local-whisper",
     "gatewayImageTag": "openclaw:local-voice",
     "whisperModel": "base",

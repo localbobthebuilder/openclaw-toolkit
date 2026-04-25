@@ -72,7 +72,7 @@ function Get-OpenClawJsonConfigValue {
 
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "config", "get", $Path
     ) -AllowFailure
 
@@ -162,7 +162,7 @@ Write-ProgressLine "Session $sessionId with timeout ${TimeoutSeconds}s" Cyan
 Write-ProgressLine "Resetting session state" Gray
 $null = Invoke-External -FilePath "docker" -Arguments @(
     "exec", $ContainerName,
-    "node", "dist/index.js",
+    "openclaw",
     "agent",
     "--agent", $agentId,
     "--session-id", $sessionId,
@@ -174,7 +174,7 @@ $null = Invoke-External -FilePath "docker" -Arguments @(
 Write-ProgressLine "Prompting OpenClaw to run exactly one exec command" Gray
 $result = Invoke-External -FilePath "docker" -Arguments @(
     "exec", $ContainerName,
-    "node", "dist/index.js",
+    "openclaw",
     "agent",
     "--agent", $agentId,
     "--session-id", $sessionId,

@@ -1292,7 +1292,7 @@ export class ToolkitDashboard extends LitElement {
           this.config.voiceNotes = {};
       }
       if (typeof this.config.voiceNotes.enabled !== 'boolean') {
-          this.config.voiceNotes.enabled = true;
+          this.config.voiceNotes.enabled = false;
       }
       if (!this.config.voiceNotes.mode) {
           this.config.voiceNotes.mode = 'local-whisper';
@@ -1670,6 +1670,9 @@ export class ToolkitDashboard extends LitElement {
                 <input type="checkbox" ?checked=${voiceNotes.enabled} @change=${(e: any) => { this.ensureVoiceNotesConfig().enabled = e.target.checked; this.requestUpdate(); }}>
                 Enable Voice Transcription
             </label>
+            <span class="help-text">
+              Disabled keeps bootstrap on the lighter <code>openclaw:local</code> image. Enabling local Whisper builds <code>${voiceNotes.gatewayImageTag || 'openclaw:local-voice'}</code>, which is much larger because it includes Whisper/Torch.
+            </span>
           </div>
           <div class="form-group">
             <label>Whisper Model</label>
@@ -4947,7 +4950,7 @@ export class ToolkitDashboard extends LitElement {
       clone.skills.enableAll = clone.skills.enableAll === false || clone.skills.enableAll === 'false' ? false : true;
     }
     if (typeof clone.voiceNotes.enabled !== 'boolean') {
-      clone.voiceNotes.enabled = clone.voiceNotes.enabled === false || clone.voiceNotes.enabled === 'false' ? false : true;
+      clone.voiceNotes.enabled = clone.voiceNotes.enabled === true || clone.voiceNotes.enabled === 'true';
     }
     if (typeof clone.voiceNotes.mode !== 'string' || !clone.voiceNotes.mode.trim()) {
       clone.voiceNotes.mode = 'local-whisper';

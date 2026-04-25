@@ -174,7 +174,7 @@ function Get-HealthReport {
 
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "health", "--json"
     ) -AllowFailure
 

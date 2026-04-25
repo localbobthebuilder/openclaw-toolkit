@@ -89,7 +89,7 @@ function Invoke-GatewayCall {
     )
 
     $paramsJson = $Params | ConvertTo-Json -Depth 50 -Compress
-    $result = Invoke-DockerExec -Arguments @("node", "dist/index.js", "gateway", "call", $Method, "--params", $paramsJson)
+    $result = Invoke-DockerExec -Arguments @("openclaw", "gateway", "call", $Method, "--params", $paramsJson)
     $text = $result.Output
     if ([string]::IsNullOrWhiteSpace($text)) {
         throw "Gateway call returned no output for method '$Method'."
@@ -321,7 +321,7 @@ if (-not $KeepAgent) {
 
     if ($agentIndex -ge 0) {
         Write-Info "Removing temporary agent config entry"
-        $null = Invoke-DockerExec -Arguments @("node", "dist/index.js", "config", "unset", "agents.list[$agentIndex]")
+        $null = Invoke-DockerExec -Arguments @("openclaw", "config", "unset", "agents.list[$agentIndex]")
         $cleanup.RemovedAgentConfig = $true
     }
 

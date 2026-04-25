@@ -129,7 +129,7 @@ function Invoke-AgentTurn {
 
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $SessionId,

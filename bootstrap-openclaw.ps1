@@ -724,6 +724,7 @@ function Ensure-LocalWhisperGatewayImage {
     param([Parameter(Mandatory = $true)]$Config)
 
     if ($null -eq $Config.voiceNotes -or -not $Config.voiceNotes.enabled) {
+        Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_IMAGE" -Value ([string]$Config.sandbox.gatewayImageTag)
         return
     }
 
@@ -1162,7 +1163,11 @@ function Ensure-InitialGatewayConfig {
 
     Write-Host "Seeding initial gateway config (required for first-time start)..." -ForegroundColor Cyan
 
-    $imageTag = if ($Config.PSObject.Properties.Name -contains "voiceNotes" -and $Config.voiceNotes -and $Config.voiceNotes.gatewayImageTag) {
+    $voiceNotesEnabled = $Config.PSObject.Properties.Name -contains "voiceNotes" -and
+        $Config.voiceNotes -and
+        $Config.voiceNotes.PSObject.Properties.Name -contains "enabled" -and
+        [bool]$Config.voiceNotes.enabled
+    $imageTag = if ($voiceNotesEnabled -and $Config.voiceNotes.gatewayImageTag) {
         [string]$Config.voiceNotes.gatewayImageTag
     } else {
         [string]$Config.sandbox.gatewayImageTag
@@ -1182,7 +1187,7 @@ function Ensure-InitialGatewayConfig {
             "run", "--rm",
             "-v", "${dockerConfigDir}:/home/node/.openclaw",
             $imageTag,
-            "node", "dist/index.js", "config", "set", $kv[0], $kv[1]
+            "openclaw", "config", "set", $kv[0], $kv[1]
         )
     }
 

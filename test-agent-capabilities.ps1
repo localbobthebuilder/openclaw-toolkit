@@ -132,7 +132,7 @@ function Invoke-AgentTurn {
     if (-not [string]::IsNullOrWhiteSpace($ModelOverrideRef)) {
         $switchResult = Invoke-External -FilePath "docker" -Arguments @(
             "exec", $ContainerName,
-            "node", "dist/index.js",
+            "openclaw",
             "agent",
             "--agent", $AgentId,
             "--session-id", $SessionId,
@@ -148,7 +148,7 @@ function Invoke-AgentTurn {
 
     $arguments = @(
         "exec", $ContainerName,
-        "node", "dist/index.js",
+        "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $SessionId,

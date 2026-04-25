@@ -1,5 +1,1 @@
-First use the read tool on /home/node/.openclaw/workspace/tool-choice-probe.txt.
-After you receive the file contents, reply with exactly REVIEW_OK if the file contains the exact phrase review smoke ok.
-Do not explain.
-Do not say you will use a tool.
-Do not output XML or JSON tool markup.
+First use the read tool on /home/node/.openclaw/workspace/tool-choice-probe.txt. After you receive the file contents, send one visible assistant reply with exact text REVIEW_OK if and only if the file contains the exact phrase review smoke ok. Do not output NO_REPLY. Do not keep the final answer only in hidden reasoning.
