@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
+import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -253,36 +254,30 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
 
           <div class="card" style="margin-top: 20px;">
             <div class="card-header"><h3>Workspace Markdown</h3></div>
-            <p class="help-text">Custom markdown for this workspace is stored in <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>. Shared templates come from <code>openclaw-toolkit\\markdown-templates\\workspaces\\&lt;TYPE&gt;\\</code>. The toolkit now asks OpenClaw itself to seed the standard starter files for each managed workspace, then applies any custom workspace markdown on top. <code>MEMORY.md</code> is optional and not first-run seeded. <code>DREAMS.md</code> is agent-maintained by the memory system and is not edited here. <code>BOOT.md</code> is a toolkit startup checklist. <code>BOOTSTRAP.md</code> is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.</p>
-            ${VALID_WORKSPACE_MARKDOWN_FILES.map((fileName) => {
-              const selectedTemplateKey = this.getMarkdownTemplateSelection(workspace, fileName, VALID_WORKSPACE_MARKDOWN_FILES);
-              const templateKeys = this.getMarkdownTemplateKeys('workspaces', fileName);
-              const isTemplateMode = selectedTemplateKey.length > 0;
-              const workspaceFiles = this.ensureWorkspaceTemplateFiles(workspace);
-              const effectiveValue = isTemplateMode
-                ? this.getMarkdownTemplateContent('workspaces', fileName, selectedTemplateKey)
-                : (workspaceFiles[fileName] || '');
-              return html`
-                <div class="form-group" style="margin-bottom: 20px;">
-                  <label>${fileName}</label>
-                  <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${this.getMarkdownFileHelpText(fileName, 'workspace')}</div>
-                  <select style="margin-bottom: 8px;" @change=${(e: any) => {
-                    const value = e.target.value;
-                    this.setMarkdownTemplateSelection(workspace, fileName, value || null, VALID_WORKSPACE_MARKDOWN_FILES);
-                    this.requestUpdate();
-                  }}>
-                    <option value="">Custom markdown</option>
-                    ${templateKeys.map((templateKey: string) => html`<option value=${templateKey} ?selected=${selectedTemplateKey === templateKey}>Template: ${templateKey}</option>`)}
-                  </select>
-                  ${isTemplateMode ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 6px;">Using template <code>${selectedTemplateKey}</code>. Switch to Custom markdown to edit workspace-specific content without changing the shared template.</div>` : ''}
-                  <textarea rows=${this.getMarkdownEditorRows(fileName)} .value=${effectiveValue} ?readonly=${isTemplateMode} placeholder=${isTemplateMode ? '' : this.buildWorkspaceBootstrapPlaceholder(workspace, fileName)} @input=${(e: any) => {
-                    if (!isTemplateMode) {
-                      workspaceFiles[fileName] = e.target.value;
-                      this.requestUpdate();
-                    }
-                  }}></textarea>
-                </div>
-              `;
+            ${renderMarkdownFileEditors({
+              scopeLabel: 'workspace',
+              intro: `Custom markdown for this workspace is stored in openclaw-toolkit\\workspaces\\${workspace.id || '<workspaceId>'}\\markdown\\. Shared templates come from openclaw-toolkit\\markdown-templates\\workspaces\\<TYPE>\\. The toolkit now asks OpenClaw itself to seed the standard starter files for each managed workspace, then applies any custom workspace markdown on top. MEMORY.md is optional and not first-run seeded. DREAMS.md is agent-maintained by the memory system and is not edited here. BOOT.md is a toolkit startup checklist. BOOTSTRAP.md is a one-time first-run ritual and is only seeded when the workspace is brand new or the live file still exists.`,
+              fileNames: VALID_WORKSPACE_MARKDOWN_FILES,
+              getHelpText: (fileName) => this.getMarkdownFileHelpText(fileName, 'workspace'),
+              getTemplateKeys: (fileName) => this.getMarkdownTemplateKeys('workspaces', fileName),
+              getSelectedTemplateKey: (fileName) => this.getMarkdownTemplateSelection(workspace, fileName, VALID_WORKSPACE_MARKDOWN_FILES),
+              getEffectiveValue: (fileName, selectedTemplateKey) => {
+                const workspaceFiles = this.ensureWorkspaceTemplateFiles(workspace);
+                return selectedTemplateKey.length > 0
+                  ? this.getMarkdownTemplateContent('workspaces', fileName, selectedTemplateKey)
+                  : (workspaceFiles[fileName] || '');
+              },
+              getPlaceholder: (fileName) => this.buildWorkspaceBootstrapPlaceholder(workspace, fileName),
+              getRows: (fileName) => this.getMarkdownEditorRows(fileName),
+              onSelectTemplate: (fileName, templateKey) => {
+                this.setMarkdownTemplateSelection(workspace, fileName, templateKey, VALID_WORKSPACE_MARKDOWN_FILES);
+                this.requestUpdate();
+              },
+              onUpdateFile: (fileName, value) => {
+                const workspaceFiles = this.ensureWorkspaceTemplateFiles(workspace);
+                workspaceFiles[fileName] = value;
+                this.requestUpdate();
+              }
             })}
           </div>
         </div>

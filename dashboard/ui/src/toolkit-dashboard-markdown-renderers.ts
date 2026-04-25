@@ -1,0 +1,86 @@
+import { html } from 'lit';
+import { renderCardSection } from './toolkit-dashboard-ui-helpers';
+
+type MarkdownTemplateLibraryParams = {
+  title: string;
+  intro: string;
+  scope: string;
+  fileNames: readonly string[];
+  selectedFileName: string;
+  templateKeys: string[];
+  library: Record<string, string>;
+  onAddTemplate: () => void;
+  onSelectScope: (scope: string) => void;
+  onSelectFile: (fileName: string) => void;
+  onRemoveTemplate: (templateKey: string) => void;
+  onUpdateTemplate: (templateKey: string, value: string) => void;
+};
+
+type MarkdownFileEditorsParams = {
+  scopeLabel: string;
+  intro: string;
+  fileNames: readonly string[];
+  getHelpText: (fileName: string) => string;
+  getTemplateKeys: (fileName: string) => string[];
+  getSelectedTemplateKey: (fileName: string) => string;
+  getEffectiveValue: (fileName: string, selectedTemplateKey: string) => string;
+  getPlaceholder: (fileName: string) => string;
+  getRows: (fileName: string) => number;
+  onSelectTemplate: (fileName: string, templateKey: string | null) => void;
+  onUpdateFile: (fileName: string, value: string) => void;
+};
+
+export function renderMarkdownTemplateLibrarySection(params: MarkdownTemplateLibraryParams) {
+  return renderCardSection(params.title, html`
+    <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">${params.intro}</p>
+    <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+      <div class="tab ${params.scope === 'agents' ? 'active' : ''}" @click=${() => params.onSelectScope('agents')}>Agents</div>
+      <div class="tab ${params.scope === 'workspaces' ? 'active' : ''}" @click=${() => params.onSelectScope('workspaces')}>Workspaces</div>
+    </div>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+      ${params.fileNames.map((fileName) => html`
+        <div class="tab ${params.selectedFileName === fileName ? 'active' : ''}" @click=${() => params.onSelectFile(fileName)}>${fileName.replace('.md', '')}</div>
+      `)}
+    </div>
+    <p class="help-text" style="margin-bottom: 20px;">Stored under <code>openclaw-toolkit\\markdown-templates\\${params.scope}\\${params.selectedFileName.replace('.md', '')}\\&lt;key&gt;.md</code>.</p>
+      ${params.templateKeys.length === 0 ? html`
+      <div class="help-text">No templates defined for ${params.scope} ${params.selectedFileName} yet.</div>
+    ` : params.templateKeys.map((templateKey) => html`
+      <div class="form-group" style="margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-weight: bold; color: #00bcd4;">${templateKey}</span>
+          <button class="btn btn-danger btn-small" style="padding: 4px 10px;" @click=${() => params.onRemoveTemplate(templateKey)}>Delete Template</button>
+        </div>
+        <textarea rows="10" .value=${params.library[templateKey] || ''} @input=${(e: any) => params.onUpdateTemplate(templateKey, e.target.value)}></textarea>
+      </div>
+    `)}
+  `, html`<button class="btn btn-ghost" @click=${() => params.onAddTemplate()}>+ Add Template</button>`);
+}
+
+export function renderMarkdownFileEditors(params: MarkdownFileEditorsParams) {
+  return html`
+    <p class="help-text">${params.intro}</p>
+    ${params.fileNames.map((fileName) => {
+      const selectedTemplateKey = params.getSelectedTemplateKey(fileName);
+      const templateKeys = params.getTemplateKeys(fileName);
+      const isTemplateMode = selectedTemplateKey.length > 0;
+      const effectiveValue = params.getEffectiveValue(fileName, selectedTemplateKey);
+      return html`
+        <div class="form-group">
+          <label>${fileName}</label>
+          <div class="help-text" style="margin-top: 0; margin-bottom: 6px;">${params.getHelpText(fileName)}</div>
+          <select style="margin-bottom: 8px;" @change=${(e: any) => params.onSelectTemplate(fileName, e.target.value || null)}>
+            <option value="">Custom markdown</option>
+            ${templateKeys.map((templateKey) => html`<option value=${templateKey} ?selected=${selectedTemplateKey === templateKey}>Template: ${templateKey}</option>`)}
+          </select>
+          ${isTemplateMode ? html`<div class="help-text" style="margin-top: 0; margin-bottom: 6px;">Using template <code>${selectedTemplateKey}</code>. Switch to Custom markdown to edit ${params.scopeLabel}-specific content without changing the shared template.</div>` : ''}
+          <textarea rows=${params.getRows(fileName)} .value=${effectiveValue} ?readonly=${isTemplateMode} placeholder=${isTemplateMode ? '' : params.getPlaceholder(fileName)} @input=${(e: any) => {
+            if (!isTemplateMode) {
+              params.onUpdateFile(fileName, e.target.value);
+            }
+          }}></textarea>
+        </div>
+      `;
+    })}
+  `;
+}
