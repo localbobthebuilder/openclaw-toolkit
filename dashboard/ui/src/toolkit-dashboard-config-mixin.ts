@@ -1490,20 +1490,53 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
   }
 
   getConfigurationChecklist() {
-    const endpoints = this.getConfigEndpoints();
-    const workspaces = this.getWorkspaces();
-    const agents = this.getManagedAgentEntries();
+    if (!this.config || typeof this.config !== 'object') {
+      return {
+        ready: false,
+        missingRequired: 1,
+        required: [
+          {
+            label: 'Configuration loaded',
+            complete: false,
+            note: 'Waiting for dashboard configuration to load.'
+          }
+        ],
+        optional: [
+          {
+            label: 'Telegram routing configured',
+            complete: false,
+            note: 'Optional. Configure this only if you want Telegram routing.'
+          },
+          {
+            label: 'Voice notes configured',
+            complete: false,
+            note: 'Optional. Configure this only if you want voice notes.'
+          }
+        ]
+      };
+    }
+
+    const endpoints = Array.isArray(this.config.endpoints) ? this.config.endpoints : [];
+    const workspaces = Array.isArray(this.config.workspaces) ? this.config.workspaces : [];
+    const agents = Array.isArray(this.config?.agents?.list) ? this.config.agents.list : [];
     const endpointAgentIds = new Set(
-      endpoints.flatMap((endpoint: any) => this.getEndpointAgentIds(endpoint))
+      endpoints.flatMap((endpoint: any) => Array.isArray(endpoint?.agents) ? endpoint.agents : [])
+        .map((agentId: any) => String(agentId || '').trim())
+        .filter((agentId: string) => agentId.length > 0)
     );
     const defaultEndpoint = endpoints.find((endpoint: any) => endpoint?.default) || null;
     const defaultEndpointModelCount = defaultEndpoint
-      ? this.getEndpointModels(defaultEndpoint).length + this.getEndpointHostedModels(defaultEndpoint).length
+      ? (Array.isArray(defaultEndpoint.models) ? defaultEndpoint.models.length : 0) + (Array.isArray(defaultEndpoint.hostedModels) ? defaultEndpoint.hostedModels.length : 0)
       : 0;
     const workspacePathsConfigured = workspaces.filter((workspace: any) => String(workspace?.path || '').trim().length > 0).length;
-    const agentsWithWorkspace = agents.filter(({ agent }: any) => !!this.getWorkspaceForAgentId(String(agent?.id || '')));
+    const agentsWithWorkspace = agents.filter(({ agent }: any) => {
+      const agentId = String(agent?.id || '').trim();
+      return !!agentId && workspaces.some((workspace: any) => Array.isArray(workspace?.agents) && workspace.agents.includes(agentId));
+    });
     const agentsWithEndpoint = agents.filter(({ agent }: any) => endpointAgentIds.has(String(agent?.id || '')));
-    const telegramConfig = this.ensureTelegramConfig();
+    const telegramConfig = this.config?.telegram && typeof this.config.telegram === 'object'
+      ? this.config.telegram
+      : { enabled: true, defaultAccount: '', accounts: [] };
     const telegramAccounts = Array.isArray(telegramConfig.accounts) ? telegramConfig.accounts : [];
     const telegramSetupStatus = this.telegramSetupStatus && typeof this.telegramSetupStatus === 'object' ? this.telegramSetupStatus : null;
     const telegramConfigured = !!telegramSetupStatus?.configured || (
@@ -1511,7 +1544,9 @@ export const ToolkitDashboardConfigMixin = <TBase extends Constructor<LitElement
       String(telegramConfig.defaultAccount || '').trim().length > 0 &&
       telegramAccounts.length > 0
     );
-    const voiceNotes = this.ensureVoiceNotesConfig();
+    const voiceNotes = this.config?.voiceNotes && typeof this.config.voiceNotes === 'object'
+      ? this.config.voiceNotes
+      : { enabled: false, mode: '', whisperModel: '' };
     const voiceConfigured = !voiceNotes.enabled || (
       String(voiceNotes.mode || '').trim().length > 0 &&
       String(voiceNotes.whisperModel || '').trim().length > 0
