@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderActionRow, renderSelectableItem, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -234,24 +234,18 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
       const models = this.selectorTarget === 'endpoint-hosted'
         ? this.getKnownHostedModelCatalog()
         : this.getKnownLocalModelCatalog();
-      return html`
-        <div class="modal-overlay">
-            <div class="modal">
-                <div class="card-header" style="padding: 20px;">
-                    <h3>${this.selectorTarget === 'endpoint-hosted' ? 'Select Hosted Model from Catalog' : 'Select Local Model from Catalog'}</h3>
-                    <button class="btn btn-ghost" @click=${() => this.showModelSelector = false}>Close</button>
-                </div>
-                <div class="modal-body">
-                    ${models.length === 0 ? html`<div class="item-sub">No matching models are in the shared catalog yet.</div>` : ''}
-                    ${models.map((m: any) => renderSelectableItem({
-                      title: m.id || m.modelRef,
-                      subtitle: this.selectorTarget === 'endpoint-hosted' ? `Ref: ${m.modelRef}` : `ID: ${m.id}`,
-                      onClick: () => this.handleModelSelected(this.selectorTarget === 'endpoint-hosted' ? m.modelRef : m.id)
-                    }))}
-                </div>
-            </div>
-        </div>
-      `;
+      return renderModalShell({
+        title: this.selectorTarget === 'endpoint-hosted' ? 'Select Hosted Model from Catalog' : 'Select Local Model from Catalog',
+        onClose: () => this.showModelSelector = false,
+        body: html`
+          ${models.length === 0 ? html`<div class="item-sub">No matching models are in the shared catalog yet.</div>` : ''}
+          ${models.map((m: any) => renderSelectableItem({
+            title: m.id || m.modelRef,
+            subtitle: this.selectorTarget === 'endpoint-hosted' ? `Ref: ${m.modelRef}` : `ID: ${m.id}`,
+            onClick: () => this.handleModelSelected(this.selectorTarget === 'endpoint-hosted' ? m.modelRef : m.id)
+          }))}
+        `
+      });
   }
 
   handleModelSelected(modelId: string) {

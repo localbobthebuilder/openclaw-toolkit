@@ -118,6 +118,27 @@ export function renderSelectableItem(params: {
   `;
 }
 
+export function renderModalShell(params: {
+  title: MaybeTemplate;
+  body: MaybeTemplate;
+  onClose: () => void;
+  closeLabel?: MaybeTemplate;
+}) {
+  return html`
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="card-header" style="padding: 20px;">
+          <h3>${params.title}</h3>
+          <button class="btn btn-ghost" @click=${params.onClose}>${params.closeLabel ?? 'Close'}</button>
+        </div>
+        <div class="modal-body">
+          ${params.body}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export function renderTwoColumnGrid(left: MaybeTemplate, right: MaybeTemplate) {
   return html`
     <div class="grid-2">
