@@ -1,11 +1,12 @@
 import { LitElement, html } from 'lit';
 import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
 import { ToolkitDashboardEndpointsMixin } from './toolkit-dashboard-endpoints-mixin';
+import { ToolkitDashboardModelsMixin } from './toolkit-dashboard-models-mixin';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
 export const ToolkitDashboardManagementMixin = <TBase extends Constructor<LitElement>>(Base: TBase) =>
-  class ToolkitDashboardManagementMixin extends ToolkitDashboardEndpointsMixin(Base) {
+  class ToolkitDashboardManagementMixin extends ToolkitDashboardModelsMixin(ToolkitDashboardEndpointsMixin(Base)) {
     [key: string]: any;
 
     renderTemplateMarkdownsConfig() {
