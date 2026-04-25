@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderActionRow, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderSelectableItem, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -243,12 +243,11 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 </div>
                 <div class="modal-body">
                     ${models.length === 0 ? html`<div class="item-sub">No matching models are in the shared catalog yet.</div>` : ''}
-                    ${models.map((m: any) => html`
-                        <div class="selectable-item" @click=${() => this.handleModelSelected(this.selectorTarget === 'endpoint-hosted' ? m.modelRef : m.id)}>
-                            <div class="item-title">${m.id || m.modelRef}</div>
-                            <div class="item-sub">${this.selectorTarget === 'endpoint-hosted' ? `Ref: ${m.modelRef}` : `ID: ${m.id}`}</div>
-                        </div>
-                    `)}
+                    ${models.map((m: any) => renderSelectableItem({
+                      title: m.id || m.modelRef,
+                      subtitle: this.selectorTarget === 'endpoint-hosted' ? `Ref: ${m.modelRef}` : `ID: ${m.id}`,
+                      onClick: () => this.handleModelSelected(this.selectorTarget === 'endpoint-hosted' ? m.modelRef : m.id)
+                    }))}
                 </div>
             </div>
         </div>

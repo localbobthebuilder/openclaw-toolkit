@@ -104,6 +104,20 @@ export function renderActionRow(params: {
   `;
 }
 
+export function renderSelectableItem(params: {
+  title: MaybeTemplate;
+  subtitle?: MaybeTemplate;
+  onClick: () => void;
+  style?: string;
+}) {
+  return html`
+    <div class="selectable-item" style=${params.style ?? ''} @click=${params.onClick}>
+      <div class="item-title">${params.title}</div>
+      ${params.subtitle !== undefined ? html`<div class="item-sub">${params.subtitle}</div>` : nothing}
+    </div>
+  `;
+}
+
 export function renderTwoColumnGrid(left: MaybeTemplate, right: MaybeTemplate) {
   return html`
     <div class="grid-2">
