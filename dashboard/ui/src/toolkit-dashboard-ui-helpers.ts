@@ -28,6 +28,21 @@ export function renderToggleSwitch(label: string, checked: boolean, onChange: (c
   `;
 }
 
+export function renderToggleField(params: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  description?: MaybeTemplate;
+  groupStyle?: string;
+  toggleStyle?: string;
+}) {
+  return html`
+    <div class="form-group" style=${params.groupStyle ?? ''}>
+      ${renderToggleSwitch(params.label, params.checked, params.onChange, params.description, params.toggleStyle ?? '')}
+    </div>
+  `;
+}
+
 export function renderTagList<T>(
   items: readonly T[],
   renderItem: (item: T, index: number) => MaybeTemplate,

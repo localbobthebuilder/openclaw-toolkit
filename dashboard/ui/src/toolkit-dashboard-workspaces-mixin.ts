@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
 import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
-import { renderFormGroup, renderHelpText, renderSectionHeader, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderFormGroup, renderHelpText, renderSectionHeader, renderSelectableTagList, renderSummaryRow, renderToggleField } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -153,19 +153,23 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
           </div>
 
           <div class="grid-2">
-            <div class="form-group">
-              <label class="toggle-switch">
-                <input type="checkbox" ?checked=${!!workspace.enableAgentToAgent} @change=${(e: any) => { workspace.enableAgentToAgent = e.target.checked; this.requestUpdate(); }}>
-                Enable agent-to-agent tool in this workspace
-              </label>
-            </div>
-            <div class="form-group">
-              <label class="toggle-switch">
-                <input type="checkbox" ?checked=${!!workspace.manageWorkspaceAgentsMd} @change=${(e: any) => { workspace.manageWorkspaceAgentsMd = e.target.checked; this.requestUpdate(); }}>
-                Manage workspace markdown files
-              </label>
-              ${renderHelpText(html`Workspace markdown lives under <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>.`)}
-            </div>
+            ${renderToggleField({
+              label: 'Enable agent-to-agent tool in this workspace',
+              checked: !!workspace.enableAgentToAgent,
+              onChange: (checked) => {
+                workspace.enableAgentToAgent = checked;
+                this.requestUpdate();
+              }
+            })}
+            ${renderToggleField({
+              label: 'Manage workspace markdown files',
+              checked: !!workspace.manageWorkspaceAgentsMd,
+              onChange: (checked) => {
+                workspace.manageWorkspaceAgentsMd = checked;
+                this.requestUpdate();
+              },
+              description: html`Workspace markdown lives under <code>openclaw-toolkit\\workspaces\\${workspace.id || '&lt;workspaceId&gt;'}\\markdown\\</code>.`
+            })}
           </div>
 
           ${workspace.mode === 'shared' ? html`

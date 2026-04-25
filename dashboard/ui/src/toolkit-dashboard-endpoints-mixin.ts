@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderActionRow, renderFormGroup, renderHelpText, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderFormGroup, renderHelpText, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow, renderToggleField } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -68,21 +68,20 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                         <label>Endpoint Key</label>
                         <input type="text" .value=${ep.key} disabled>
                     </div>
-                    <div class="form-group">
-                        <label class="toggle-switch">
-                            <input type="checkbox" ?checked=${!!ep.default} @change=${(e: any) => {
-                                if (e.target.checked) {
-                                    for (const endpoint of this.getConfigEndpoints()) {
-                                        endpoint.default = endpoint.key === ep.key;
-                                    }
-                                } else {
-                                    ep.default = false;
-                                }
-                                this.requestUpdate();
-                            }}>
-                            Default endpoint
-                        </label>
-                    </div>
+                    ${renderToggleField({
+                      label: 'Default endpoint',
+                      checked: !!ep.default,
+                      onChange: (checked) => {
+                        if (checked) {
+                          for (const endpoint of this.getConfigEndpoints()) {
+                            endpoint.default = endpoint.key === ep.key;
+                          }
+                        } else {
+                          ep.default = false;
+                        }
+                        this.requestUpdate();
+                      }
+                    })}
                 </div>
                 ${renderFormGroup({
                   label: 'Endpoint Role',
@@ -90,19 +89,19 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 })}
             </div>
 
-            <div class="form-group" style="margin-top: 16px;">
-                <label class="toggle-switch">
-                    <input type="checkbox" ?checked=${!!runtime} @change=${(e: any) => {
-                        if (e.target.checked) {
-                            this.ensureEndpointOllama(ep);
-                        } else {
-                            delete ep.ollama;
-                        }
-                        this.requestUpdate();
-                    }}>
-                    This endpoint has a local Ollama runtime
-                </label>
-            </div>
+            ${renderToggleField({
+              label: 'This endpoint has a local Ollama runtime',
+              checked: !!runtime,
+              onChange: (checked) => {
+                if (checked) {
+                  this.ensureEndpointOllama(ep);
+                } else {
+                  delete ep.ollama;
+                }
+                this.requestUpdate();
+              },
+              groupStyle: 'margin-top: 16px;'
+            })}
 
             ${renderSectionHeader({
               title: 'Assigned Agents',
@@ -155,12 +154,14 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                         <label>Provider ID</label>
                         <input type="text" .value=${runtime.providerId || ''} @input=${(e: any) => { runtime.providerId = e.target.value; this.requestUpdate(); }}>
                     </div>
-                    <div class="form-group">
-                        <label class="toggle-switch">
-                            <input type="checkbox" ?checked=${!!runtime.autoPullMissingModels} @change=${(e: any) => { runtime.autoPullMissingModels = e.target.checked; this.requestUpdate(); }}>
-                            Auto-pull missing local models when they fit
-                        </label>
-                    </div>
+                    ${renderToggleField({
+                      label: 'Auto-pull missing local models when they fit',
+                      checked: !!runtime.autoPullMissingModels,
+                      onChange: (checked) => {
+                        runtime.autoPullMissingModels = checked;
+                        this.requestUpdate();
+                      }
+                    })}
                 </div>
                 ${renderFormGroup({
                   label: 'Runtime Pull Behavior',
