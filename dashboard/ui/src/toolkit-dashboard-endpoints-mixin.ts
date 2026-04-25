@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderActionRow, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderModalShell, renderSelectableItem, renderSelectableTagList, renderSectionHeader, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -104,8 +104,11 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 </label>
             </div>
 
-            <h4 style="color: #666; margin-top: 24px;">Assigned Agents</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Endpoints now own agent placement. Agents listed here belong to this machine/workbench.</p>
+            ${renderSectionHeader({
+              title: 'Assigned Agents',
+              intro: 'Endpoints now own agent placement. Agents listed here belong to this machine/workbench.',
+              style: 'margin-top: 24px;'
+            })}
             ${renderSelectableTagList(
               assignedAgents,
               ({ agent }: any) => html`
@@ -183,8 +186,11 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                   }}>
                 <div class="help-text">Per-endpoint override for probe headroom. Leave blank to use global setting.</div>
               </div>
-            <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine. When a model has fallbacks, both toolkit fit checks and OpenClaw runtime fallbacks follow the order shown here.</p>
+            ${renderSectionHeader({
+              title: 'Local Runtime Models',
+              intro: "Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine. When a model has fallbacks, both toolkit fit checks and OpenClaw runtime fallbacks follow the order shown here.",
+              style: 'margin-top: 20px;'
+            })}
              
             ${endpointModels.map((mo: any, idx: number) => html`
                 ${renderActionRow({
@@ -207,8 +213,11 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
             <div class="item-sub" style="margin-top: 20px;">This endpoint is currently hosted-only. Enable the local runtime toggle above if this machine should run Ollama too.</div>
             `}
 
-            <h4 style="color: #666; margin-top: 24px;">Hosted Models</h4>
-            <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models available from this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs. If the primary hosted model fails, OpenClaw tries the local fallbacks below in order.</p>
+            ${renderSectionHeader({
+              title: 'Hosted Models',
+              intro: 'These are provider-backed models available from this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs. If the primary hosted model fails, OpenClaw tries the local fallbacks below in order.',
+              style: 'margin-top: 24px;'
+            })}
 
             ${endpointHostedModels.map((model: any, idx: number) => html`
                 ${renderActionRow({

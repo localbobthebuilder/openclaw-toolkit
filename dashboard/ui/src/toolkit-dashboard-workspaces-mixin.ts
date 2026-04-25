@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { VALID_WORKSPACE_MARKDOWN_FILES } from './toolkit-dashboard-constants';
 import { renderMarkdownFileEditors } from './toolkit-dashboard-markdown-renderers';
-import { renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderSectionHeader, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -88,12 +88,13 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
 
           <div class="card" style="margin-bottom: 20px; border-color: ${workspace.mode === 'private' ? '#90caf9' : '#81c784'};">
             <div class="card-header"><h3>Home Base Rules</h3></div>
-            <div class="help-text" style="margin-top: 0;">
-              <strong>${workspace.mode === 'private' ? 'Private workspace' : 'Shared workspace'}:</strong>
-              ${workspace.mode === 'private'
+            ${renderSectionHeader({
+              title: html`${workspace.mode === 'private' ? 'Private workspace' : 'Shared workspace'}:`,
+              intro: workspace.mode === 'private'
                 ? 'this is the agent home base and privacy boundary. With no shared access attached, the toolkit forces sandbox on with workspace-write mode.'
-                : 'this is a collaboration area, not a private boundary. The toolkit forces sandbox off for agents who live here so they can work beyond a single private home-base path.'}
-            </div>
+                : 'this is a collaboration area, not a private boundary. The toolkit forces sandbox off for agents who live here so they can work beyond a single private home-base path.',
+              introStyle: 'font-size: 0.8rem; color: #888; margin-bottom: 0; margin-top: 0;'
+            })}
             <div class="help-text" style="margin-top: 10px;">
               OpenClaw uses the exact configured workspace path directly. It does not require the private workspace name or path to match the agent ID.
             </div>

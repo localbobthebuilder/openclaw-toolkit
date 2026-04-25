@@ -118,6 +118,20 @@ export function renderSelectableItem(params: {
   `;
 }
 
+export function renderSectionHeader(params: {
+  title: MaybeTemplate;
+  intro?: MaybeTemplate;
+  style?: string;
+  introStyle?: string;
+}) {
+  return html`
+    <div style=${params.style ?? ''}>
+      <h4 style="color: #666; margin-top: 0;">${params.title}</h4>
+      ${params.intro !== undefined ? html`<p style=${params.introStyle ?? 'font-size: 0.8rem; color: #888; margin-bottom: 15px;'}>${params.intro}</p>` : nothing}
+    </div>
+  `;
+}
+
 export function renderModalShell(params: {
   title: MaybeTemplate;
   body: MaybeTemplate;
