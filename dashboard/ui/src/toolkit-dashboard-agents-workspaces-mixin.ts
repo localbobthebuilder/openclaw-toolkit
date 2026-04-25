@@ -1,13 +1,13 @@
 import { LitElement, html } from 'lit';
-import { AVAILABLE_TOOL_OPTIONS } from './toolkit-dashboard-constants';
 import { ToolkitDashboardAgentPlacementMixin } from './toolkit-dashboard-agent-placement-mixin';
 import { ToolkitDashboardAgentBootstrapMixin } from './toolkit-dashboard-agent-bootstrap-mixin';
 import { ToolkitDashboardAgentSubagentsMixin } from './toolkit-dashboard-agent-subagents-mixin';
+import { ToolkitDashboardAgentToolsMixin } from './toolkit-dashboard-agent-tools-mixin';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
 export const ToolkitDashboardAgentsWorkspacesMixin = <TBase extends Constructor<LitElement>>(Base: TBase) =>
-  class ToolkitDashboardAgentsWorkspacesMixin extends ToolkitDashboardAgentSubagentsMixin(ToolkitDashboardAgentPlacementMixin(ToolkitDashboardAgentBootstrapMixin(Base))) {
+  class ToolkitDashboardAgentsWorkspacesMixin extends ToolkitDashboardAgentToolsMixin(ToolkitDashboardAgentSubagentsMixin(ToolkitDashboardAgentPlacementMixin(ToolkitDashboardAgentBootstrapMixin(Base)))) {
     [key: string]: any;
 
     renderAgentsConfig() {
@@ -73,18 +73,6 @@ export const ToolkitDashboardAgentsWorkspacesMixin = <TBase extends Constructor<
     const agentIdValidationError = this.getEditingAgentValidationError();
     const allowedAgentChoices = this.getAllowedAgentChoices(agent.id);
     const selectedAllowedAgents = Array.isArray(subagents.allowAgents) ? subagents.allowAgents : (subagents.allowAgents = []);
-    const candidateModelRefs = Array.isArray(agent.candidateModelRefs) ? agent.candidateModelRefs : (agent.candidateModelRefs = []);
-    const toolsetKeys = this.ensureAgentToolsetKeys(agent);
-    const appliedToolsets = this.getAgentAppliedToolsets(agent);
-    const effectiveToolState = this.getEffectiveAgentToolState(agent);
-    const directToolOverrides = this.normalizeAgentToolOverrides(agent) || { allow: [], deny: [] };
-    const directAllowedTools = this.normalizeToolNameList(directToolOverrides.allow);
-    const directDeniedTools = this.normalizeToolNameList(directToolOverrides.deny);
-    const selectedEndpoint = this.resolveAgentEndpoint(agent);
-    const endpointModelOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
-    const availableAgentToolsets = this.getToolsetsList().filter((toolset: any) => toolset.key !== 'minimal' && !toolsetKeys.includes(toolset.key));
-    const availableDirectAllowOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directAllowedTools.includes(option.id));
-    const availableDirectDenyOptions = AVAILABLE_TOOL_OPTIONS.filter((option) => !directDeniedTools.includes(option.id));
     const telegramRoutesForAgent = this.getTelegramRoutesForAgent(String(agent.id || ''));
 
     return html`
@@ -155,205 +143,7 @@ export const ToolkitDashboardAgentsWorkspacesMixin = <TBase extends Constructor<
 
             ${this.renderAgentSubagentsConfig(subagents, selectedAllowedAgents, allowedAgentChoices)}
 
-            <div class="form-group">
-                <label>Candidate Models</label>
-                <div class="tag-list">
-                    ${(agent.candidateModelRefs || []).map((ref: string, idx: number) => html`
-                        <div class="tag">
-                            ${ref}
-                            <span class="tag-remove" @click=${() => { agent.candidateModelRefs.splice(idx, 1); this.requestUpdate(); }}>×</span>
-                        </div>
-                    `)}
-                </div>
-                <div style="margin-top: 10px;">
-                    <select ?disabled=${!selectedEndpoint || endpointModelOptions.length === 0} @change=${(e: any) => {
-                        const value = e.target.value;
-                        if (value) {
-                            if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
-                            if (!agent.candidateModelRefs.includes(value)) {
-                                agent.candidateModelRefs.push(value);
-                                this.syncAgentModelSource(agent);
-                                this.requestUpdate();
-                            }
-                            e.target.value = '';
-                        }
-                    }}>
-                        <option value="">${selectedEndpoint ? '+ Add Endpoint Model' : 'Choose an endpoint first'}</option>
-                        ${endpointModelOptions
-                            .filter((option: any) => !candidateModelRefs.includes(option.ref))
-                            .map((option: any) => html`<option value=${option.ref}>${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}</option>`)}
-                    </select>
-                </div>
-            </div>
-
-            <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
-                <div class="card-header"><h3>Toolsets</h3></div>
-                <div class="help-text" style="margin-top: 0; margin-bottom: 14px;">The global <code>minimal</code> toolset is always applied first. Toolsets lower in the list win when the same tool is both allowed and denied.</div>
-
-                <div class="form-group">
-                    <label>Applied Toolsets</label>
-                    <div class="applied-toolset-list">
-                        ${appliedToolsets.map((toolset: any) => {
-                          const isMinimal = toolset.key === 'minimal';
-                          const agentToolsetIndex = isMinimal ? -1 : toolsetKeys.indexOf(toolset.key);
-                          const allowedTools = this.normalizeToolNameList(toolset.allow);
-                          const deniedTools = this.normalizeToolNameList(toolset.deny);
-                          return html`
-                            <div class="applied-toolset-card">
-                              <div class="applied-toolset-header">
-                                <strong>${toolset.name || toolset.key}</strong>
-                                ${isMinimal ? html`<span class="badge">Global</span>` : ''}
-                                ${!isMinimal ? html`
-                                  <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex <= 0} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, -1)}>Up</button>
-                                  <button class="btn btn-ghost" style="padding: 2px 6px;" ?disabled=${agentToolsetIndex < 0 || agentToolsetIndex >= toolsetKeys.length - 1} @click=${() => this.moveAgentToolset(agent, agentToolsetIndex, 1)}>Down</button>
-                                  <button class="btn btn-danger" style="padding: 2px 6px;" @click=${() => { agent.toolsetKeys.splice(agentToolsetIndex, 1); this.requestUpdate(); }}>Remove</button>
-                                ` : ''}
-                              </div>
-                              <div class="toolset-preview-rows">
-                                <div class="toolset-preview-row">
-                                  <div class="toolset-preview-label">Allow</div>
-                                  ${allowedTools.length === 0
-                                    ? html`<div class="toolset-preview-empty">No allowed tools.</div>`
-                                    : html`
-                                      <div class="toolset-preview-tags">
-                                        ${allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                                      </div>
-                                    `}
-                                </div>
-                                <div class="toolset-preview-row">
-                                  <div class="toolset-preview-label">Deny</div>
-                                  ${deniedTools.length === 0
-                                    ? html`<div class="toolset-preview-empty">No denied tools.</div>`
-                                    : html`
-                                      <div class="toolset-preview-tags">
-                                        ${deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                                      </div>
-                                    `}
-                                </div>
-                              </div>
-                            </div>
-                          `;
-                        })}
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <select @change=${(e: any) => {
-                          const value = e.target.value;
-                          if (value) {
-                            this.addAgentToolset(agent, value);
-                            e.target.value = '';
-                          }
-                        }}>
-                            <option value="">${availableAgentToolsets.length === 0 ? 'No other toolsets available' : '+ Add toolset'}</option>
-                            ${availableAgentToolsets.map((toolset: any) => html`
-                              <option value=${toolset.key}>${toolset.name || toolset.key} - ${this.getToolsetPreviewText(toolset)}</option>
-                            `)}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Direct Tool Overrides</label>
-                    <div class="applied-toolset-card">
-                      <div class="applied-toolset-header">
-                        <strong>Direct Tool Overrides</strong>
-                        <span class="badge">Final Layer</span>
-                      </div>
-                      <div class="toolset-preview-rows">
-                        <div class="toolset-preview-row">
-                          <div class="toolset-preview-label">Allow</div>
-                          ${directAllowedTools.length === 0
-                            ? html`<div class="toolset-preview-empty">No direct allow overrides.</div>`
-                            : html`
-                              <div class="toolset-preview-tags">
-                                ${directAllowedTools.map((toolId: string) => html`
-                                  <div class="tag">
-                                    ${this.renderToolLabel(toolId)}
-                                    <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'allow', toolId)}>×</span>
-                                  </div>
-                                `)}
-                              </div>
-                            `}
-                          <div style="margin-top: 6px;">
-                            <select @change=${(e: any) => {
-                              const value = e.target.value;
-                              if (value) {
-                                this.addAgentToolOverride(agent, 'allow', value);
-                                e.target.value = '';
-                              }
-                            }}>
-                              <option value="">+ Add allowed tool override</option>
-                              ${availableDirectAllowOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
-                            </select>
-                          </div>
-                        </div>
-                        <div class="toolset-preview-row">
-                          <div class="toolset-preview-label">Deny</div>
-                          ${directDeniedTools.length === 0
-                            ? html`<div class="toolset-preview-empty">No direct deny overrides.</div>`
-                            : html`
-                              <div class="toolset-preview-tags">
-                                ${directDeniedTools.map((toolId: string) => html`
-                                  <div class="tag">
-                                    ${this.renderToolLabel(toolId)}
-                                    <span class="tag-remove" @click=${() => this.removeAgentToolOverride(agent, 'deny', toolId)}>×</span>
-                                  </div>
-                                `)}
-                              </div>
-                            `}
-                          <div style="margin-top: 6px;">
-                            <select @change=${(e: any) => {
-                              const value = e.target.value;
-                              if (value) {
-                                this.addAgentToolOverride(agent, 'deny', value);
-                                e.target.value = '';
-                              }
-                            }}>
-                              <option value="">+ Add denied tool override</option>
-                              ${availableDirectDenyOptions.map((option) => html`<option value=${option.id}>${this.getToolDisplayLabel(option.id)} - ${option.description}</option>`)}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="help-text" style="margin-top: 8px;">These direct per-agent tool picks merge after all applied toolsets, so they are the easiest way to make one-off tweaks.</div>
-                </div>
-
-                <div class="form-group">
-                    <label>Combined Toolset</label>
-                    <div class="applied-toolset-card">
-                      <div class="applied-toolset-header">
-                        <strong>Combined Toolset</strong>
-                        <span class="badge">Final</span>
-                      </div>
-                      <div class="toolset-preview-rows">
-                        <div class="toolset-preview-row">
-                          <div class="toolset-preview-label">Allow</div>
-                          ${effectiveToolState.allowedTools.length === 0
-                            ? html`<div class="toolset-preview-empty">No tools allowed yet.</div>`
-                            : html`
-                              <div class="toolset-preview-tags">
-                                ${effectiveToolState.allowedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                              </div>
-                            `}
-                        </div>
-                        <div class="toolset-preview-row">
-                          <div class="toolset-preview-label">Deny</div>
-                          ${effectiveToolState.deniedTools.length === 0
-                            ? html`<div class="toolset-preview-empty">No explicit denies.</div>`
-                            : html`
-                              <div class="toolset-preview-tags">
-                                ${effectiveToolState.deniedTools.map((toolId: string) => html`<div class="tag">${this.renderToolLabel(toolId)}</div>`)}
-                              </div>
-                            `}
-                        </div>
-                      </div>
-                    </div>
-                </div>
-
-                ${effectiveToolState.explicitTools ? html`
-                  <div class="help-text" style="margin-top: 0;">This agent also has a raw <code>tools</code> block in config. Those direct OpenClaw overrides still apply after the combined toolkit toolset shown above.</div>
-                ` : ''}
-            </div>
+            ${this.renderAgentToolsConfig(agent)}
 
             ${this.renderAgentBootstrapConfig(agent, agentTemplateFiles)}
         </div>
