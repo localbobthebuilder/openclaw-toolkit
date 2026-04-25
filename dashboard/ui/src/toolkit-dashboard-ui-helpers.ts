@@ -85,6 +85,25 @@ export function renderSummaryRow(params: {
   `;
 }
 
+export function renderActionRow(params: {
+  title: MaybeTemplate;
+  subtitle?: MaybeTemplate;
+  content?: MaybeTemplate;
+  actions?: MaybeTemplate;
+  style?: string;
+}) {
+  return html`
+    <div class="item-row" style=${params.style ?? 'align-items: flex-start; gap: 16px;'}>
+      <div class="item-info">
+        <span class="item-title">${params.title}</span>
+        ${params.subtitle !== undefined ? html`<span class="item-sub">${params.subtitle}</span>` : nothing}
+        ${params.content !== undefined ? params.content : nothing}
+      </div>
+      ${params.actions !== undefined ? html`<div style="display: flex; gap: 12px; align-items: flex-start; flex-shrink: 0;">${params.actions}</div>` : nothing}
+    </div>
+  `;
+}
+
 export function renderTwoColumnGrid(left: MaybeTemplate, right: MaybeTemplate) {
   return html`
     <div class="grid-2">

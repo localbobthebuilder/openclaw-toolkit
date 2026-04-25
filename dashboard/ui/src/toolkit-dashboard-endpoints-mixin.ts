@@ -1,7 +1,7 @@
 import { LitElement, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { renderModelCatalogConfig } from './toolkit-dashboard-model-catalog-renderer';
-import { renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
+import { renderActionRow, renderSelectableTagList, renderSummaryRow } from './toolkit-dashboard-ui-helpers';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
 
@@ -183,23 +183,21 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                   }}>
                 <div class="help-text">Per-endpoint override for probe headroom. Leave blank to use global setting.</div>
               </div>
-              <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
+            <h4 style="color: #666; margin-top: 20px;">Local Runtime Models</h4>
             <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">Models listed here are desired on this machine's local runtime. Bootstrap will pull them when they fit the machine. When a model has fallbacks, both toolkit fit checks and OpenClaw runtime fallbacks follow the order shown here.</p>
              
             ${endpointModels.map((mo: any, idx: number) => html`
-                <div class="item-row" style="align-items: flex-start; gap: 16px;">
-                    <div class="item-info">
-                        <span class="item-title">${mo.id}</span>
-                        <span class="item-sub">Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}</span>
-                        ${endpointModels.length > 1 ? this.renderOrderedLocalFallbackEditor(mo, endpointModels.map((localModel: any) => localModel.id)) : ''}
+                ${renderActionRow({
+                  title: mo.id,
+                  subtitle: `Ctx: ${mo.contextWindow} | MaxTokens: ${mo.maxTokens || 8192}`,
+                  content: endpointModels.length > 1 ? this.renderOrderedLocalFallbackEditor(mo, endpointModels.map((localModel: any) => localModel.id)) : '',
+                  actions: html`
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                      <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
+                      <button class="btn btn-danger" @click=${() => { endpointModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
                     </div>
-                    <div style="display: flex; gap: 12px; align-items: flex-start; flex-shrink: 0;">
-                        <div style="display: flex; flex-direction: column; gap: 8px;">
-                            <button class="btn btn-secondary" @click=${() => this.tuneExistingModel(ep.key, mo.id)}>Re-Tune</button>
-                            <button class="btn btn-danger" @click=${() => { endpointModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
-                        </div>
-                    </div>
-                </div>
+                  `
+                })}
             `)}
 
             <div style="margin-top: 20px;">
@@ -213,17 +211,15 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
             <p style="font-size: 0.8rem; color: #888; margin-bottom: 15px;">These are provider-backed models available from this endpoint, such as OpenAI, Claude, Gemini, Copilot, or Ollama Cloud refs. If the primary hosted model fails, OpenClaw tries the local fallbacks below in order.</p>
 
             ${endpointHostedModels.map((model: any, idx: number) => html`
-                <div class="item-row" style="align-items: flex-start; gap: 16px;">
-                    <div class="item-info">
-                        <span class="item-title">${model.modelRef}</span>
-                        ${endpointModels.length > 0 ? this.renderOrderedLocalFallbackEditor(model, endpointModels.map((localModel: any) => localModel.id)) : ''}
+                ${renderActionRow({
+                  title: model.modelRef,
+                  content: endpointModels.length > 0 ? this.renderOrderedLocalFallbackEditor(model, endpointModels.map((localModel: any) => localModel.id)) : '',
+                  actions: html`
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                      <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
                     </div>
-                    <div style="display: flex; gap: 12px; align-items: flex-start; flex-shrink: 0;">
-                        <div style="display: flex; flex-direction: column; gap: 8px;">
-                            <button class="btn btn-danger" @click=${() => { endpointHostedModels.splice(idx, 1); this.requestUpdate(); }}>Remove</button>
-                        </div>
-                    </div>
-                </div>
+                  `
+                })}
             `)}
 
             <div style="margin-top: 20px;">
