@@ -12,13 +12,14 @@ $ErrorActionPreference = "Stop"
 
 # Derive default workspace path from bootstrap config so it's portable across machines/users
 $_scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$_configFile = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+$_toolkitDir = Split-Path -Parent $_scriptDir
+$_configFile = Join-Path $_toolkitDir "openclaw-bootstrap.config.json"
 if (-not $WorkspaceHostPath) {
     $_hostConfigDir = $null
     if (Test-Path $_configFile) {
         . (Join-Path $_scriptDir "shared-config-paths.ps1")
         $_bsCfg = Get-Content -Raw $_configFile | ConvertFrom-Json
-        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_scriptDir
+        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_toolkitDir
         if ($_bsCfg.hostWorkspaceDir) { $WorkspaceHostPath = [string]$_bsCfg.hostWorkspaceDir }
         elseif ($_bsCfg.hostConfigDir) { $_hostConfigDir = [string]$_bsCfg.hostConfigDir }
     }

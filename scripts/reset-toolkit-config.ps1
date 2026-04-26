@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $ConfigPath) {
-    $ConfigPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "openclaw-bootstrap.config.json"
+    $ConfigPath = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) "openclaw-bootstrap.config.json"
 }
 
 if (-not $DefaultConfigPath) {

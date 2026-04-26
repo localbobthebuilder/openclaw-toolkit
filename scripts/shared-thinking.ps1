@@ -17,7 +17,8 @@ function Get-ToolkitBootstrapConfig {
     param([string]$ConfigPath)
 
     if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-        $ConfigPath = Join-Path $PSScriptRoot "openclaw-bootstrap.config.json"
+        $toolkitDir = Split-Path -Parent $PSScriptRoot
+        $ConfigPath = Join-Path $toolkitDir "openclaw-bootstrap.config.json"
     }
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
         return $null

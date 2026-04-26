@@ -11,8 +11,9 @@ $ErrorActionPreference = "Stop"
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [System.Environment]::GetEnvironmentVariable("Path", "User")
 
-# Resolve paths portably from the config file next to this script
-$configFile = [System.IO.Path]::Combine($PSScriptRoot, "openclaw-bootstrap.config.json")
+# Resolve paths portably from the config file at the toolkit root
+$toolkitDir = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$configFile = [System.IO.Path]::Combine($toolkitDir, "openclaw-bootstrap.config.json")
 $composeFilePath = $null
 . ([System.IO.Path]::Combine($PSScriptRoot, "shared-ollama-endpoints.ps1"))
 . ([System.IO.Path]::Combine($PSScriptRoot, "shared-ollama-cloud-auth.ps1"))
@@ -21,13 +22,13 @@ $bootstrapConfig = $null
 if (Test-Path $configFile) {
     . ([System.IO.Path]::Combine($PSScriptRoot, "shared-config-paths.ps1"))
     $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
-    $cfg = Resolve-PortableConfigPaths -Config $cfg -BaseDir $PSScriptRoot
+    $cfg = Resolve-PortableConfigPaths -Config $cfg -BaseDir $toolkitDir
     $bootstrapConfig = $cfg
     if (-not $RepoPath)  { $RepoPath  = $cfg.repoPath }
     if (-not $HealthUrl) { $HealthUrl = "http://127.0.0.1:$($cfg.gatewayPort)/healthz" }
     if ($cfg.composeFilePath) { $composeFilePath = $cfg.composeFilePath }
 }
-if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\openclaw")) }
+if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::GetFullPath((Join-Path $toolkitDir "..\\openclaw")) }
 if (-not $HealthUrl) { $HealthUrl = "http://127.0.0.1:18789/healthz" }
 if (-not $composeFilePath) { $composeFilePath = [System.IO.Path]::Combine($RepoPath, "docker-compose.yml") }
 

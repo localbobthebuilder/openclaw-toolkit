@@ -77,7 +77,12 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
           : telegramLiveCheckState.reason === 'services-down'
             ? 'Telegram checks are blocked because Docker or the gateway is not fully ready.'
             : 'Telegram checks are not available yet.';
-      const renderServicesSection = () => sections.length === 0 ? html`
+      const renderServicesSection = () => {
+        const rawStatusOutput = this.statusOutput && this.statusOutput.trim().length > 0 ? this.statusOutput.trim() : '';
+        const statusOutputLooksBroken = this.statusLoaded && sections.length === 0 && !!rawStatusOutput;
+
+        if (sections.length === 0 && !statusOutputLooksBroken) {
+          return html`
         <div class="card status-services-section">
           <div class="card-header">
             <h3>Services</h3>
@@ -97,7 +102,34 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
             </div>
           </div>
         </div>
-      ` : html`
+      `;
+        }
+
+        if (statusOutputLooksBroken) {
+          return html`
+        <div class="card status-services-section">
+          <div class="card-header">
+            <h3>Services</h3>
+            <span class="badge badge-warning">probe error</span>
+          </div>
+          ${renderHelpText('The status probe returned text that the dashboard could not summarize into service cards. The raw output is shown below so you can see what failed.', 'margin-top: 0; margin-bottom: 16px;')}
+          <div class="status-grid" style="grid-template-columns: 1fr;">
+            <div class="status-card">
+              <div class="status-card-header">
+                <h4>
+                  <span class="status-indicator status-offline"></span>
+                  Status probe output
+                </h4>
+                <span class="badge badge-warning">raw</span>
+              </div>
+              <div class="status-content" style="white-space: pre-wrap;">${rawStatusOutput}</div>
+            </div>
+          </div>
+        </div>
+      `;
+        }
+
+        return html`
         <div class="card status-services-section">
           <div class="card-header">
             <h3>Services</h3>
@@ -135,6 +167,7 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
           </div>
         </div>
       `;
+      };
 
       if (!this.statusLoaded && sections.length === 0) {
         return html`

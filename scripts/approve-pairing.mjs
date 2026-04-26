@@ -99,18 +99,18 @@ let hostConfigDir = path.join(
 );
 let envFilePath = null;
 
-const bootstrapConfigPath = path.join(__dirname, "openclaw-bootstrap.config.json");
+const bootstrapConfigPath = path.join(path.dirname(__dirname), "openclaw-bootstrap.config.json");
 if (fs.existsSync(bootstrapConfigPath)) {
   try {
     const cfg = JSON.parse(fs.readFileSync(bootstrapConfigPath, "utf8"));
     if (cfg.gatewayPort) port = parseInt(String(cfg.gatewayPort), 10);
     if (cfg.hostConfigDir) {
       const val = String(cfg.hostConfigDir);
-      hostConfigDir = path.isAbsolute(val) ? val : path.resolve(__dirname, val);
+      hostConfigDir = path.isAbsolute(val) ? val : path.resolve(path.dirname(__dirname), val);
     }
     if (cfg.envFilePath) {
       const val = String(cfg.envFilePath);
-      envFilePath = path.isAbsolute(val) ? val : path.resolve(__dirname, val);
+      envFilePath = path.isAbsolute(val) ? val : path.resolve(path.dirname(__dirname), val);
     }
   } catch {}
 }

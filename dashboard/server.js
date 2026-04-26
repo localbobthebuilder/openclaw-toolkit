@@ -635,17 +635,47 @@ app.post('/api/config', (req, res) => {
 });
 
 app.get('/api/status', (req, res) => {
+  const statusScript = path.join(toolkitDir, 'scripts', 'status-openclaw.ps1');
   const child = spawn('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
-    '-File', path.join(toolkitDir, 'status-openclaw.ps1')
+    '-File', statusScript
   ], { cwd: toolkitDir });
 
   let output = '';
+  let responded = false;
+  const timeoutMs = 25000;
+  const timeout = setTimeout(() => {
+    if (responded) {
+      return;
+    }
+    output += output ? '\n' : '';
+    output += `Status probe timed out after ${timeoutMs / 1000}s while running ${path.basename(statusScript)}.`;
+    try {
+      child.kill();
+    } catch (err) {
+      console.warn('Failed to terminate timed-out status probe:', err?.message ?? err);
+    }
+    responded = true;
+    res.json({ output, code: -1, timedOut: true });
+  }, timeoutMs);
+
   child.stdout.on('data', (data) => output += data.toString());
   child.stderr.on('data', (data) => output += data.toString());
 
+  child.on('error', (err) => {
+    if (responded) return;
+    clearTimeout(timeout);
+    responded = true;
+    res.status(500).json({ output: String(err?.message || err), code: -1, error: true });
+  });
+
   child.on('close', (code) => {
+    if (responded) {
+      return;
+    }
+    clearTimeout(timeout);
+    responded = true;
     res.json({ output, code });
   });
 });

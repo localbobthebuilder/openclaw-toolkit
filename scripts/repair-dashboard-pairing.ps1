@@ -10,13 +10,14 @@ $ErrorActionPreference = "Stop"
 
 # Resolve host config dir from bootstrap config (portable, no hardcoded paths).
 $_scriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
-$_configFile   = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+$_toolkitDir   = Split-Path -Parent $_scriptDir
+$_configFile   = Join-Path $_toolkitDir "openclaw-bootstrap.config.json"
 $_hostConfigDir = Join-Path $env:USERPROFILE ".openclaw"
 $_gatewayPort = 18789
 if (Test-Path $_configFile) {
     . (Join-Path $_scriptDir "shared-config-paths.ps1")
     $_cfg2 = Get-Content -Raw $_configFile | ConvertFrom-Json
-    $_cfg2 = Resolve-PortableConfigPaths -Config $_cfg2 -BaseDir $_scriptDir
+    $_cfg2 = Resolve-PortableConfigPaths -Config $_cfg2 -BaseDir $_toolkitDir
     if ($_cfg2.hostConfigDir) { $_hostConfigDir = [string]$_cfg2.hostConfigDir }
     if ($_cfg2.gatewayPort)   { $_gatewayPort   = [int]$_cfg2.gatewayPort }
 }

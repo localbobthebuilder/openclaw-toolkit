@@ -20,12 +20,13 @@ Log ""
 # -- Bootstrap config ---------------------------------------------------------
 Log "[1] Resolving host config dir..." "Yellow"
 $_scriptDir     = Split-Path -Parent $MyInvocation.MyCommand.Path
-$_configFile    = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+$_toolkitDir    = Split-Path -Parent $_scriptDir
+$_configFile    = Join-Path $_toolkitDir "openclaw-bootstrap.config.json"
 $_hostConfigDir = Join-Path $env:USERPROFILE ".openclaw"
 if (Test-Path $_configFile) {
     . (Join-Path $_scriptDir "shared-config-paths.ps1")
     $_cfg = Get-Content -Raw $_configFile | ConvertFrom-Json
-    $_cfg = Resolve-PortableConfigPaths -Config $_cfg -BaseDir $_scriptDir
+    $_cfg = Resolve-PortableConfigPaths -Config $_cfg -BaseDir $_toolkitDir
     if ($_cfg.hostConfigDir) { $_hostConfigDir = [string]$_cfg.hostConfigDir }
 }
 $_devicesDir = Join-Path $_hostConfigDir "devices"

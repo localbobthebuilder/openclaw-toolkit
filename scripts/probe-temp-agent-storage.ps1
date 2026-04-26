@@ -14,16 +14,17 @@ $ErrorActionPreference = "Stop"
 
 # Derive defaults from bootstrap config so paths are portable across machines/users
 $_scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$_configFile = Join-Path $_scriptDir "openclaw-bootstrap.config.json"
+$_toolkitDir = Split-Path -Parent $_scriptDir
+$_configFile = Join-Path $_toolkitDir "openclaw-bootstrap.config.json"
 if (-not $RepoPath -or -not $StateRoot) {
     if (Test-Path $_configFile) {
         . (Join-Path $_scriptDir "shared-config-paths.ps1")
         $_bsCfg = Get-Content -Raw $_configFile | ConvertFrom-Json
-        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_scriptDir
+        $_bsCfg = Resolve-PortableConfigPaths -Config $_bsCfg -BaseDir $_toolkitDir
         if (-not $RepoPath   -and $_bsCfg.repoPath)      { $RepoPath   = [string]$_bsCfg.repoPath }
         if (-not $StateRoot  -and $_bsCfg.hostConfigDir)  { $StateRoot  = [string]$_bsCfg.hostConfigDir }
     }
-    if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::GetFullPath((Join-Path $_scriptDir "..\openclaw")) }
+    if (-not $RepoPath)  { $RepoPath  = [System.IO.Path]::GetFullPath((Join-Path $_toolkitDir "..\openclaw")) }
     if (-not $StateRoot) { $StateRoot = Join-Path $env:USERPROFILE ".openclaw" }
 }
 
