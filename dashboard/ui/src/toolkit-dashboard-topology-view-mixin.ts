@@ -381,9 +381,12 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
 
       return html`
         <div class="card">
-          <div class="card-header">
-            <h3>Agent Inspector</h3>
-            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <div class="card-header topology-inspector-header">
+            <div class="topology-inspector-header-copy">
+              <h3>Agent Inspector</h3>
+              <div class="topology-inspector-header-subtitle">Selected agent details, live sessions, and effective toolkit state.</div>
+            </div>
+            <div class="topology-inspector-header-actions">
               <button class="btn btn-ghost" @click=${() => {
                 this.topologyInspectorOpen = false;
               }}>Hide</button>
@@ -391,14 +394,20 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
             </div>
           </div>
 
-          <div class="topology-inspector-meta">
-            <div><strong>${selectedEntry.name}</strong> <span style="color:#777;">(${selectedEntry.id})</span></div>
-            <div>Endpoint: <strong>${selectedEndpoint ? this.getEndpointLabel(selectedEndpoint) : 'Unassigned'}</strong></div>
-            <div>
-              Workspace:
+          <div class="topology-inspector-summary">
+            <div class="topology-inspector-summary-item topology-inspector-summary-item-wide">
+              <div class="topology-inspector-summary-label">Agent</div>
+              <div class="topology-inspector-summary-value"><strong>${selectedEntry.name}</strong> <span style="color:#777;">(${selectedEntry.id})</span></div>
+            </div>
+            <div class="topology-inspector-summary-item">
+              <div class="topology-inspector-summary-label">Endpoint</div>
+              <div class="topology-inspector-summary-value"><strong>${selectedEndpoint ? this.getEndpointLabel(selectedEndpoint) : 'Unassigned'}</strong></div>
+            </div>
+            <div class="topology-inspector-summary-item topology-inspector-summary-item-wide">
+              <div class="topology-inspector-summary-label">Workspace</div>
               <select
                 .value=${primaryWorkspace?.id || ''}
-                style="margin-left: 8px; min-width: 240px;"
+                class="topology-inspector-select"
                 @change=${(event: any) => this.setTopologyAgentWorkspace(selectedEntry.id, event.target.value || null)}>
                 <option value="">No workspace</option>
                 ${workspaceOptions.map((option: any) => html`
@@ -413,7 +422,10 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                 `)}
               </select>
             </div>
-            <div>Model: <strong>${agent.modelRef || 'unassigned'}</strong></div>
+            <div class="topology-inspector-summary-item">
+              <div class="topology-inspector-summary-label">Model</div>
+              <div class="topology-inspector-summary-value"><strong>${agent.modelRef || 'unassigned'}</strong></div>
+            </div>
           </div>
 
           <div class="help-text" style="margin-top: 10px;">
