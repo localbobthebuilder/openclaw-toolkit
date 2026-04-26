@@ -111,8 +111,8 @@ export function renderModelCatalogConfig(dashboard: any) {
             </div>
           </div>
           <div class="model-catalog-toolbar-actions">
-          <button class="btn btn-ghost" @click=${() => dashboard.addModel()}>+ Add Local</button>
-          <button class="btn btn-ghost" @click=${() => dashboard.addHostedModel()}>+ Add Hosted</button>
+          <button class="btn btn-primary" @click=${() => dashboard.addModel()}>+ Add Local Model</button>
+          <button class="btn btn-primary" @click=${() => dashboard.addHostedModel()}>+ Add Hosted Model</button>
           </div>
         </div>
       </div>
