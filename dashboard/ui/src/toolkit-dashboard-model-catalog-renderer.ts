@@ -100,18 +100,22 @@ export function renderModelCatalogConfig(dashboard: any) {
 
   return html`
     <div class="card">
-      <div class="card-header">
-        <h3>Known Models</h3>
-        <div style="display: flex; gap: 8px;">
+      <div class="model-catalog-toolbar">
+        <div class="model-catalog-toolbar-row">
+          <div class="model-catalog-toolbar-copy">
+            <h3>Known Models</h3>
+            <div class="model-catalog-toolbar-subtitle">
+              ${hasSharedCatalog
+                ? 'This shared catalog is stored in top-level modelCatalog in openclaw-bootstrap.config.json. Endpoint model rows still decide what each machine should pull, run, and fall back to.'
+                : 'No shared catalog exists yet. The view below is inferred from endpoint-local and endpoint-hosted models; adding a catalog model will seed a reusable shared catalog from this list.'}
+            </div>
+          </div>
+          <div class="model-catalog-toolbar-actions">
           <button class="btn btn-ghost" @click=${() => dashboard.addModel()}>+ Add Local</button>
           <button class="btn btn-ghost" @click=${() => dashboard.addHostedModel()}>+ Add Hosted</button>
+          </div>
         </div>
       </div>
-      <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">
-        ${hasSharedCatalog
-          ? 'This shared catalog is stored in top-level modelCatalog in openclaw-bootstrap.config.json. Endpoint model rows still decide what each machine should pull, run, and fall back to.'
-          : 'No shared catalog exists yet. The view below is inferred from endpoint-local and endpoint-hosted models; adding a catalog model will seed a reusable shared catalog from this list.'}
-      </p>
       <div class="model-catalog-help">
         <div class="model-catalog-help-card">
           <strong>Min Ctx</strong>
