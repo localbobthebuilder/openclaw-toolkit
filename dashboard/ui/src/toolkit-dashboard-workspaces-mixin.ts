@@ -11,9 +11,11 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
 
     renderFeaturesConfig() {
       return html`
-        <div class="tabs">
-          <div class="tab ${this.featureSubsection === 'telegram' ? 'active' : ''}" @click=${() => this.featureSubsection = 'telegram'}>Telegram</div>
-          <div class="tab ${this.featureSubsection === 'voice' ? 'active' : ''}" @click=${() => this.featureSubsection = 'voice'}>Voice</div>
+        <div class="features-toolbar">
+          <div class="features-toolbar-tabs">
+            <button type="button" class="features-toolbar-tab ${this.featureSubsection === 'telegram' ? 'active' : ''}" @click=${() => this.featureSubsection = 'telegram'}>Telegram</button>
+            <button type="button" class="features-toolbar-tab ${this.featureSubsection === 'voice' ? 'active' : ''}" @click=${() => this.featureSubsection = 'voice'}>Voice</button>
+          </div>
         </div>
         ${this.featureSubsection === 'telegram'
           ? this.renderTelegramFeaturesConfig()

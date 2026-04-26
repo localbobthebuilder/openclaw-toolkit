@@ -172,6 +172,11 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .config-toolbar-tab { appearance: none; border: 0; border-radius: 10px; padding: 12px 18px; background: transparent; color: #9aa0a6; font-size: 0.92rem; font-weight: 600; cursor: pointer; transition: background-color 0.2s, color 0.2s, box-shadow 0.2s; }
     .config-toolbar-tab:hover { color: #fff; background: #232323; }
     .config-toolbar-tab.active { background: #00bcd4; color: #000; box-shadow: 0 0 0 1px rgba(0,188,212,0.24); }
+    .features-toolbar { margin-bottom: 18px; }
+    .features-toolbar-tabs { display: inline-flex; gap: 10px; padding: 6px; border: 1px solid #2f2f2f; border-radius: 14px; background: #171717; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); width: fit-content; flex-wrap: wrap; }
+    .features-toolbar-tab { appearance: none; border: 0; border-radius: 10px; padding: 12px 18px; background: transparent; color: #9aa0a6; font-size: 0.92rem; font-weight: 600; cursor: pointer; transition: background-color 0.2s, color 0.2s, box-shadow 0.2s; }
+    .features-toolbar-tab:hover { color: #fff; background: #232323; }
+    .features-toolbar-tab.active { background: #00bcd4; color: #000; box-shadow: 0 0 0 1px rgba(0,188,212,0.24); }
     .config-toolbar-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; align-items: center; }
     .config-toolbar-actions .btn { flex: 0 1 auto; white-space: nowrap; }
     .unsaved-banner { background: #ff9800; color: #000; padding: 10px 20px; border-radius: 4px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: bold; }
@@ -357,6 +362,8 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       .model-catalog-actions .btn { flex: 1 1 180px; }
       .config-toolbar-tabs { width: 100%; }
       .config-toolbar-tab { flex: 1 1 180px; }
+      .features-toolbar-tabs { width: 100%; }
+      .features-toolbar-tab { flex: 1 1 180px; }
       .config-toolbar-actions { flex-direction: column; align-items: stretch; }
       .config-toolbar-actions .btn { width: 100%; }
     }
@@ -456,6 +463,8 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       .endpoint-editor-toolbar { padding: 12px; }
       .config-toolbar-tabs { gap: 8px; padding: 4px; }
       .config-toolbar-tab { padding: 10px 14px; }
+      .features-toolbar-tabs { gap: 8px; padding: 4px; }
+      .features-toolbar-tab { padding: 10px 14px; }
       .markdown-library-scope-tabs { gap: 8px; padding: 4px; }
       .markdown-library-scope-tab { padding: 10px 14px; }
       .markdown-library-file-tab { padding: 9px 12px; }
