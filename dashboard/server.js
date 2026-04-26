@@ -797,7 +797,7 @@ wss.on('connection', (ws) => {
       console.log(`Running command: ${command} ${args.join(' ')}`);
 
       // Rebuild is handled in-process: build UI, tell client, then process.exit(0)
-      // so the run-toolkit-dashboard.cmd restart loop brings the server back up cleanly.
+      // so the cmd\\run-toolkit-dashboard.cmd restart loop brings the server back up cleanly.
       if (command === 'toolkit-dashboard-rebuild') {
         const uiDir = path.join(toolkitDir, 'dashboard', 'ui');
         ws.send(JSON.stringify({ type: 'stdout', data: '==> Building dashboard UI...\n' }));
@@ -814,7 +814,7 @@ wss.on('connection', (ws) => {
           }
           ws.send(JSON.stringify({ type: 'stdout', data: '\nBuild complete. Server is restarting...\n' }));
           ws.send(JSON.stringify({ type: 'exit', code: 0 }));
-          // process.exit(0) signals the run-toolkit-dashboard.cmd restart loop to relaunch
+          // process.exit(0) signals the cmd\\run-toolkit-dashboard.cmd restart loop to relaunch
           setTimeout(() => process.exit(0), 400);
         });
         return;
@@ -868,3 +868,4 @@ wss.on('connection', (ws) => {
     }
   });
 });
+

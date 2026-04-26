@@ -77,51 +77,51 @@ set "HELP_EXIT_CODE=1"
 goto :help
 
 :prereqs
-call "%SCRIPT_DIR%run-prereqs.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-prereqs.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :bootstrap
-call "%SCRIPT_DIR%run-bootstrap.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-bootstrap.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :backup
-call "%SCRIPT_DIR%run-backup.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-backup.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :restore
-call "%SCRIPT_DIR%run-restore.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-restore.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :update
-call "%SCRIPT_DIR%run-update.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-update.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :start
-call "%SCRIPT_DIR%run-start.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-start.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :onboard
-call "%SCRIPT_DIR%run-openclaw-onboard.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-openclaw-onboard.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :status
-call "%SCRIPT_DIR%run-status.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-status.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :dashboard
-call "%SCRIPT_DIR%run-dashboard.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-dashboard.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :phone_dashboard
-call "%SCRIPT_DIR%run-phone-dashboard.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-phone-dashboard.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :toolkit_dashboard
-call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-toolkit-dashboard.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :toolkit_dashboard_stop
-call "%SCRIPT_DIR%run-toolkit-dashboard.cmd" stop
+call "%SCRIPT_DIR%cmd\run-toolkit-dashboard.cmd" stop
 exit /b %ERRORLEVEL%
 
 :toolkit_dashboard_rebuild
@@ -129,119 +129,119 @@ call "%SCRIPT_DIR%rebuild-toolkit-dashboard.cmd"
 exit /b %ERRORLEVEL%
 
 :dashboard_repair
-call "%SCRIPT_DIR%run-dashboard-repair.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-dashboard-repair.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :openai_auth
-call "%SCRIPT_DIR%run-openai-auth.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-openai-auth.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :ollama_auth
-call "%SCRIPT_DIR%run-ollama-auth.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-ollama-auth.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :gemini_auth
-call "%SCRIPT_DIR%run-gemini-auth.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-gemini-auth.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :claude_auth
-call "%SCRIPT_DIR%run-claude-auth.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-claude-auth.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :copilot_auth
-call "%SCRIPT_DIR%run-copilot-auth.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-copilot-auth.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :verify
-call "%SCRIPT_DIR%run-verify.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-verify.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :agents
-call "%SCRIPT_DIR%run-configure-agents.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-configure-agents.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :reset_config
-call "%SCRIPT_DIR%run-reset-config.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-reset-config.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :watchdog
-call "%SCRIPT_DIR%run-watchdog.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-watchdog.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :install_watchdog
-call "%SCRIPT_DIR%run-install-watchdog.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-install-watchdog.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :compact_storage
-call "%SCRIPT_DIR%run-compact-storage.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-compact-storage.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :cleanup_containers
-call "%SCRIPT_DIR%run-cleanup-containers.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-cleanup-containers.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :voice_test
-call "%SCRIPT_DIR%run-voice-test.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-voice-test.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :local_model_test
-call "%SCRIPT_DIR%run-local-model-test.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-local-model-test.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :agent_smoke
-call "%SCRIPT_DIR%run-agent-smoke.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-agent-smoke.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :agent_session
-call "%SCRIPT_DIR%run-agent-session.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-agent-session.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :agent_benchmark
-call "%SCRIPT_DIR%run-agent-benchmark.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-agent-benchmark.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :remote_review_smoke
-call "%SCRIPT_DIR%run-remote-review-smoke.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-remote-review-smoke.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :local_delegate_test
-call "%SCRIPT_DIR%run-local-delegated-coder-test.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-local-delegated-coder-test.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :temp_agent_probe
-call "%SCRIPT_DIR%run-temp-agent-probe.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-temp-agent-probe.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :model_fit
-call "%SCRIPT_DIR%run-model-fit.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-model-fit.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :cli
-call "%SCRIPT_DIR%run-openclaw-cli.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-openclaw-cli.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :add_local_model
-call "%SCRIPT_DIR%run-add-local-model.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-add-local-model.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :remove_local_model
-call "%SCRIPT_DIR%run-remove-local-model.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-remove-local-model.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :sandbox_test
-call "%SCRIPT_DIR%run-sandbox-test.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-sandbox-test.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :telegram_setup
-call "%SCRIPT_DIR%run-telegram-setup.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-telegram-setup.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :telegram_ids
-call "%SCRIPT_DIR%run-telegram-ids.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-telegram-ids.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :stop
-call "%SCRIPT_DIR%run-stop.cmd" %FORWARD_ARGS%
+call "%SCRIPT_DIR%cmd\run-stop.cmd" %FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :help
@@ -398,5 +398,6 @@ echo   %~f0 remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30
 echo   %~f0 stop -StopDockerDesktop
 echo   %~f0 dashboard-repair
 exit /b %HELP_EXIT_CODE%
+
 
 
