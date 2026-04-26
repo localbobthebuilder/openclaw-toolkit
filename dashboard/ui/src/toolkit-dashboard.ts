@@ -44,6 +44,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
   @state() topologyEdges: any[] = [];
   @state() topologyShowAllArrows: boolean = false;
   @state() topologyInspectorMarkdownFile: string = 'AGENTS.md';
+  @state() configToolbarStickyOffset: number = 0;
   @state() topologyAgentSessions: Array<{ key: string; sessionId?: string; agentId: string; label: string; url: string; createdAt: number }> = [];
   @state() topologyAgentSessionBusyKey: string | null = null;
   @state() topologyAgentSessionError: string = '';
@@ -56,6 +57,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
   pendingSocketAction: string | null = null;
   pendingSocketRetryTimer: number | null = null;
   topologyMeasureFrame: number | null = null;
+  configToolbarMeasureFrame: number | null = null;
   topologyAgentSessionWindows = new Map<string, Window>();
   topologyAgentSessionPollTimers = new Map<string, number>();
   gatewayAuthTokenPromise: Promise<string> | null = null;
@@ -124,7 +126,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .item-sub { font-size: 0.75rem; color: #777; }
     .model-catalog-list { display: flex; flex-direction: column; gap: 14px; }
     .model-catalog-card { background: #252525; border: 1px solid #333; border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-    .model-catalog-toolbar { position: sticky; top: 122px; z-index: 24; margin: -16px -16px 18px; padding: 16px; background: linear-gradient(180deg, rgba(37,37,37,0.98) 0%, rgba(37,37,37,0.94) 100%); backdrop-filter: blur(8px); border-bottom: 1px solid #333; border-radius: 10px 10px 0 0; box-shadow: 0 8px 18px rgba(0,0,0,0.2); }
+    .model-catalog-toolbar { position: sticky; top: calc(var(--config-toolbar-sticky-offset, 0px) + 12px); z-index: 24; margin: -16px -16px 18px; padding: 16px; background: linear-gradient(180deg, rgba(37,37,37,0.98) 0%, rgba(37,37,37,0.94) 100%); backdrop-filter: blur(8px); border-bottom: 1px solid #333; border-radius: 10px 10px 0 0; box-shadow: 0 8px 18px rgba(0,0,0,0.2); }
     .model-catalog-toolbar-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .model-catalog-toolbar-copy { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
     .model-catalog-toolbar-copy h3 { margin: 0; font-size: 1.1rem; color: #00bcd4; }
@@ -323,7 +325,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     }
     @media (max-width: 900px) {
       .model-catalog-header { flex-direction: column; }
-      .model-catalog-toolbar { top: 132px; margin: -16px -16px 18px; }
+      .model-catalog-toolbar { margin: -16px -16px 18px; }
       .model-catalog-toolbar-row { flex-direction: column; }
       .model-catalog-toolbar-actions { justify-content: flex-start; width: 100%; }
       .model-catalog-toolbar-actions .btn { flex: 1 1 180px; }
@@ -424,7 +426,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       h1 { font-size: 1rem; }
       h2 { font-size: 1.2rem; }
       .btn { padding: 10px 12px; }
-      .model-catalog-toolbar { top: 146px; margin: -12px -12px 16px; padding: 12px; }
+      .model-catalog-toolbar { margin: -12px -12px 16px; padding: 12px; }
       .model-catalog-card { padding: 12px; }
       .model-catalog-actions .btn { flex-basis: 100%; }
       .setup-guide { padding: 18px; }
@@ -475,11 +477,18 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       window.cancelAnimationFrame(this.topologyMeasureFrame);
       this.topologyMeasureFrame = null;
     }
+    if (this.configToolbarMeasureFrame !== null) {
+      window.cancelAnimationFrame(this.configToolbarMeasureFrame);
+      this.configToolbarMeasureFrame = null;
+    }
   }
 
   updated() {
     if (this.activeTab === 'topology') {
       this.scheduleTopologyMeasure();
+    }
+    if (this.activeTab === 'config') {
+      this.scheduleConfigToolbarMeasure();
     }
   }
 
@@ -487,7 +496,27 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     if (this.activeTab === 'topology') {
       this.scheduleTopologyMeasure();
     }
+    if (this.activeTab === 'config') {
+      this.scheduleConfigToolbarMeasure();
+    }
   };
+
+  private scheduleConfigToolbarMeasure() {
+    if (this.configToolbarMeasureFrame !== null) {
+      window.cancelAnimationFrame(this.configToolbarMeasureFrame);
+    }
+    this.configToolbarMeasureFrame = window.requestAnimationFrame(() => {
+      this.configToolbarMeasureFrame = null;
+      const toolbar = this.renderRoot?.querySelector('.config-toolbar') as HTMLElement | null;
+      if (!toolbar) {
+        return;
+      }
+      const nextHeight = Math.max(0, Math.round(toolbar.getBoundingClientRect().height));
+      if (nextHeight !== this.configToolbarStickyOffset) {
+        this.configToolbarStickyOffset = nextHeight;
+      }
+    });
+  }
 
   private scheduleTopologyMeasure() {
     if (this.topologyMeasureFrame !== null) {

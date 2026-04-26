@@ -61,7 +61,7 @@ export const ToolkitDashboardShellViewMixin = <TBase extends Constructor<LitElem
       if (!this.config) return html`<p>Loading config...</p>`;
 
       return html`
-        <div class="config-page">
+        <div class="config-page" style=${`--config-toolbar-sticky-offset: ${this.configToolbarStickyOffset || 0}px;`}>
           <header class="config-toolbar">
             <div class="config-toolbar-tabs">
               <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
