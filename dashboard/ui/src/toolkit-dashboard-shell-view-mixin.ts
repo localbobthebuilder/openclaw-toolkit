@@ -61,31 +61,33 @@ export const ToolkitDashboardShellViewMixin = <TBase extends Constructor<LitElem
       if (!this.config) return html`<p>Loading config...</p>`;
 
       return html`
-        <header class="config-toolbar">
-          <div class="config-toolbar-tabs">
-            <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
-            <div class="tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</div>
-            <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
-            <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
-            <div class="tab ${this.configSection === 'markdownTemplates' ? 'active' : ''}" @click=${() => this.configSection = 'markdownTemplates'}>Template Markdowns</div>
-            <div class="tab ${this.configSection === 'toolsets' ? 'active' : ''}" @click=${() => this.configSection = 'toolsets'}>Toolsets</div>
-            <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
-            <div class="tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</div>
-            <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
-          </div>
-          <div class="config-toolbar-actions">
-             <button class="btn btn-ghost" ?disabled=${this.hasConfigValidationErrors} @click=${this.saveConfig}>Save Only</button>
-             <button class="btn btn-primary" ?disabled=${this.hasConfigValidationErrors} @click=${this.applyAndRestart}>Save & Apply (Restart Agents)</button>
-          </div>
-        </header>
+        <div class="config-page">
+          <header class="config-toolbar">
+            <div class="config-toolbar-tabs">
+              <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
+              <div class="tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</div>
+              <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
+              <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
+              <div class="tab ${this.configSection === 'markdownTemplates' ? 'active' : ''}" @click=${() => this.configSection = 'markdownTemplates'}>Template Markdowns</div>
+              <div class="tab ${this.configSection === 'toolsets' ? 'active' : ''}" @click=${() => this.configSection = 'toolsets'}>Toolsets</div>
+              <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
+              <div class="tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</div>
+              <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
+            </div>
+            <div class="config-toolbar-actions">
+               <button class="btn btn-ghost" ?disabled=${this.hasConfigValidationErrors} @click=${this.saveConfig}>Save Only</button>
+               <button class="btn btn-primary" ?disabled=${this.hasConfigValidationErrors} @click=${this.applyAndRestart}>Save & Apply (Restart Agents)</button>
+            </div>
+          </header>
 
-        ${this.hasConfigValidationErrors ? html`
-          <div class="card" style="border-color: #ff9800; margin-bottom: 20px;">
-            <div class="help-text" style="color: #ff9800; margin: 0;">${this.getValidationErrors()[0]}</div>
-          </div>
-        ` : ''}
+          ${this.hasConfigValidationErrors ? html`
+            <div class="card" style="border-color: #ff9800; margin-bottom: 20px;">
+              <div class="help-text" style="color: #ff9800; margin: 0;">${this.getValidationErrors()[0]}</div>
+            </div>
+          ` : ''}
 
-        ${this.renderConfigSection()}
+          ${this.renderConfigSection()}
+        </div>
       `;
     }
 
