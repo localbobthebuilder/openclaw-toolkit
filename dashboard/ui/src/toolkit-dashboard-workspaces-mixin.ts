@@ -35,8 +35,8 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
           <div class="card-header">
             <h3>Workspaces</h3>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-ghost" @click=${() => this.addWorkspace('shared')}>+ Shared Workspace</button>
-              <button class="btn btn-ghost" @click=${() => this.addWorkspace('private')}>+ Private Workspace</button>
+              <button class="btn btn-primary" @click=${() => this.addWorkspace('shared')}>+ Add Shared Workspace</button>
+              <button class="btn btn-primary" @click=${() => this.addWorkspace('private')}>+ Add Private Workspace</button>
             </div>
           </div>
           <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Workspaces define the agent home base. Shared workspaces can host many agents and are collaboration areas. Private workspaces host one agent, act as the privacy boundary, and can optionally expose specific shared collaboration workspaces.</p>
@@ -195,7 +195,7 @@ export const ToolkitDashboardWorkspacesMixin = <TBase extends Constructor<LitEle
                 (agentId) => {
                   this.setAgentPrimaryWorkspace(agentId, workspace.id);
                 },
-                availableAgents.length === 0 ? 'No unassigned agents available' : '+ Add Agent to Shared Workspace'
+                availableAgents.length === 0 ? 'No unassigned agents available' : '+ Add Agent'
               )}
             </div>
           ` : html`

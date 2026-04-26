@@ -54,7 +54,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
         <div class="card">
           <div class="card-header">
             <h3>Voice</h3>
-            <button class="btn btn-ghost" @click=${() => this.fetchVoiceModels()}>Refresh Models</button>
+            <button class="btn btn-primary" @click=${() => this.fetchVoiceModels()}>Refresh Models</button>
           </div>
           <div class="form-group">
             <label class="toggle-switch">
@@ -178,7 +178,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
             </h3>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button
-                class="btn btn-ghost"
+                class="btn btn-primary"
                 ?disabled=${setupButtonDisabled}
                 @click=${() => {
                   if (setupState === 'services-down') {
@@ -295,7 +295,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
             <div class="card" style="padding: 14px; margin-top: 16px;">
               <div class="card-header" style="margin-bottom: 12px;">
                 <h3>Specific Telegram Routes</h3>
-                <button class="btn btn-ghost" ?disabled=${!accountId} @click=${() => this.addTelegramSpecificRoute(accountId)}>+ Add Specific Route</button>
+                <button class="btn btn-primary" ?disabled=${!accountId} @click=${() => this.addTelegramSpecificRoute(accountId)}>+ Add Specific Route</button>
               </div>
               <span class="help-text" style="margin-top: 0; margin-bottom: 12px;">Use specific routes when the same Telegram bot should send one group to one agent and another group or DM source to a different agent.</span>
               ${specificRoutes.length === 0 ? html`
@@ -357,7 +357,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
           <div class="form-group" style="margin-bottom: 0;">
             <div class="card-header" style="margin-bottom: 12px;">
               <h3>Allowed Groups</h3>
-              <button class="btn btn-ghost" @click=${() => this.addTelegramGroup(accountTarget)}>+ Add Group</button>
+              <button class="btn btn-primary" @click=${() => this.addTelegramGroup(accountTarget)}>+ Add Group</button>
             </div>
             ${accountGroups.length > 0 ? accountGroups.map((group: any, groupIndex: number) => html`
               <div class="card" style="padding: 14px; margin-bottom: 12px;">
@@ -436,7 +436,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
         <div class="card">
           <div class="card-header">
             <h3>Telegram Accounts</h3>
-            <button class="btn btn-ghost" @click=${() => this.addTelegramAccount()}>+ Add Account</button>
+            <button class="btn btn-primary" @click=${() => this.addTelegramAccount()}>+ Add Account</button>
           </div>
           <span class="help-text">Manage the default Telegram bot and any extra Telegram bots in one place. Every account can keep its own trusted chats and target a different agent.</span>
           <span class="help-text">Use the Telegram Setup action here, on Status, or on Ops to authenticate the live channel. The dashboard does not store Telegram bot token fields in toolkit config.</span>

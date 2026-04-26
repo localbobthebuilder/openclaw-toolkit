@@ -20,10 +20,10 @@ export const ToolkitDashboardAgentsWorkspacesMixin = <TBase extends Constructor<
     }));
 
     return html`
-      <div class="card">
+        <div class="card">
         <div class="card-header">
             <h3>Agents Configuration</h3>
-            <button class="btn btn-ghost" @click=${() => this.addAgent()}>+ Add Agent</button>
+            <button class="btn btn-primary" @click=${() => this.addAgent()}>+ Add Agent</button>
         </div>
         <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Agents are first-class toolkit records. Endpoints own machine placement, and workspaces own the agent home base: the primary workspace the agent lives in by default. Private workspaces are the privacy boundary; shared workspaces are the collaboration area.</p>
 

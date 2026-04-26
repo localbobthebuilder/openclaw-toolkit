@@ -29,7 +29,7 @@ export const ToolkitDashboardToolsetsMixin = <TBase extends Constructor<LitEleme
         <div class="card">
           <div class="card-header">
             <h3>Toolsets</h3>
-            <button class="btn btn-ghost" @click=${() => this.addToolset()}>+ Add Toolset</button>
+            <button class="btn btn-primary" @click=${() => this.addToolset()}>+ Add Toolset</button>
           </div>
           <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Toolsets are reusable allow/deny layers. The built-in <code>minimal</code> toolset is always applied first as a safe chat-only baseline, then each agent's own toolsets are merged from top to bottom so lower entries win conflicts.</p>
 

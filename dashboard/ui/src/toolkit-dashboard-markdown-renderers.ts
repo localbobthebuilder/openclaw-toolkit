@@ -91,7 +91,7 @@ export function renderMarkdownTemplateLibrarySection(params: MarkdownTemplateLib
         <textarea rows="10" .value=${params.library[templateKey] || ''} @input=${(e: any) => params.onUpdateTemplate(templateKey, e.target.value)}></textarea>
       </div>
     `)}
-  `, html`<button class="btn btn-ghost" @click=${() => params.onAddTemplate()}>+ Add Template</button>`);
+  `, html`<button class="btn btn-primary" @click=${() => params.onAddTemplate()}>+ Add Template</button>`);
 }
 
 export function renderMarkdownFileEditors(params: MarkdownFileEditorsParams) {

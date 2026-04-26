@@ -21,7 +21,7 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
       <div class="card">
         <div class="card-header">
           <h3>Endpoints</h3>
-          <button class="btn btn-ghost" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
+          <button class="btn btn-primary" @click=${() => this.addEndpoint()}>+ Add Endpoint</button>
         </div>
         <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">Endpoints are machines or PCs. Each one can expose a local Ollama runtime, a hosted model pool, or both.</p>
         ${repeat(endpoints, (ep: any) => ep.key, (ep: any) => {
@@ -69,8 +69,8 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 <div class="endpoint-editor-toolbar-subtitle">Keep the add actions visible while you review local and hosted models for this endpoint.</div>
               </div>
               <div class="endpoint-editor-toolbar-actions">
-                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Add Local Model from Catalog</button>
-                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model from Catalog</button>
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Add Local Model</button>
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model</button>
               </div>
             </div>
 
@@ -142,7 +142,7 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                   this.requestUpdate();
                 }
               },
-              availableAgents.length === 0 ? 'All configured agents are already assigned' : '+ Add Agent to Endpoint',
+              availableAgents.length === 0 ? 'All configured agents are already assigned' : '+ Add Agent',
               undefined,
               availableAgents.length === 0,
               'margin-top: 10px; margin-bottom: 20px;'
