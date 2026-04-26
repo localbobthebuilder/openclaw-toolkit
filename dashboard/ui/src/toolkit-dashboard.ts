@@ -140,7 +140,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .tab:hover { background: #252525; color: #fff; border-color: #444; }
     .tab.active { background: #00bcd4; color: #000; border-color: #00bcd4; font-weight: 600; }
     .config-page { margin: -30px; padding: 0 30px 30px; }
-    .config-toolbar { position: sticky; top: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; padding: 12px 0 16px; background: linear-gradient(180deg, rgba(15,15,15,0.98) 0%, rgba(15,15,15,0.94) 100%); backdrop-filter: blur(8px); border-bottom: 1px solid #252525; box-shadow: 0 10px 18px rgba(0,0,0,0.25); }
+    .config-toolbar { position: sticky; top: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; padding: 0 0 16px; background: linear-gradient(180deg, rgba(15,15,15,0.98) 0%, rgba(15,15,15,0.94) 100%); backdrop-filter: blur(8px); border-bottom: 1px solid #252525; box-shadow: 0 10px 18px rgba(0,0,0,0.25); }
     .config-toolbar-tabs { display: flex; flex-wrap: wrap; gap: 10px; }
     .config-toolbar-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; align-items: center; }
     .config-toolbar-actions .btn { flex: 0 1 auto; white-space: nowrap; }
@@ -345,7 +345,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       header > div { width: 100%; flex-wrap: wrap; }
       header .btn { flex: 0 1 auto; }
       .config-page { margin: -18px; padding: 0 18px 18px; }
-      .config-toolbar { top: 0; margin-bottom: 20px; }
+      .config-toolbar { top: 0; padding-top: 12px; margin-bottom: 20px; }
       .card { padding: 16px; border-radius: 12px; }
       .card-header { align-items: flex-start; flex-direction: column; gap: 10px; }
       .card-header .btn { width: 100%; }
