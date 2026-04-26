@@ -64,14 +64,20 @@ function renderMarkdownFileEditor(params: {
 export function renderMarkdownTemplateLibrarySection(params: MarkdownTemplateLibraryParams) {
   return renderCardSection(params.title, html`
     <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">${params.intro}</p>
-    <div style="display: flex; gap: 10px; margin-bottom: 16px;">
-      <div class="tab ${params.scope === 'agents' ? 'active' : ''}" @click=${() => params.onSelectScope('agents')}>Agents</div>
-      <div class="tab ${params.scope === 'workspaces' ? 'active' : ''}" @click=${() => params.onSelectScope('workspaces')}>Workspaces</div>
+    <div class="markdown-library-tab-group">
+      <div class="markdown-library-tab-group-label">Scope</div>
+      <div class="markdown-library-scope-tabs">
+        <button class="markdown-library-scope-tab ${params.scope === 'agents' ? 'active' : ''}" @click=${() => params.onSelectScope('agents')}>Agents</button>
+        <button class="markdown-library-scope-tab ${params.scope === 'workspaces' ? 'active' : ''}" @click=${() => params.onSelectScope('workspaces')}>Workspaces</button>
+      </div>
     </div>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+    <div class="markdown-library-tab-group" style="margin-top: 18px;">
+      <div class="markdown-library-tab-group-label">Template files</div>
+      <div class="markdown-library-file-tabs">
       ${params.fileNames.map((fileName) => html`
-        <div class="tab ${params.selectedFileName === fileName ? 'active' : ''}" @click=${() => params.onSelectFile(fileName)}>${fileName.replace('.md', '')}</div>
+        <button class="markdown-library-file-tab ${params.selectedFileName === fileName ? 'active' : ''}" @click=${() => params.onSelectFile(fileName)}>${fileName.replace('.md', '')}</button>
       `)}
+      </div>
     </div>
     <p class="help-text" style="margin-bottom: 20px;">Stored under <code>openclaw-toolkit\\markdown-templates\\${params.scope}\\${params.selectedFileName.replace('.md', '')}\\&lt;key&gt;.md</code>.</p>
       ${params.templateKeys.length === 0 ? html`

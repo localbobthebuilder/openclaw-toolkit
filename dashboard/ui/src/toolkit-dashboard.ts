@@ -139,6 +139,16 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .endpoint-editor-toolbar-subtitle { color: #888; font-size: 0.85rem; line-height: 1.45; max-width: 72ch; }
     .endpoint-editor-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
     .endpoint-editor-toolbar-actions .btn { flex: 0 1 auto; white-space: nowrap; }
+    .markdown-library-tab-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 2px; }
+    .markdown-library-tab-group-label { color: #7f8a90; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    .markdown-library-scope-tabs { display: inline-flex; gap: 10px; padding: 6px; border: 1px solid #2f2f2f; border-radius: 14px; background: #171717; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); width: fit-content; flex-wrap: wrap; }
+    .markdown-library-scope-tab { appearance: none; border: 0; border-radius: 10px; padding: 12px 18px; background: transparent; color: #9aa0a6; font-size: 0.92rem; font-weight: 600; cursor: pointer; transition: background-color 0.2s, color 0.2s, box-shadow 0.2s; }
+    .markdown-library-scope-tab:hover { color: #fff; background: #232323; }
+    .markdown-library-scope-tab.active { background: #00bcd4; color: #000; box-shadow: 0 0 0 1px rgba(0,188,212,0.24); }
+    .markdown-library-file-tabs { display: flex; flex-wrap: wrap; gap: 10px; }
+    .markdown-library-file-tab { appearance: none; border: 1px solid #333; border-radius: 10px; background: #1b1b1b; color: #8f9498; padding: 10px 14px; font-size: 0.82rem; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; transition: all 0.2s; text-transform: uppercase; }
+    .markdown-library-file-tab:hover { background: #232323; border-color: #444; color: #fff; }
+    .markdown-library-file-tab.active { background: #00bcd4; border-color: #00bcd4; color: #000; box-shadow: 0 0 0 1px rgba(0,188,212,0.18); }
     .model-catalog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
     .model-catalog-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .model-catalog-title .item-title { overflow-wrap: anywhere; }
@@ -338,6 +348,8 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       .endpoint-editor-toolbar { flex-direction: column; }
       .endpoint-editor-toolbar-actions { justify-content: flex-start; width: 100%; }
       .endpoint-editor-toolbar-actions .btn { flex: 1 1 180px; }
+      .markdown-library-scope-tabs { width: 100%; }
+      .markdown-library-scope-tab { flex: 1 1 180px; }
       .model-catalog-actions { justify-content: stretch; }
       .model-catalog-actions .btn { flex: 1 1 180px; }
       .config-toolbar-actions { flex-direction: column; align-items: stretch; }
@@ -437,6 +449,9 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       .btn { padding: 10px 12px; }
       .model-catalog-toolbar { margin: -12px -12px 16px; padding: 12px; }
       .endpoint-editor-toolbar { padding: 12px; }
+      .markdown-library-scope-tabs { gap: 8px; padding: 4px; }
+      .markdown-library-scope-tab { padding: 10px 14px; }
+      .markdown-library-file-tab { padding: 9px 12px; }
       .model-catalog-card { padding: 12px; }
       .model-catalog-actions .btn { flex-basis: 100%; }
       .setup-guide { padding: 18px; }
