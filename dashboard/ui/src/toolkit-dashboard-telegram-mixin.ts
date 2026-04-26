@@ -27,7 +27,7 @@ export const ToolkitDashboardTelegramMixin = <TBase extends Constructor<LitEleme
           ` : ''}
         </aside>
 
-        <main>
+        <main class=${this.activeTab === 'config' ? 'config-main' : ''}>
           ${this.hasUnsavedChanges ? html`
             <div class="unsaved-banner">
               <span>You have unsaved changes!</span>
