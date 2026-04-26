@@ -63,6 +63,17 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 <button class="btn btn-ghost" @click=${() => this.editingEndpointKey = null}>Back to Endpoints</button>
             </div>
 
+            <div class="endpoint-editor-toolbar">
+              <div class="endpoint-editor-toolbar-copy">
+                <div class="endpoint-editor-toolbar-title">Model assignments</div>
+                <div class="endpoint-editor-toolbar-subtitle">Keep the add actions visible while you review local and hosted models for this endpoint.</div>
+              </div>
+              <div class="endpoint-editor-toolbar-actions">
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Add Local Model from Catalog</button>
+                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model from Catalog</button>
+              </div>
+            </div>
+
             <div class="grid-2">
                 <div>
                     <div class="form-group">
@@ -210,9 +221,6 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 })}
             `)}
 
-            <div style="margin-top: 20px;">
-                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'tune'; this.showModelSelector = true; }}>+ Add Local Model from Catalog</button>
-            </div>
             ` : html`
             <div class="item-sub" style="margin-top: 20px;">This endpoint is currently hosted-only. Enable the local runtime toggle above if this machine should run Ollama too.</div>
             `}
@@ -235,9 +243,6 @@ export const ToolkitDashboardEndpointsMixin = <TBase extends Constructor<LitElem
                 })}
             `)}
 
-            <div style="margin-top: 20px;">
-                <button class="btn btn-primary" @click=${() => { this.selectorTarget = 'endpoint-hosted'; this.showModelSelector = true; }}>+ Add Hosted Model from Catalog</button>
-            </div>
         </div>
       `;
   }

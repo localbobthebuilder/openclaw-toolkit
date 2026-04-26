@@ -133,6 +133,12 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .model-catalog-toolbar-subtitle { color: #888; font-size: 0.85rem; line-height: 1.45; max-width: 78ch; }
     .model-catalog-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
     .model-catalog-toolbar-actions .btn { flex: 0 1 auto; white-space: nowrap; }
+    .endpoint-editor-toolbar { position: sticky; top: calc(var(--config-toolbar-sticky-offset, 0px) + 12px); z-index: 24; margin: 0 0 20px; padding: 16px; background: linear-gradient(180deg, rgba(37,37,37,0.98) 0%, rgba(37,37,37,0.94) 100%); backdrop-filter: blur(8px); border: 1px solid #333; border-radius: 10px; box-shadow: 0 8px 18px rgba(0,0,0,0.2); display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .endpoint-editor-toolbar-copy { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .endpoint-editor-toolbar-title { color: #00bcd4; font-size: 1.05rem; font-weight: 700; }
+    .endpoint-editor-toolbar-subtitle { color: #888; font-size: 0.85rem; line-height: 1.45; max-width: 72ch; }
+    .endpoint-editor-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+    .endpoint-editor-toolbar-actions .btn { flex: 0 1 auto; white-space: nowrap; }
     .model-catalog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
     .model-catalog-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .model-catalog-title .item-title { overflow-wrap: anywhere; }
@@ -329,6 +335,9 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       .model-catalog-toolbar-row { flex-direction: column; }
       .model-catalog-toolbar-actions { justify-content: flex-start; width: 100%; }
       .model-catalog-toolbar-actions .btn { flex: 1 1 180px; }
+      .endpoint-editor-toolbar { flex-direction: column; }
+      .endpoint-editor-toolbar-actions { justify-content: flex-start; width: 100%; }
+      .endpoint-editor-toolbar-actions .btn { flex: 1 1 180px; }
       .model-catalog-actions { justify-content: stretch; }
       .model-catalog-actions .btn { flex: 1 1 180px; }
       .config-toolbar-actions { flex-direction: column; align-items: stretch; }
@@ -427,6 +436,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       h2 { font-size: 1.2rem; }
       .btn { padding: 10px 12px; }
       .model-catalog-toolbar { margin: -12px -12px 16px; padding: 12px; }
+      .endpoint-editor-toolbar { padding: 12px; }
       .model-catalog-card { padding: 12px; }
       .model-catalog-actions .btn { flex-basis: 100%; }
       .setup-guide { padding: 18px; }
