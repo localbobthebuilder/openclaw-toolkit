@@ -64,15 +64,15 @@ export const ToolkitDashboardShellViewMixin = <TBase extends Constructor<LitElem
         <div class="config-page" style=${`--config-toolbar-sticky-offset: ${this.configToolbarStickyOffset || 0}px;`}>
           <header class="config-toolbar">
             <div class="config-toolbar-tabs">
-              <div class="tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</div>
-              <div class="tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</div>
-              <div class="tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</div>
-              <div class="tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</div>
-              <div class="tab ${this.configSection === 'markdownTemplates' ? 'active' : ''}" @click=${() => this.configSection = 'markdownTemplates'}>Template Markdowns</div>
-              <div class="tab ${this.configSection === 'toolsets' ? 'active' : ''}" @click=${() => this.configSection = 'toolsets'}>Toolsets</div>
-              <div class="tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</div>
-              <div class="tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</div>
-              <div class="tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</div>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'markdownTemplates' ? 'active' : ''}" @click=${() => this.configSection = 'markdownTemplates'}>Template Markdowns</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'toolsets' ? 'active' : ''}" @click=${() => this.configSection = 'toolsets'}>Toolsets</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'agents' ? 'active' : ''}" @click=${() => this.configSection = 'agents'}>Agents</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'workspaces' ? 'active' : ''}" @click=${() => this.configSection = 'workspaces'}>Workspaces</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'features' ? 'active' : ''}" @click=${() => this.configSection = 'features'}>Features</button>
             </div>
             <div class="config-toolbar-actions">
                <button class="btn btn-ghost" ?disabled=${this.hasConfigValidationErrors} @click=${this.saveConfig}>Save Only</button>
