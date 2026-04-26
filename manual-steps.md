@@ -3,7 +3,7 @@
 Use this as the main entrypoint:
 
 ```powershell
-.\run-openclaw.cmd help
+.\\cmd\\run-openclaw.cmd help
 ```
 
 Bootstrap now starts with a Windows prerequisite phase before it does any
@@ -28,7 +28,7 @@ On a machine that is already set up, this phase should be fast:
 You can run that phase by itself with:
 
 ```powershell
-.\run-openclaw.cmd prereqs
+.\\cmd\\run-openclaw.cmd prereqs
 ```
 
 You do not need to run every script in this directory.
@@ -41,65 +41,65 @@ For a compact day-to-day cheat sheet, see:
 
 Main operator wrapper:
 
-- `.\run-openclaw.cmd prereqs`
+- `.\\cmd\\run-openclaw.cmd prereqs`
   Audit Windows prerequisites, auto-install what can be installed, and report remaining blockers.
-- `.\run-openclaw.cmd bootstrap`
+- `.\\cmd\\run-openclaw.cmd bootstrap`
   First-time setup or re-apply the hardened setup on the current machine.
-- `.\run-openclaw.cmd backup`
+- `.\\cmd\\run-openclaw.cmd backup`
   Create a portable recovery snapshot zip.
-- `.\run-openclaw.cmd restore`
+- `.\\cmd\\run-openclaw.cmd restore`
   Restore host state and repo-local files from the newest backup zip.
-- `.\run-openclaw.cmd update`
+- `.\\cmd\\run-openclaw.cmd update`
   Take a pre-update backup, move to the newest stable OpenClaw release tag, then re-run bootstrap and verify.
-- `.\run-openclaw.cmd start`
+- `.\\cmd\\run-openclaw.cmd start`
   Start Docker/OpenClaw and open the authenticated localhost dashboard.
-- `.\run-openclaw.cmd status`
+- `.\\cmd\\run-openclaw.cmd status`
   Show Docker, gateway, container, and Tailscale Serve status.
-- `.\run-openclaw.cmd dashboard`
+- `.\\cmd\\run-openclaw.cmd dashboard`
   Open the localhost tokenized dashboard URL.
-- `.\run-openclaw.cmd dashboard-repair`
+- `.\\cmd\\run-openclaw.cmd dashboard-repair`
   Approve pending dashboard device pairings, then reopen the dashboard.
-- `.\run-openclaw.cmd openai-auth`
+- `.\\cmd\\run-openclaw.cmd openai-auth`
   Run the one-time OpenAI Codex OAuth flow for OpenClaw, then re-apply bootstrap.
-- `.\run-openclaw.cmd gemini-auth`
+- `.\\cmd\\run-openclaw.cmd gemini-auth`
   Run the one-time Gemini auth flow for OpenClaw, then re-apply bootstrap.
-- `.\run-openclaw.cmd claude-auth`
+- `.\\cmd\\run-openclaw.cmd claude-auth`
   Run Anthropic auth for OpenClaw. Default is API-key auth; use `-Method paste-token` or `-Method cli` only if you intentionally need those older flows.
-- `.\run-openclaw.cmd verify`
+- `.\\cmd\\run-openclaw.cmd verify`
   Run the full verification report and smoke tests.
-- `.\run-openclaw.cmd verify -Checks "<name1 name2 ...>"`
+- `.\\cmd\\run-openclaw.cmd verify -Checks "<name1 name2 ...>"`
   Run only specific verification areas such as `voice`, `local-model`, `agent`, or `sandbox`.
-- `.\run-openclaw.cmd agents`
+- `.\\cmd\\run-openclaw.cmd agents`
   Apply the starter multi-agent layout from the bootstrap config.
-- `.\run-openclaw.cmd reset-config`
+- `.\\cmd\\run-openclaw.cmd reset-config`
   Restore `openclaw-bootstrap.config.json` from the checked-in starter defaults and save the previous file as `openclaw-bootstrap.config.json.bak`.
-- `.\run-openclaw.cmd watchdog`
+- `.\\cmd\\run-openclaw.cmd watchdog`
   Run one health-check pass with optional restart/alert behavior.
-- `.\run-openclaw.cmd install-watchdog`
+- `.\\cmd\\run-openclaw.cmd install-watchdog`
   Install a Windows Scheduled Task for recurring watchdog checks.
-- `.\run-openclaw.cmd voice-test`
+- `.\\cmd\\run-openclaw.cmd voice-test`
   Smoke-test voice transcription through the live media config.
-- `.\run-openclaw.cmd local-model-test`
+- `.\\cmd\\run-openclaw.cmd local-model-test`
   Smoke-test OpenClaw through the configured Ollama model path.
-- `.\run-openclaw.cmd agent-smoke`
+- `.\\cmd\\run-openclaw.cmd agent-smoke`
   Smoke-test the shared-workspace agent roles, especially `coder-local`'s real file and git workflows.
-- `.\run-openclaw.cmd remote-review-smoke`
+- `.\\cmd\\run-openclaw.cmd remote-review-smoke`
   Smoke-test `main -> coder-remote -> review-local` on the shared workspace and verify that the review task uses exact full file paths.
-- `.\run-openclaw.cmd temp-agent-probe`
+- `.\\cmd\\run-openclaw.cmd temp-agent-probe`
   Create a temporary agent through the live gateway API, create one session for it, and report which files appeared under `%USERPROFILE%\.openclaw`. By default it cleans the probe back up and restarts the gateway so live state matches disk.
-- `.\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
+- `.\\cmd\\run-openclaw.cmd model-fit -Model <ollama-model> -EndpointKey <endpoint-key> [-MaxContextWindow <tokens>]`
   Probe a local Ollama model on a named endpoint, starting at 4k context and increasing until the configured VRAM headroom rule is reached.
-- `.\run-openclaw.cmd add-local-model -Model <ollama-model> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
+- `.\\cmd\\run-openclaw.cmd add-local-model -Model <ollama-model> -EndpointKey <endpoint-key> [-FallbackModel <fallback-model-id>] [-AssignTo <agent-id>]`
   Preflight raw model size and disk space, pull a missing Ollama model on that endpoint, auto-probe a safe context, write it into bootstrap config, optionally write ordered `fallbackModelIds`, and optionally assign it to an agent before reapplying bootstrap.
-- `.\run-openclaw.cmd remove-local-model -Model <ollama-model> [-ReplaceWith <other-ollama-model>]`
+- `.\\cmd\\run-openclaw.cmd remove-local-model -Model <ollama-model> [-ReplaceWith <other-ollama-model>]`
   Remove a local Ollama model from managed config and host Ollama storage. If the model is managed, retarget any managed local-agent references before reapplying bootstrap.
-- `.\run-openclaw.cmd compact-storage`
+- `.\\cmd\\run-openclaw.cmd compact-storage`
   Compact Docker Desktop's WSL data disk and restart OpenClaw afterward.
-- `.\run-openclaw.cmd sandbox-test`
+- `.\\cmd\\run-openclaw.cmd sandbox-test`
   Smoke-test one harmless sandboxed exec action.
-- `.\run-openclaw.cmd telegram-ids`
+- `.\\cmd\\run-openclaw.cmd telegram-ids`
   Inspect Telegram IDs from OpenClaw logs.
-- `.\run-openclaw.cmd stop`
+- `.\\cmd\\run-openclaw.cmd stop`
   Stop the gateway and remove disposable sandbox worker containers.
 
 Wrapper help note:
@@ -109,11 +109,11 @@ Wrapper help note:
   their backing PowerShell scripts.
 - Supported help triggers on wrappers: `help`, `-Help`, `--help`, and `/?`
 - Examples:
-  `.\run-verify.cmd /?`
-  `.\run-add-local-model.cmd help`
-  `.\run-status.cmd --help`
+  `.\\cmd\\run-verify.cmd /?`
+  `.\\cmd\\run-add-local-model.cmd help`
+  `.\\cmd\\run-status.cmd --help`
 - The top-level wrapper also forwards these help aliases to subcommands, so
-  `.\run-openclaw.cmd verify /?` works too.
+  `.\\cmd\\run-openclaw.cmd verify /?` works too.
 
 Endpoints are machines or PCs. If one has a local Ollama runtime, it can
 declare endpoint-level desired models under `endpoint.ollama.models`. That is
@@ -154,91 +154,91 @@ OpenClaw model failover note:
 
 Direct scripts:
 
-- `.\run-bootstrap.cmd`
+- `.\\cmd\\run-bootstrap.cmd`
   Launch bootstrap with PowerShell 7 if available.
-- `.\run-verify.cmd`
+- `.\\cmd\\run-verify.cmd`
   Launch verify with PowerShell 7 if available.
-- `.\run-configure-agents.cmd`
+- `.\\cmd\\run-configure-agents.cmd`
   Apply the starter multi-agent layout directly.
-- `.\run-backup.cmd`
+- `.\\cmd\\run-backup.cmd`
   Launch backup directly.
-- `.\run-restore.cmd`
+- `.\\cmd\\run-restore.cmd`
   Launch restore directly.
-- `.\run-update.cmd`
+- `.\\cmd\\run-update.cmd`
   Launch update directly.
-- `.\run-start.cmd`
+- `.\\cmd\\run-start.cmd`
   Launch start directly.
-- `.\run-status.cmd`
+- `.\\cmd\\run-status.cmd`
   Launch status directly.
-- `.\run-stop.cmd`
+- `.\\cmd\\run-stop.cmd`
   Launch stop directly.
-- `.\run-dashboard.cmd`
+- `.\\cmd\\run-dashboard.cmd`
   Open the tokenized localhost dashboard directly.
-- `.\run-dashboard-repair.cmd`
+- `.\\cmd\\run-dashboard-repair.cmd`
   Repair dashboard pairing directly.
-- `.\run-openai-auth.cmd`
+- `.\\cmd\\run-openai-auth.cmd`
   Run the one-time OpenAI Codex OAuth flow for OpenClaw directly.
-- `.\run-gemini-auth.cmd`
+- `.\\cmd\\run-gemini-auth.cmd`
   Run the one-time Gemini API-key auth flow for OpenClaw directly.
-- `.\run-claude-auth.cmd`
+- `.\\cmd\\run-claude-auth.cmd`
   Run Anthropic auth for OpenClaw directly.
-- `.\run-watchdog.cmd`
+- `.\\cmd\\run-watchdog.cmd`
   Run one watchdog pass directly.
-- `.\run-install-watchdog.cmd`
+- `.\\cmd\\run-install-watchdog.cmd`
   Install the watchdog scheduled task directly.
-- `.\run-voice-test.cmd`
+- `.\\cmd\\run-voice-test.cmd`
   Run the voice smoke test directly.
-- `.\run-local-model-test.cmd`
+- `.\\cmd\\run-local-model-test.cmd`
   Run the local-model smoke test directly.
-- `.\run-agent-smoke.cmd`
+- `.\\cmd\\run-agent-smoke.cmd`
   Run the shared-workspace agent capability smoke test directly.
-- `.\run-remote-review-smoke.cmd`
+- `.\\cmd\\run-remote-review-smoke.cmd`
   Run the focused `main -> coder-remote -> review-local` orchestration smoke test directly.
-- `.\run-local-delegated-coder-test.cmd`
+- `.\\cmd\\run-local-delegated-coder-test.cmd`
   Diagnose the exact `main -> coder-local` spawned local-model path and detect raw fake tool-call output.
-- `.\run-temp-agent-probe.cmd`
+- `.\\cmd\\run-temp-agent-probe.cmd`
   Create a temporary agent through the live gateway API and inspect which `.openclaw` files are created for it.
-- `.\run-add-local-model.cmd`
+- `.\\cmd\\run-add-local-model.cmd`
   Pull, tune, and register a local Ollama model directly.
-- `.\run-remove-local-model.cmd`
+- `.\\cmd\\run-remove-local-model.cmd`
   Remove a local Ollama model directly.
-- `.\run-compact-storage.cmd`
+- `.\\cmd\\run-compact-storage.cmd`
   Compact Docker Desktop's WSL data disk directly.
-- `.\run-sandbox-test.cmd`
+- `.\\cmd\\run-sandbox-test.cmd`
   Run the sandbox smoke test directly.
-- `.\run-telegram-ids.cmd`
+- `.\\cmd\\run-telegram-ids.cmd`
   Run Telegram ID inspection directly.
 
 The core mental model is:
 
-- first-time or new machine: `.\run-openclaw.cmd bootstrap`
-- create a recovery snapshot: `.\run-openclaw.cmd backup`
-- restore from a recovery snapshot: `.\run-openclaw.cmd restore`
-- update to the newest stable release and re-apply hardening: `.\run-openclaw.cmd update`
-- normal daily startup: `.\run-openclaw.cmd start`
-- apply the configured starter multi-agent layout: `.\run-openclaw.cmd agents`
-- inspect where a newly created API agent stores its data: `.\run-openclaw.cmd temp-agent-probe`
-- run OpenAI Codex OAuth for OpenClaw when needed: `.\run-openclaw.cmd openai-auth`
-- complete Gemini auth for OpenClaw when you want the research path: `.\run-openclaw.cmd gemini-auth`
-- run Anthropic auth for OpenClaw when needed: `.\run-openclaw.cmd claude-auth`
-- health/status check: `.\run-openclaw.cmd status`
-- dashboard access: `.\run-openclaw.cmd dashboard`
-- clean shutdown: `.\run-openclaw.cmd stop`
+- first-time or new machine: `.\\cmd\\run-openclaw.cmd bootstrap`
+- create a recovery snapshot: `.\\cmd\\run-openclaw.cmd backup`
+- restore from a recovery snapshot: `.\\cmd\\run-openclaw.cmd restore`
+- update to the newest stable release and re-apply hardening: `.\\cmd\\run-openclaw.cmd update`
+- normal daily startup: `.\\cmd\\run-openclaw.cmd start`
+- apply the configured starter multi-agent layout: `.\\cmd\\run-openclaw.cmd agents`
+- inspect where a newly created API agent stores its data: `.\\cmd\\run-openclaw.cmd temp-agent-probe`
+- run OpenAI Codex OAuth for OpenClaw when needed: `.\\cmd\\run-openclaw.cmd openai-auth`
+- complete Gemini auth for OpenClaw when you want the research path: `.\\cmd\\run-openclaw.cmd gemini-auth`
+- run Anthropic auth for OpenClaw when needed: `.\\cmd\\run-openclaw.cmd claude-auth`
+- health/status check: `.\\cmd\\run-openclaw.cmd status`
+- dashboard access: `.\\cmd\\run-openclaw.cmd dashboard`
+- clean shutdown: `.\\cmd\\run-openclaw.cmd stop`
 
 Common paste-ready examples:
 
 ```powershell
-.\run-openclaw.cmd prereqs
-.\run-openclaw.cmd bootstrap
-.\run-openclaw.cmd start
-.\run-openclaw.cmd status
-.\run-openclaw.cmd dashboard
-.\run-openclaw.cmd phone-dashboard
-.\run-openclaw.cmd verify -Checks "voice multi-agent"
-.\run-openclaw.cmd agents
-.\run-openclaw.cmd agent-smoke
-.\run-openclaw.cmd remote-review-smoke
-.\run-openclaw.cmd temp-agent-probe -KeepAgent
+.\\cmd\\run-openclaw.cmd prereqs
+.\\cmd\\run-openclaw.cmd bootstrap
+.\\cmd\\run-openclaw.cmd start
+.\\cmd\\run-openclaw.cmd status
+.\\cmd\\run-openclaw.cmd dashboard
+.\\cmd\\run-openclaw.cmd phone-dashboard
+.\\cmd\\run-openclaw.cmd verify -Checks "voice multi-agent"
+.\\cmd\\run-openclaw.cmd agents
+.\\cmd\\run-openclaw.cmd agent-smoke
+.\\cmd\\run-openclaw.cmd remote-review-smoke
+.\\cmd\\run-openclaw.cmd temp-agent-probe -KeepAgent
 ```
 
 Run the bootstrap script first:
@@ -250,7 +250,7 @@ pwsh -ExecutionPolicy Bypass -File .\bootstrap-openclaw.ps1
 If you are not sure which PowerShell is your default, use:
 
 ```powershell
-.\run-bootstrap.cmd
+.\\cmd\\run-bootstrap.cmd
 ```
 
 That launcher prefers PowerShell 7 (`pwsh`) automatically and falls back to
@@ -259,13 +259,13 @@ Windows PowerShell only if needed.
 The simpler operator wrapper is:
 
 ```powershell
-.\run-openclaw.cmd bootstrap
+.\\cmd\\run-openclaw.cmd bootstrap
 ```
 
 If the dashboard later says `gateway token missing`, use:
 
 ```powershell
-.\run-openclaw.cmd dashboard
+.\\cmd\\run-openclaw.cmd dashboard
 ```
 
 That launcher opens the Control UI with the token attached via `#token=...`
@@ -274,7 +274,7 @@ instead of weakening auth.
 If the dashboard says `pairing required`, use:
 
 ```powershell
-.\run-openclaw.cmd dashboard-repair
+.\\cmd\\run-openclaw.cmd dashboard-repair
 ```
 
 That helper lists pending device-pairing requests and can approve the current
@@ -290,7 +290,7 @@ Firefox note:
 
 Temporary agent storage probe:
 
-- Run `.\run-temp-agent-probe.cmd` when you want a
+- Run `.\\cmd\\run-temp-agent-probe.cmd` when you want a
   concrete answer to "what files did OpenClaw create for this agent?"
 - The helper uses the live gateway API to add an agent, optionally creates one
   session so the session store materializes on disk, and prints the paths it
@@ -303,8 +303,8 @@ Temporary agent storage probe:
 Examples:
 
 ```powershell
-.\run-openclaw.cmd temp-agent-probe
-.\run-openclaw.cmd temp-agent-probe -KeepAgent
+.\\cmd\\run-openclaw.cmd temp-agent-probe
+.\\cmd\\run-openclaw.cmd temp-agent-probe -KeepAgent
 ```
 
 Multi-agent note:
@@ -403,7 +403,7 @@ group ID, or mention policy changes later.
 To inspect Telegram user IDs and group IDs from OpenClaw's own logs, use:
 
 ```powershell
-.\run-telegram-ids.cmd
+.\\cmd\\run-telegram-ids.cmd
 ```
 
 Telegram group notes:
@@ -469,7 +469,7 @@ pwsh -ExecutionPolicy Bypass -File .\test-voice-notes.ps1
 Or:
 
 ```powershell
-.\run-voice-test.cmd
+.\\cmd\\run-voice-test.cmd
 ```
 
 This creates a short synthetic WAV on Windows, copies it into the running
@@ -487,14 +487,14 @@ To smoke-test the configured Ollama local-model path directly through OpenClaw,
 use:
 
 ```powershell
-.\run-openclaw.cmd local-model-test
+.\\cmd\\run-openclaw.cmd local-model-test
 ```
 
 To probe a local model against your GPU budget before writing its context into
 bootstrap, run:
 
 ```powershell
-.\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
+.\\cmd\\run-openclaw.cmd model-fit -Model qwen3-coder:30b -EndpointKey local -MaxContextWindow 131072
 ```
 
 Do not hand-edit endpoint `models` in the bootstrap config unless you are fixing
@@ -509,13 +509,13 @@ tunes the context window for your GPU budget. If you want to add a brand-new
 local model end to end, use:
 
 ```powershell
-.\run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc
+.\\cmd\\run-openclaw.cmd add-local-model -Model qwen2.5:7b -Name "Qwen 2.5 7B" -EndpointKey review-pc
 ```
 
 If you want that managed model entry to carry a fallback model, pass it explicitly:
 
 ```powershell
-.\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
+.\\cmd\\run-openclaw.cmd add-local-model -Model qwen3-coder:30b -Name "Qwen3 Coder 30B" -EndpointKey local -FallbackModel qwen2.5-coder:3b
 ```
 
 `-FallbackModel` takes an Ollama model ID and writes it to the managed
@@ -546,7 +546,7 @@ Supported `-AssignTo` agent IDs are:
 To remove a local model later, use:
 
 ```powershell
-.\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b
+.\\cmd\\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -ReplaceWith qwen3-coder:30b
 ```
 
 What it does now:
@@ -572,20 +572,20 @@ Important storage note:
 If you want to compact Docker Desktop storage after model churn, use:
 
 ```powershell
-.\run-openclaw.cmd compact-storage
+.\\cmd\\run-openclaw.cmd compact-storage
 ```
 
 Or combine it with model removal:
 
 ```powershell
-.\run-openclaw.cmd remove-local-model -Model qwen3.5:35b-a3b -CompactDockerData
+.\\cmd\\run-openclaw.cmd remove-local-model -Model qwen3.5:35b-a3b -CompactDockerData
 ```
 
 If you only want to drop a local model from managed config and keep the actual
 Ollama files on disk, use:
 
 ```powershell
-.\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -KeepOllamaModel -SkipBootstrap
+.\\cmd\\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -KeepOllamaModel -SkipBootstrap
 ```
 
 That is the pure config-only path: it rewrites the managed bootstrap config and
@@ -595,8 +595,8 @@ until you explicitly apply later.
 Safe preview examples:
 
 ```powershell
-.\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -WhatIf
-.\run-openclaw.cmd compact-storage -WhatIf
+.\\cmd\\run-openclaw.cmd remove-local-model -Model deepseek-r1:8b -WhatIf
+.\\cmd\\run-openclaw.cmd compact-storage -WhatIf
 ```
 
 Current tuned local-model caps on this 32GB RTX 5090 setup:
@@ -645,7 +645,7 @@ If enabled, bootstrap will apply the layout automatically near the end of the
 run. You can also re-apply it any time with:
 
 ```powershell
-.\run-openclaw.cmd agents
+.\\cmd\\run-openclaw.cmd agents
 ```
 
 The current starter layout creates:
@@ -998,7 +998,7 @@ To authenticate an extra Telegram account after you add it to toolkit config,
 run:
 
 ```powershell
-.\run-openclaw.cmd telegram-setup -AccountId alerts
+.\\cmd\\run-openclaw.cmd telegram-setup -AccountId alerts
 ```
 
 Bootstrap-managed keys for this starter layout live in:
@@ -1043,7 +1043,7 @@ Gemini note:
 - The supported one-time login path is:
 
 ```powershell
-.\run-openclaw.cmd gemini-auth
+.\\cmd\\run-openclaw.cmd gemini-auth
 ```
 
 - That command runs OpenClaw's interactive `google` API-key auth flow, then reruns bootstrap so the managed allowlist and agents pick Gemini up automatically.
@@ -1054,14 +1054,14 @@ Other hosted auth helpers:
 - OpenAI Codex:
 
 ```powershell
-.\run-openclaw.cmd openai-auth
+.\\cmd\\run-openclaw.cmd openai-auth
 ```
 
 - Anthropic:
   recommended supported path is API-key auth
 
 ```powershell
-.\run-openclaw.cmd claude-auth
+.\\cmd\\run-openclaw.cmd claude-auth
 ```
 
 - `claude-auth` now defaults to Anthropic API-key auth inside OpenClaw.
@@ -1069,8 +1069,8 @@ Other hosted auth helpers:
 - If you intentionally want an older flow instead, use one of:
 
 ```powershell
-.\run-openclaw.cmd claude-auth -Method paste-token
-.\run-openclaw.cmd claude-auth -Method cli
+.\\cmd\\run-openclaw.cmd claude-auth -Method paste-token
+.\\cmd\\run-openclaw.cmd claude-auth -Method cli
 ```
 
 Use the older flows only if you have a specific reason.
@@ -1078,7 +1078,7 @@ Use the older flows only if you have a specific reason.
 - GitHub Copilot for OpenClaw:
 
 ```powershell
-.\run-openclaw.cmd copilot-auth
+.\\cmd\\run-openclaw.cmd copilot-auth
 ```
 
 - This runs OpenClaw's built-in `github-copilot` device-login flow inside the gateway container.
@@ -1087,7 +1087,7 @@ Use the older flows only if you have a specific reason.
 - Ollama cloud auth:
 
 ```powershell
-.\run-openclaw.cmd ollama-auth
+.\\cmd\\run-openclaw.cmd ollama-auth
 ```
 
 - Use this only for Ollama `:cloud` models and Ollama Web Search.
@@ -1121,7 +1121,7 @@ default.
 To run one harmless sandbox exec smoke test manually, use:
 
 ```powershell
-.\run-openclaw.cmd sandbox-test
+.\\cmd\\run-openclaw.cmd sandbox-test
 ```
 
 ## 7. Verification
@@ -1135,15 +1135,15 @@ pwsh -ExecutionPolicy Bypass -File .\verify-openclaw.ps1
 Or use:
 
 ```powershell
-.\run-verify.cmd
+.\\cmd\\run-verify.cmd
 ```
 
 Targeted verification examples:
 
 ```powershell
-.\run-openclaw.cmd verify -Checks voice
-.\run-openclaw.cmd verify -Checks "local-model agent"
-.\run-openclaw.cmd verify -Checks "sandbox audit"
+.\\cmd\\run-openclaw.cmd verify -Checks voice
+.\\cmd\\run-openclaw.cmd verify -Checks "local-model agent"
+.\\cmd\\run-openclaw.cmd verify -Checks "sandbox audit"
 ```
 
 The `agent` smoke test now exercises all configured collaboration roles that matter in day-to-day use:
@@ -1158,7 +1158,7 @@ When one of those fails, the verifier now reports the specific category, such as
 For the specific spawned-local-coder problem, use:
 
 ```powershell
-.\run-openclaw.cmd local-delegate-test
+.\\cmd\\run-openclaw.cmd local-delegate-test
 ```
 
 That diagnostic does not call `research`. It reproduces the exact `main -> coder-local` spawned local-model path and reports whether the child made a real structured tool call or just printed fake `<function=...>` tool markup as plain text.
@@ -1209,13 +1209,13 @@ multi-agent layout. It exercises:
 You can run it by itself with:
 
 ```powershell
-.\run-openclaw.cmd agent-smoke
+.\\cmd\\run-openclaw.cmd agent-smoke
 ```
 
 To run the narrower remote handoff smoke path by itself, use:
 
 ```powershell
-.\run-openclaw.cmd remote-review-smoke
+.\\cmd\\run-openclaw.cmd remote-review-smoke
 ```
 
 That focuses on the `main -> coder-remote -> review-local` path and is useful
@@ -1243,7 +1243,7 @@ portable recovery snapshot of your OpenClaw state.
 Use:
 
 ```powershell
-.\run-openclaw.cmd backup
+.\\cmd\\run-openclaw.cmd backup
 ```
 
 That creates a timestamped zip under:
@@ -1261,7 +1261,7 @@ By default it excludes disposable sandbox directories to keep the archive
 smaller. If you ever want those too, run:
 
 ```powershell
-.\run-backup.cmd -IncludeSandboxes
+.\\cmd\\run-backup.cmd -IncludeSandboxes
 ```
 
 ## 9. Restore and migration
@@ -1270,21 +1270,21 @@ To restore from the latest backup snapshot on a machine that already has the
 setup toolkit, use:
 
 ```powershell
-.\run-openclaw.cmd restore
+.\\cmd\\run-openclaw.cmd restore
 ```
 
 To restore from a specific zip:
 
 ```powershell
-.\run-restore.cmd -BackupPath <repo-dir>-backup-YYYYMMDD-HHMMSS.zip
+.\\cmd\\run-restore.cmd -BackupPath <repo-dir>-backup-YYYYMMDD-HHMMSS.zip
 ```
 
 Recommended migration flow on a new machine:
 
 1. Copy the `<toolkit-dir>` folder and your backup zip to the new machine.
-2. Run `.\run-openclaw.cmd restore -RunBootstrap`
-3. Run `.\run-openclaw.cmd start`
-4. Run `.\run-openclaw.cmd status`
+2. Run `.\\cmd\\run-openclaw.cmd restore -RunBootstrap`
+3. Run `.\\cmd\\run-openclaw.cmd start`
+4. Run `.\\cmd\\run-openclaw.cmd status`
 
 What restore does:
 
@@ -1306,7 +1306,7 @@ pwsh -ExecutionPolicy Bypass -File .\restore-openclaw.ps1 -WhatIf
 To move to the newest stable OpenClaw release and then re-apply your hardened setup, use:
 
 ```powershell
-.\run-openclaw.cmd update
+.\\cmd\\run-openclaw.cmd update
 ```
 
 That helper:
@@ -1332,14 +1332,14 @@ Optional overrides:
 - latest beta release:
 
 ```powershell
-.\run-openclaw.cmd update -Channel beta
+.\\cmd\\run-openclaw.cmd update -Channel beta
 ```
 
 - specific tag, branch, or commit:
 
 ```powershell
-.\run-openclaw.cmd update -Ref v2026.4.2
-.\run-openclaw.cmd update -Ref main
+.\\cmd\\run-openclaw.cmd update -Ref v2026.4.2
+.\\cmd\\run-openclaw.cmd update -Ref main
 ```
 
 Recommended policy:
@@ -1359,13 +1359,13 @@ container is available instead of only testing whether the local port is open.
 Run one manual watchdog check:
 
 ```powershell
-.\run-openclaw.cmd watchdog
+.\\cmd\\run-openclaw.cmd watchdog
 ```
 
 Run it with self-heal and Telegram alerting:
 
 ```powershell
-.\run-openclaw.cmd watchdog -RestartOnFailure -AlertOnFailure
+.\\cmd\\run-openclaw.cmd watchdog -RestartOnFailure -AlertOnFailure
 ```
 
 The watchdog behavior is:
@@ -1381,7 +1381,7 @@ If you want it to run automatically every 5 minutes on Windows, install the
 scheduled task:
 
 ```powershell
-.\run-openclaw.cmd install-watchdog
+.\\cmd\\run-openclaw.cmd install-watchdog
 ```
 
 This creates a Windows Scheduled Task named `OpenClaw Watchdog`.
@@ -1424,7 +1424,7 @@ The safe phone browser flow is:
 1. On the PC, run:
 
 ```powershell
-.\run-openclaw.cmd phone-dashboard
+.\\cmd\\run-openclaw.cmd phone-dashboard
 ```
 
 2. That command prints and copies a tokenized Tailscale dashboard URL.
@@ -1439,7 +1439,7 @@ Notes:
 - If the phone ever shows `pairing required`, run:
 
 ```powershell
-.\run-openclaw.cmd dashboard-repair
+.\\cmd\\run-openclaw.cmd dashboard-repair
 ```
 
 - If the phone ever shows `origin not allowed`, re-run bootstrap or verify that
@@ -1507,7 +1507,7 @@ After a reboot, you do not need to rebuild or re-bootstrap OpenClaw.
 Use:
 
 ```powershell
-.\run-openclaw.cmd start
+.\\cmd\\run-openclaw.cmd start
 ```
 
 That helper:
@@ -1521,13 +1521,13 @@ That helper:
 To check whether everything is up, use:
 
 ```powershell
-.\run-openclaw.cmd status
+.\\cmd\\run-openclaw.cmd status
 ```
 
 To stop OpenClaw cleanly, use:
 
 ```powershell
-.\run-openclaw.cmd stop
+.\\cmd\\run-openclaw.cmd stop
 ```
 
 That helper stops the main gateway and removes the disposable `openclaw-sbx-*`
@@ -1537,7 +1537,7 @@ sandbox worker containers. It does not delete your real state under
 If you also want it to close Docker Desktop afterwards, use:
 
 ```powershell
-.\run-openclaw.cmd stop -StopDockerDesktop
+.\\cmd\\run-openclaw.cmd stop -StopDockerDesktop
 ```
 
 The most important mental model is:
@@ -1562,5 +1562,6 @@ That host state includes things like:
 So deleting or expiring a sandbox container does not mean losing your whole
 OpenClaw setup. It mostly means losing that one running execution environment,
 which OpenClaw can rebuild.
+
 
 

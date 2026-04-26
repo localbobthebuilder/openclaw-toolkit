@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [int]$WatchSeconds = 60,
     [int]$PollMs = 500

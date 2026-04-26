@@ -14,7 +14,7 @@ $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
 if (-not $usingPowerShellCore -and $null -ne $pwshCommand) {
     Write-Host "INFO: Running under Windows PowerShell. 'pwsh' is installed and preferred for future runs." -ForegroundColor Yellow
-    Write-Host "INFO: Next time, launch via run-dashboard.cmd or run:" -ForegroundColor Yellow
+    Write-Host "INFO: Next time, launch via cmd\run-dashboard.cmd or run:" -ForegroundColor Yellow
     Write-Host "      pwsh -ExecutionPolicy Bypass -File $($MyInvocation.MyCommand.Path)" -ForegroundColor Yellow
 }
 

@@ -83,16 +83,16 @@ function Invoke-External {
 try {
     $dockerCommand = Get-Command "docker" -ErrorAction SilentlyContinue
     if ($null -eq $dockerCommand) {
-        throw "Docker is not installed on this machine. Install/start it first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') prereqs"
+        throw "Docker is not installed on this machine. Install/start it first with $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') prereqs"
     }
 
     Write-Step "Checking gateway container"
     $containerProbe = Invoke-External -FilePath $dockerCommand.Source -Arguments @("ps", "--format", "{{.Names}}") -AllowFailure
     if ($containerProbe.ExitCode -ne 0) {
-        throw "Docker is not ready. Start OpenClaw first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') start"
+        throw "Docker is not ready. Start OpenClaw first with $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') start"
     }
     if (($containerProbe.Output -split "`r?`n") -notcontains $ContainerName) {
-        throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') start"
+        throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') start"
     }
 
     Write-Step "Launching Telegram channel setup"

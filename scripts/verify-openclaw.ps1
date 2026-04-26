@@ -73,7 +73,7 @@ $usingPowerShellCore = $PSVersionTable.PSEdition -eq "Core"
 $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
 if (-not $usingPowerShellCore -and $null -ne $pwshCommand) {
     Write-Host "INFO: Running under Windows PowerShell. 'pwsh' is installed and preferred for future verification runs." -ForegroundColor Yellow
-    Write-Host "INFO: Next time, launch via run-verify.cmd or run:" -ForegroundColor Yellow
+    Write-Host "INFO: Next time, launch via cmd\run-verify.cmd or run:" -ForegroundColor Yellow
     Write-Host "      pwsh -ExecutionPolicy Bypass -File $($MyInvocation.MyCommand.Path)" -ForegroundColor Yellow
 }
 
@@ -2061,7 +2061,7 @@ if (Test-CheckRequested -Names @("multi-agent")) {
                 $multiAgentVerification += "PASS: Gemini provider auth is ready"
             }
             else {
-                $multiAgentVerification += "INFO: Gemini provider auth is not ready yet. Run $(Join-Path $PSScriptRoot 'run-openclaw.cmd') gemini-auth"
+                $multiAgentVerification += "INFO: Gemini provider auth is not ready yet. Run $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') gemini-auth"
             }
         }
 

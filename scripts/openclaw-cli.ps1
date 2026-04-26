@@ -79,7 +79,7 @@ try {
     }
 
     if (($containerProbe.Output -split "`r?`n") -notcontains $ContainerName) {
-        throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') start"
+        throw "Gateway container '$ContainerName' is not running. Start OpenClaw first with $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') start"
     }
 
     $result = Invoke-External -FilePath $dockerCommand.Source -Arguments (Get-ToolkitGatewayOpenClawDockerExecArgs -ContainerName $ContainerName -Arguments $Arguments) -AllowFailure

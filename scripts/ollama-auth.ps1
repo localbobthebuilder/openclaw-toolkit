@@ -40,7 +40,7 @@ function Write-Step {
 
 $ollama = Get-Command "ollama" -ErrorAction SilentlyContinue
 if ($null -eq $ollama) {
-    throw "Ollama is not installed. Install it first with $(Join-Path $PSScriptRoot 'run-openclaw.cmd') prereqs"
+    throw "Ollama is not installed. Install it first with $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') prereqs"
 }
 
 $existingMarker = Read-OllamaCloudAuthMarker -BootstrapConfig $bootstrapConfig

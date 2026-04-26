@@ -319,7 +319,7 @@ if ($result.Other.Count -gt 0) {
 
 Write-Host ""
 Write-LogLine -Message "Pairing repair complete. Reopen the dashboard now:" -Color Green
-Write-LogLine -Message (Join-Path $PSScriptRoot "run-dashboard.cmd")
+Write-LogLine -Message (Join-Path (Split-Path $PSScriptRoot -Parent) "cmd\run-dashboard.cmd")
 if ($OpenDashboard -and $approvedAuto) {
     Start-Sleep -Milliseconds 750
     Write-Host ""

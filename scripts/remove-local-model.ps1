@@ -432,7 +432,7 @@ if ($CompactDockerData) {
 else {
     Write-Host ""
     Write-Host "Note: Ollama model files live on this machine under $env:USERPROFILE\.ollama\models, not inside Docker Desktop's VHDX." -ForegroundColor DarkGray
-    Write-Host "If you want to compact Docker Desktop storage separately, run: $(Join-Path $PSScriptRoot 'run-openclaw.cmd') compact-storage" -ForegroundColor DarkGray
+    Write-Host "If you want to compact Docker Desktop storage separately, run: $(Join-Path (Split-Path $PSScriptRoot -Parent) 'run-openclaw.cmd') compact-storage" -ForegroundColor DarkGray
 }
 
 

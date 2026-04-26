@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$RepoPath,
     [string]$HealthUrl
