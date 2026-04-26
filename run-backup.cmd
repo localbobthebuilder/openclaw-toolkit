@@ -2,7 +2,8 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%backup-openclaw.ps1" "%~nx0" %*
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%scripts\backup-openclaw.ps1" "%~nx0" %*
 exit /b %ERRORLEVEL%
+
 
 

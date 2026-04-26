@@ -2,6 +2,7 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%run-prereqs-elevated.ps1" "%~nx0" %*
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%scripts\run-prereqs-elevated.ps1" "%~nx0" %*
 exit /b %ERRORLEVEL%
+
 

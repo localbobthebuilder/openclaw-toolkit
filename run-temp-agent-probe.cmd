@@ -2,5 +2,6 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%probe-temp-agent-storage.ps1" "%~nx0" %*
+"%SCRIPT_DIR%invoke-toolkit-script.cmd" "%SCRIPT_DIR%scripts\probe-temp-agent-storage.ps1" "%~nx0" %*
 exit /b %ERRORLEVEL%
+

@@ -46,7 +46,7 @@ if %ERRORLEVEL%==0 (
 exit /b %ERRORLEVEL%
 
 :help
-set "HELP_PS1=%~dp0show-script-help.ps1"
+set "HELP_PS1=%~dp0scripts\show-script-help.ps1"
 if not exist "%HELP_PS1%" (
   echo Help script not found: %HELP_PS1%
   exit /b 2
@@ -60,3 +60,4 @@ if %ERRORLEVEL%==0 (
 )
 
 exit /b %ERRORLEVEL%
+
