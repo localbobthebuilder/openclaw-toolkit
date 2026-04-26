@@ -33,6 +33,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
       const visibleEdges = this.getVisibleTopologyEdges();
       const selectedTopologyEntry = this.getTopologySelectedAgentEntry();
       const selectedTopologyAgentId = this.topologySelectedAgentId || selectedTopologyEntry?.id || null;
+      const inspectorOpen = !!this.topologyInspectorOpen;
       const orderedVisibleEdges = [...visibleEdges].sort((left: any, right: any) => {
         const leftHovered = this.topologyHoverEdgeKey === left.key ? 1 : 0;
         const rightHovered = this.topologyHoverEdgeKey === right.key ? 1 : 0;
@@ -53,11 +54,11 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
         <div class="topology-shell">
           <div class="card">
             <div class="topology-toolbar">
-              <div>
-                <div style="color: #fff; font-weight: 600; margin-bottom: 6px;">Drag agents onto endpoint workbenches</div>
-                <div class="topology-help">
-                  Drag a pawn onto a computer/workbench to change its <strong>endpoint assignment</strong>. Click <strong>Delegation</strong> on an agent, then click another agent to add or remove a dotted delegation arrow.
-                </div>
+          <div>
+            <div style="color: #fff; font-weight: 600; margin-bottom: 6px;">Drag agents onto endpoint workbenches</div>
+            <div class="topology-help">
+              Drag a pawn onto a computer/workbench to change its <strong>endpoint assignment</strong>. Click <strong>Delegation</strong> on an agent, then click another agent to add or remove a dotted delegation arrow.
+            </div>
               </div>
               <div class="topology-toolbar-controls">
                 <label class="toggle-switch topology-legend-item" title="When off, arrows only appear while hovering a delegator card.">
@@ -74,6 +75,11 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                   <span class="topology-legend-item">♻ cycles blocked</span>
                   <span class="topology-legend-item">${this.topologyEdges.length} delegation link${this.topologyEdges.length === 1 ? '' : 's'}</span>
                 </div>
+                <button class="btn btn-secondary" @click=${() => {
+                  this.topologyInspectorOpen = !this.topologyInspectorOpen;
+                }}>
+                  ${inspectorOpen ? 'Hide Inspector' : 'Show Inspector'}
+                </button>
               </div>
             </div>
             <div class="topology-help" style="margin-top: 14px;">
@@ -85,7 +91,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
               </div>
             ` : ''}
           </div>
-          <div class="topology-main-grid">
+          <div class="topology-main-grid ${inspectorOpen ? 'inspector-open' : ''}">
             <div class="topology-board-column">
               <div class="topology-notice ${this.topologyNotice ? '' : 'placeholder'}">
                 ${this.topologyNotice
@@ -337,16 +343,21 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
               </div>
             </div>
 
-            <div class="topology-inspector-column">
-              <div class="topology-inspector-sticky">
-                ${selectedTopologyEntry ? this.renderTopologyInspector(selectedTopologyEntry) : html`
-                  <div class="card">
-                    <div class="card-header"><h3>Agent Inspector</h3></div>
-                    <div class="topology-help">Select an agent card to inspect its effective markdown, toolsets, and delegation settings.</div>
-                  </div>
-                `}
+            ${inspectorOpen ? html`
+              <div class="topology-inspector-column">
+                <div class="topology-inspector-sticky">
+                  ${selectedTopologyEntry ? this.renderTopologyInspector(selectedTopologyEntry) : html`
+                    <div class="card">
+                      <div class="card-header">
+                        <h3>Agent Inspector</h3>
+                        <button class="btn btn-ghost" @click=${() => { this.topologyInspectorOpen = false; }}>Hide</button>
+                      </div>
+                      <div class="topology-help">Select an agent card to inspect its effective markdown, toolsets, and delegation settings.</div>
+                    </div>
+                  `}
+                </div>
               </div>
-            </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -372,7 +383,12 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
         <div class="card">
           <div class="card-header">
             <h3>Agent Inspector</h3>
-            <button class="btn btn-ghost" @click=${() => this.openTopologyAgentEditor(selectedEntry.key)}>Open Full Editor</button>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <button class="btn btn-ghost" @click=${() => {
+                this.topologyInspectorOpen = false;
+              }}>Hide</button>
+              <button class="btn btn-ghost" @click=${() => this.openTopologyAgentEditor(selectedEntry.key)}>Open Full Editor</button>
+            </div>
           </div>
 
           <div class="topology-inspector-meta">

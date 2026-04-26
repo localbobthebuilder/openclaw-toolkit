@@ -13,6 +13,7 @@ export const ToolkitDashboardTopologyAssignmentMixin = <TBase extends Constructo
 
     selectTopologyAgent(agentId: string) {
       this.topologySelectedAgentId = agentId;
+      this.topologyInspectorOpen = true;
     }
 
     setTopologyAgentEnabled(agentId: string, enabled: boolean) {
@@ -96,7 +97,7 @@ export const ToolkitDashboardTopologyAssignmentMixin = <TBase extends Constructo
     }
 
     handleTopologyAgentClick(agentId: string) {
-      this.topologySelectedAgentId = agentId;
+      this.selectTopologyAgent(agentId);
       if (!this.topologyLinkSourceAgentId) {
         return;
       }

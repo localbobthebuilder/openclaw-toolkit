@@ -40,6 +40,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
   @state() topologyNotice: string = '';
   @state() topologyBoardWidth: number = 0;
   @state() topologyBoardHeight: number = 0;
+  @state() topologyInspectorOpen: boolean = false;
   @state() topologyEdges: any[] = [];
   @state() topologyShowAllArrows: boolean = false;
   @state() topologyInspectorMarkdownFile: string = 'AGENTS.md';
@@ -195,7 +196,8 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .step-done-badge { color: #4caf50; font-size: 0.75rem; font-weight: bold; }
     .setup-step .btn { white-space: nowrap; flex-shrink: 0; }
     .topology-shell { display: flex; flex-direction: column; gap: 20px; }
-    .topology-main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
+    .topology-main-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+    .topology-main-grid.inspector-open { grid-template-columns: minmax(0, 1fr) 400px; }
     .topology-board-column { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
     .topology-inspector-column { min-width: 0; }
     .topology-inspector-sticky { position: sticky; top: 20px; }
@@ -295,7 +297,8 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .topology-help { color: #888; font-size: 0.82rem; line-height: 1.55; }
     .topology-help strong { color: #ddd; }
     @media (max-width: 1480px) {
-      .topology-main-grid { grid-template-columns: minmax(0, 1fr); }
+      .topology-main-grid,
+      .topology-main-grid.inspector-open { grid-template-columns: minmax(0, 1fr); }
       .topology-inspector-sticky { position: static; }
     }
     @media (max-width: 1100px) {
