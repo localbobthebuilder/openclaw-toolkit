@@ -2,6 +2,8 @@
 
 Portable PowerShell toolkit for setting up, hardening, operating, verifying, backing up, and updating a Docker-based OpenClaw installation on Windows.
 
+The repo includes the toolkit scripts, the local dashboard UI, operator docs, and the automation used to manage an OpenClaw deployment end to end.
+
 ## What This Repo Contains
 
 - Bootstrap and prerequisite automation
@@ -42,3 +44,7 @@ run-openclaw.cmd update
 
 - [manual-steps.md](manual-steps.md)
 - [quick-reference.md](quick-reference.md)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
