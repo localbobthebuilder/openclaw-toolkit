@@ -23,10 +23,15 @@ if (-not $ConfigPath) {
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-gateway-cli-startup.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-openclaw-config.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-auth-profiles.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-toolkit-logging.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-web-tools-config.ps1")
 
 Enable-ToolkitTimestampedOutput
 Initialize-ToolkitOpenClawConfigBatch
+
+# diagnostics relocated (moved below where helper functions are defined)
+
 
 function Write-Step {
     param([string]$Message)
@@ -91,6 +96,36 @@ function Invoke-External {
     [pscustomobject]@{
         ExitCode = $exitCode
         Output   = $text
+    }
+}
+
+function Ensure-GatewayRuntimeDepsDir {
+    param(
+        [string]$ContainerName = "openclaw-openclaw-gateway-1",
+        [switch]$Aggressive
+    )
+    # Ensure the runtime-deps dir exists and is owned by node:node.
+    try {
+        $res = Invoke-External -FilePath "docker" -Arguments @("exec", "-i", $ContainerName, "sh", "-c", "mkdir -p /var/tmp/openclaw-plugin-runtime-deps && chown -R node:node /var/tmp/openclaw-plugin-runtime-deps || true") -AllowFailure
+        if ($res.ExitCode -eq 0) { Write-Host "Ensured /var/tmp/openclaw-plugin-runtime-deps exists and owned by node:node" -ForegroundColor Green }
+    }
+    catch {
+        Write-WarnLine "Could not ensure runtime-deps dir: $($_.Exception.Message)"
+    }
+
+    try {
+        if ($Aggressive.IsPresent) {
+            # Remove any unknown dirs immediately (use with caution). Attempt direct rm -rf, falling back to cleaning contents then rmdir.
+            $cleanupCmd = 'for d in /var/tmp/openclaw-plugin-runtime-deps/openclaw-unknown-*; do [ -d "$d" ] || continue; rm -rf "$d" 2>/dev/null || (find "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; rmdir "$d" 2>/dev/null); done || true'
+        }
+        else {
+            $cleanupCmd = 'for d in $(find /var/tmp/openclaw-plugin-runtime-deps -maxdepth 1 -type d -name "openclaw-unknown-*" -mmin +10 -print); do [ -d "$d" ] || continue; rm -rf "$d" 2>/dev/null || (find "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; rmdir "$d" 2>/dev/null); done || true'
+        }
+        $cleanup = Invoke-External -FilePath "docker" -Arguments @("exec", "-i", $ContainerName, "sh", "-c", $cleanupCmd) -AllowFailure
+        if ($cleanup.Output) { Write-Host $cleanup.Output }
+    }
+    catch {
+        Write-WarnLine "Runtime-deps cleanup failed: $($_.Exception.Message); continuing."
     }
 }
 
@@ -467,16 +502,20 @@ $script:ManagedAgentBootstrapOverlayFiles = @("AGENTS.md", "TOOLS.md", "SOUL.md"
 $script:ManagedWorkspaceMarkdownFiles = @("AGENTS.md", "TOOLS.md", "SOUL.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "MEMORY.md", "BOOT.md")
 $script:ManagedWorkspaceSeedOnceMarkdownFiles = @("BOOTSTRAP.md")
 
+function Get-ToolkitRootDir {
+    return (Split-Path -Parent $PSScriptRoot)
+}
+
 function Get-ToolkitAgentBootstrapTemplateDir {
     param([Parameter(Mandatory = $true)][string]$AgentId)
 
-    return (Join-Path (Join-Path (Join-Path $PSScriptRoot "agents") $AgentId) "bootstrap")
+    return (Join-Path (Join-Path (Join-Path (Get-ToolkitRootDir) "agents") $AgentId) "bootstrap")
 }
 
 function Get-ToolkitWorkspaceMarkdownTemplateDir {
     param([Parameter(Mandatory = $true)][string]$WorkspaceId)
 
-    return (Join-Path (Join-Path (Join-Path $PSScriptRoot "workspaces") $WorkspaceId) "markdown")
+    return (Join-Path (Join-Path (Join-Path (Get-ToolkitRootDir) "workspaces") $WorkspaceId) "markdown")
 }
 
 function Get-ToolkitMarkdownTemplateLibraryDir {
@@ -486,7 +525,7 @@ function Get-ToolkitMarkdownTemplateLibraryDir {
     )
 
     $folderName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
-    return (Join-Path (Join-Path (Join-Path $PSScriptRoot "markdown-templates") $Scope) $folderName)
+    return (Join-Path (Join-Path (Join-Path (Get-ToolkitRootDir) "markdown-templates") $Scope) $folderName)
 }
 
 function Get-MarkdownTemplateSelectionKey {
@@ -1409,6 +1448,15 @@ function Resolve-AgentToolsetToolsOverride {
         [Parameter(Mandatory = $true)]$AgentConfig
     )
 
+    $delegationDisabled = $false
+    if ($AgentConfig.PSObject.Properties.Name -contains "subagents" -and $null -ne $AgentConfig.subagents) {
+        $subagentsConfig = $AgentConfig.subagents
+        if ($subagentsConfig.PSObject.Properties.Name -contains "enabled" -and -not [bool]$subagentsConfig.enabled) {
+            $delegationDisabled = $true
+        }
+    }
+    $delegationSuppressedTools = @("sessions_spawn", "subagents")
+
     $appliedToolsetKeys = @(Get-AgentToolsetKeys -Config $Config -AgentConfig $AgentConfig)
     $toolStates = [ordered]@{}
     foreach ($toolsetKey in @($appliedToolsetKeys)) {
@@ -1454,6 +1502,19 @@ function Resolve-AgentToolsetToolsOverride {
         switch ($toolStates[$toolName]) {
             "allow" { $allow.Add($toolName) }
             "deny" { $deny.Add($toolName) }
+        }
+    }
+
+    if ($delegationDisabled) {
+        $filteredAllow = New-Object System.Collections.Generic.List[string]
+        foreach ($toolName in @($allow | Where-Object { $_ -notin $delegationSuppressedTools })) {
+            $filteredAllow.Add($toolName)
+        }
+        $allow = $filteredAllow
+        foreach ($toolName in @($delegationSuppressedTools)) {
+            if ($toolName -notin @($deny)) {
+                $deny.Add($toolName)
+            }
         }
     }
 
@@ -1858,7 +1919,7 @@ function Get-AuthReadyHostedProviders {
         $liveConfig.auth.PSObject.Properties.Name -contains "profiles" -and
         $null -ne $liveConfig.auth.profiles) {
         foreach ($profile in @($liveConfig.auth.profiles.PSObject.Properties.Value)) {
-            if ($profile -and $profile.provider -and [string]$profile.provider -ne "ollama") {
+            if ($profile -and $profile.provider) {
                 $providers = Add-UniqueString -List $providers -Value ([string]$profile.provider)
             }
         }
@@ -2128,7 +2189,7 @@ function Resolve-AgentFallbackModelRefs {
 function Wait-ForGateway {
     param(
         [string]$HealthUrl = "http://127.0.0.1:18789/healthz",
-        [int]$MaxAttempts = 45,
+        [int]$MaxAttempts = 300,
         [int]$DelaySeconds = 2
     )
 
@@ -2391,9 +2452,18 @@ if (@($ollamaProviderEntries.Keys).Count -gt 0) {
     foreach ($providerId in @($ollamaProviderEntries.Keys)) {
         Set-OpenClawConfigJson -Path ("models.providers." + [string]$providerId) -Value $ollamaProviderEntries[$providerId]
     }
+    foreach ($profileSpec in @(Get-ToolkitOllamaAuthProfileSpecs -Config $config)) {
+        Set-OpenClawConfigJson -Path ("auth.profiles." + [string]$profileSpec.ProfileId) -Value ([ordered]@{
+                provider = [string]$profileSpec.ProviderId
+                mode     = "api_key"
+            })
+    }
 }
 
+Sync-ToolkitWebToolsOpenClawConfig -Config $config
+
 Flush-OpenClawConfigChanges
+Sync-ToolkitOllamaAgentAuthStores -Config $config -AgentIds @($mergedAgents | ForEach-Object { [string]$_.id })
 
 $managedAgentsFiles = @()
 foreach ($staleExtraAgentId in @($staleManagedExtraAgentIds)) {
@@ -2527,5 +2597,7 @@ if (-not $NoRestart) {
         "compose", "-f", ([string]$config.composeFilePath),
         "restart", "openclaw-gateway"
     )
+    Ensure-GatewayRuntimeDepsDir -ContainerName $ContainerName
+    Start-Sleep -Seconds 2
     Wait-ForGateway
 }

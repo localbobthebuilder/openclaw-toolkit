@@ -9,7 +9,7 @@ function Convert-ToolkitConfigValueToJson {
     }
 
     if ($AsArray -or $Value -is [System.Array]) {
-        return (@($Value) | ConvertTo-Json -AsArray -Depth 50 -Compress)
+        return (ConvertTo-Json -InputObject @($Value) -Depth 50 -Compress)
     }
 
     return ($Value | ConvertTo-Json -Depth 50 -Compress)

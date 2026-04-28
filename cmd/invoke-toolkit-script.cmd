@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
+set "WRAPPER_DIR=%~dp0"
 
 set "TARGET_PS1=%~1"
 set "WRAPPER_NAME=%~2"
@@ -46,7 +47,7 @@ if %ERRORLEVEL%==0 (
 exit /b %ERRORLEVEL%
 
 :help
-set "HELP_PS1=%CD%\scripts\show-script-help.ps1"
+set "HELP_PS1=%WRAPPER_DIR%..\scripts\show-script-help.ps1"
 if not exist "%HELP_PS1%" (
   echo Help script not found: %HELP_PS1%
   exit /b 2

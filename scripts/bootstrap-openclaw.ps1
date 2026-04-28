@@ -16,7 +16,30 @@ if (-not $ConfigPath) {
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-endpoints.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-gateway-cli-startup.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-openclaw-config.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-ollama-auth-profiles.ps1")
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-toolkit-logging.ps1")
+. (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "shared-web-tools-config.ps1")
+
+$script:ToolkitBootstrapTranscriptActive = $false
+$script:ToolkitBootstrapTranscriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) "bootstrap-live.log"
+try {
+    Start-Transcript -Path $script:ToolkitBootstrapTranscriptPath -Force | Out-Null
+    $script:ToolkitBootstrapTranscriptActive = $true
+}
+catch {
+    Write-Warning "Failed to start bootstrap transcript at '$script:ToolkitBootstrapTranscriptPath': $($_.Exception.Message)"
+}
+trap {
+    if ($script:ToolkitBootstrapTranscriptActive) {
+        try {
+            Stop-Transcript | Out-Null
+        }
+        catch {
+        }
+        $script:ToolkitBootstrapTranscriptActive = $false
+    }
+    throw
+}
 
 Enable-ToolkitTimestampedOutput
 Initialize-ToolkitOpenClawConfigBatch
@@ -527,30 +550,36 @@ function Ensure-OpenClawCliStartupComposeSupport {
     )
 
     $compileCachePath = Get-ToolkitGatewayNodeCompileCachePath
+    $pluginStageDir = Get-ToolkitGatewayPluginStageDir
     $raw = Get-Content -Raw $ComposePath
     $updated = $raw
 
-    $updated = [regex]::Replace($updated, '(?m)^\s*OPENCLAW_NO_RESPAWN:\s*\$\{OPENCLAW_NO_RESPAWN:-1\}\s*\r?\n?', '')
-    $updated = [regex]::Replace($updated, '(?m)^\s*NODE_COMPILE_CACHE:\s*\$\{NODE_COMPILE_CACHE:-[^}]+\}\s*\r?\n?', '')
+    $updated = [regex]::Replace($updated, '(?m)^[^\S\r\n]*OPENCLAW_NO_RESPAWN:[^\S\r\n]*\$\{OPENCLAW_NO_RESPAWN:-1\}[^\S\r\n]*\r?\n?', '')
+    $updated = [regex]::Replace($updated, '(?m)^[^\S\r\n]*NODE_COMPILE_CACHE:[^\S\r\n]*\$\{NODE_COMPILE_CACHE:-[^}]+\}[^\S\r\n]*\r?\n?', '')
+    $updated = [regex]::Replace($updated, '(?m)^[^\S\r\n]*OPENCLAW_PLUGIN_STAGE_DIR:[^\S\r\n]*\$\{OPENCLAW_PLUGIN_STAGE_DIR:-[^}]+\}[^\S\r\n]*\r?\n?', '')
+    $updated = [regex]::Replace($updated, '(?m)^[^\S\r\n]*-[^\S\r\n]*openclaw-plugin-runtime-deps:\$\{OPENCLAW_PLUGIN_STAGE_DIR:-[^}]+\}[^\S\r\n]*\r?\n?', '')
+    $updated = [regex]::Replace($updated, '(?ms)\r?\nvolumes:\s*\r?\n\s*openclaw-plugin-runtime-deps:\s*\r?\n?\s*$', '')
+    $updated = [regex]::Replace($updated, '(?m)^([^\S\r\n]*TERM:[^\r\n]*xterm-256color[^\r\n]*)(\r?\n)(?:[^\S\r\n]*\r?\n)+', '$1$2')
 
     $managedLines = @(
         '      OPENCLAW_NO_RESPAWN: ${OPENCLAW_NO_RESPAWN:-1}',
-        ('      NODE_COMPILE_CACHE: ${NODE_COMPILE_CACHE:-' + $compileCachePath + '}')
+        ('      NODE_COMPILE_CACHE: ${NODE_COMPILE_CACHE:-' + $compileCachePath + '}'),
+        ('      OPENCLAW_PLUGIN_STAGE_DIR: ${OPENCLAW_PLUGIN_STAGE_DIR:-' + $pluginStageDir + '}')
     ) -join [Environment]::NewLine
 
     $updated = [regex]::Replace(
         $updated,
-        '(?m)^(\s*TERM:\s*xterm-256color\s*)$',
+        '(?m)^([^\S\r\n]*TERM:[^\S\r\n]*xterm-256color[^\S\r\n]*)$',
         '$1' + [Environment]::NewLine + $managedLines
     )
 
     if ($updated -ne $raw) {
         Backup-File -Path $ComposePath
         Set-Content -Path $ComposePath -Value $updated -Encoding UTF8
-        Write-Host "Updated docker-compose for faster gateway CLI startup." -ForegroundColor Green
+        Write-Host "Updated docker-compose for faster gateway CLI and plugin startup." -ForegroundColor Green
     }
     else {
-        Write-Host "Docker Compose already includes gateway CLI startup optimization."
+        Write-Host "Docker Compose already includes gateway CLI and plugin startup optimization."
     }
 }
 
@@ -698,6 +727,7 @@ function Ensure-OpenClawCliStartupEnv {
 
     Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_NO_RESPAWN" -Value (Get-ToolkitGatewayOpenClawNoRespawnValue)
     Set-EnvVarValue -Path $Config.envFilePath -Name "NODE_COMPILE_CACHE" -Value (Get-ToolkitGatewayNodeCompileCachePath)
+    Set-EnvVarValue -Path $Config.envFilePath -Name "OPENCLAW_PLUGIN_STAGE_DIR" -Value (Get-ToolkitGatewayPluginStageDir)
 }
 
 function Ensure-GatewayCliCompileCacheDirectory {
@@ -717,6 +747,37 @@ function Ensure-GatewayCliCompileCacheDirectory {
     }
     else {
         Write-WarnLine "Could not prepare gateway CLI compile cache directory at $cachePath."
+    }
+}
+
+function Ensure-GatewayRuntimeDepsDir {
+    param(
+        [string]$ContainerName = "openclaw-openclaw-gateway-1",
+        [switch]$Aggressive
+    )
+
+    # Ensure the runtime-deps dir exists and is owned by node:node.
+    try {
+        $res = Invoke-External -FilePath "docker" -Arguments @("exec", "-i", $ContainerName, "sh", "-c", "mkdir -p /var/tmp/openclaw-plugin-runtime-deps && chown -R node:node /var/tmp/openclaw-plugin-runtime-deps || true") -AllowFailure
+        if ($res.ExitCode -eq 0) { Write-Host "Ensured /var/tmp/openclaw-plugin-runtime-deps exists and owned by node:node" -ForegroundColor Green }
+    }
+    catch {
+        Write-WarnLine "Could not ensure runtime-deps dir: $($_.Exception.Message)"
+    }
+
+    try {
+        if ($Aggressive.IsPresent) {
+            # Remove any unknown dirs immediately (use with caution). Attempt direct rm -rf, falling back to cleaning contents then rmdir.
+            $cleanupCmd = 'for d in /var/tmp/openclaw-plugin-runtime-deps/openclaw-unknown-*; do [ -d "$d" ] || continue; rm -rf "$d" 2>/dev/null || (find "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; rmdir "$d" 2>/dev/null); done || true'
+        }
+        else {
+            $cleanupCmd = 'for d in $(find /var/tmp/openclaw-plugin-runtime-deps -maxdepth 1 -type d -name "openclaw-unknown-*" -mmin +10 -print); do [ -d "$d" ] || continue; rm -rf "$d" 2>/dev/null || (find "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; rmdir "$d" 2>/dev/null); done || true'
+        }
+        $cleanup = Invoke-External -FilePath "docker" -Arguments @("exec", "-i", $ContainerName, "sh", "-c", $cleanupCmd) -AllowFailure
+        if ($cleanup.Output) { Write-Host $cleanup.Output }
+    }
+    catch {
+        Write-WarnLine "Runtime-deps cleanup failed: $($_.Exception.Message); continuing."
     }
 }
 
@@ -893,6 +954,29 @@ function Wait-ForGateway {
     }
 
     throw "Gateway never became healthy at $HealthUrl"
+}
+
+function Wait-ForGatewayRuntimeReady {
+    param(
+        [string]$ContainerName = "openclaw-openclaw-gateway-1",
+        [int]$MaxAttempts = 60
+    )
+
+    Write-Host "Waiting up to $($MaxAttempts * 3)s for full gateway runtime readiness in container $ContainerName..." -ForegroundColor Cyan
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
+        $result = Invoke-External -FilePath "docker" -Arguments @("logs", $ContainerName, "--tail", "400") -AllowFailure
+        if ($result.ExitCode -eq 0) {
+            $hasGatewayReady = $result.Output -match '\[gateway\]\s+ready'
+            $hasHeartbeatStarted = $result.Output -match '\[heartbeat\]\s+started'
+            if ($hasGatewayReady -and $hasHeartbeatStarted) {
+                Write-Host "Gateway runtime is ready." -ForegroundColor Green
+                return
+            }
+        }
+        Start-Sleep -Seconds 3
+    }
+
+    throw "Gateway runtime never reached '[gateway] ready' and '[heartbeat] started' in container $ContainerName"
 }
 
 function Ensure-TailscaleServe {
@@ -1969,7 +2053,7 @@ function Get-AuthReadyHostedProviders {
         $liveConfig.auth.PSObject.Properties.Name -contains "profiles" -and
         $null -ne $liveConfig.auth.profiles) {
         foreach ($profile in @($liveConfig.auth.profiles.PSObject.Properties.Value)) {
-            if ($profile -and $profile.provider -and [string]$profile.provider -ne "ollama") {
+            if ($profile -and $profile.provider) {
                 $providers = Add-UniqueString -List $providers -Value ([string]$profile.provider)
             }
         }
@@ -2680,7 +2764,8 @@ function Ensure-AgentBootstrapOverlayHook {
     }
 
     $hookName = "agent-bootstrap-overlays"
-    $toolkitHookDir = Join-Path (Split-Path -Parent $PSCommandPath) (Join-Path "managed-hooks" $hookName)
+    $toolkitRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+    $toolkitHookDir = Join-Path $toolkitRoot (Join-Path "managed-hooks" $hookName)
     $managedHooksRoot = Join-Path (Get-HostConfigDir -Config $Config) "hooks"
     $managedHookDir = Join-Path $managedHooksRoot $hookName
     Sync-ManagedHookDirectory -SourceDir $toolkitHookDir -TargetDir $managedHookDir
@@ -2769,13 +2854,16 @@ Write-Step "Starting the OpenClaw gateway container"
     Push-Location $config.repoPath
     try {
         $null = Invoke-External -FilePath "docker" -Arguments @("compose", "up", "-d", "--force-recreate", "openclaw-gateway")
+        # Ensure runtime-deps dir exists and cleanup stale directories on the fresh gateway
+        Ensure-GatewayRuntimeDepsDir -ContainerName "openclaw-openclaw-gateway-1"
     }
     finally {
         Pop-Location
 }
 
 Write-Step "Waiting for gateway health"
-Wait-ForGateway -HealthUrl $config.verification.healthUrl
+Wait-ForGateway -HealthUrl $config.verification.healthUrl -MaxAttempts 300
+Wait-ForGatewayRuntimeReady -ContainerName "openclaw-openclaw-gateway-1" -MaxAttempts 300
 Ensure-GatewayCliCompileCacheDirectory
 
 Write-Step "Applying security configuration"
@@ -2923,19 +3011,23 @@ if ($config.sandbox.enabled) {
 Clear-RedundantNodeDenyCommands -Config $config
 Configure-TelegramSurface -Config $config
 Configure-VoiceNotes -Config $config
+Sync-ToolkitWebToolsOpenClawConfig -Config $config
 Flush-OpenClawConfigChanges
 & (Join-Path (Split-Path -Parent $PSCommandPath) "configure-agent-layout.ps1") -ConfigPath $ConfigPath -NoRestart -StrongModelRef $resolvedStrongModelRef -ResearchModelRef $resolvedResearchModelRef -LocalChatModelRef $ollamaState.ResolvedLocalChatModelRef -HostedTelegramModelRef $resolvedHostedTelegramModelRef -LocalReviewModelRef $ollamaState.ResolvedLocalReviewModelRef -LocalCoderModelRef $ollamaState.ResolvedLocalCoderModelRef -RemoteReviewModelRef $ollamaState.ResolvedRemoteReviewModelRef -RemoteCoderModelRef $ollamaState.ResolvedRemoteCoderModelRef
 
-Write-Step "Restarting gateway after config changes"
+Write-Step "Recreating gateway after config changes"
 Push-Location $config.repoPath
 try {
-    $null = Invoke-External -FilePath "docker" -Arguments @("compose", "restart", "openclaw-gateway")
+    $null = Invoke-External -FilePath "docker" -Arguments @("compose", "up", "-d", "--force-recreate", "openclaw-gateway")
 }
 finally {
     Pop-Location
 }
 
-Wait-ForGateway -HealthUrl $config.verification.healthUrl
+Ensure-GatewayRuntimeDepsDir -ContainerName "openclaw-openclaw-gateway-1"
+
+Wait-ForGateway -HealthUrl $config.verification.healthUrl -MaxAttempts 300
+Wait-ForGatewayRuntimeReady -ContainerName "openclaw-openclaw-gateway-1" -MaxAttempts 300
 
 Write-Step "Configuring Tailscale Serve"
 Ensure-TailscaleServe -Config $config
@@ -2960,6 +3052,7 @@ if ($config.PSObject.Properties.Name -contains "watchdog" -and $config.watchdog.
 
 Write-Host ""
 Write-Host "Bootstrap complete." -ForegroundColor Green
+Write-Host "Bootstrap live log: $script:ToolkitBootstrapTranscriptPath" -ForegroundColor DarkGray
 Write-Host "Private dashboard: $(tailscale serve status | Select-Object -First 1)"
 Write-Host ""
 Write-Host "Recommended next commands:" -ForegroundColor Cyan
@@ -2978,5 +3071,15 @@ if (Test-ToolkitAgentEnabled -AgentConfig (Get-BootstrapAgentByKey -Config $conf
         Write-WarnLine "Gemini is configured as an optional hosted provider, but OpenClaw is not authenticated with Gemini yet."
     }
 }
+
+if ($script:ToolkitBootstrapTranscriptActive) {
+    try {
+        Stop-Transcript | Out-Null
+    }
+    catch {
+    }
+    $script:ToolkitBootstrapTranscriptActive = $false
+}
+
 
 

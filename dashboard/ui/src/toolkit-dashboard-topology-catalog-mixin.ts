@@ -7,6 +7,36 @@ export const ToolkitDashboardTopologyCatalogMixin = <TBase extends Constructor<L
   class ToolkitDashboardTopologyCatalogMixin extends Base {
     [key: string]: any;
 
+    getGatewayPortFromConfig(config: any) {
+      const parsed = Number(config?.gatewayPort);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 18789;
+    }
+
+    getToolkitDashboardPortFromConfig(config: any) {
+      const parsed = Number(config?.toolkitDashboard?.port);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 18792;
+    }
+
+    ensureToolkitNetworkConfig(config: any) {
+      const clone = config || {};
+      if (!clone.toolkitDashboard || typeof clone.toolkitDashboard !== 'object') {
+        clone.toolkitDashboard = {};
+      }
+      if (!clone.tailscale || typeof clone.tailscale !== 'object') {
+        clone.tailscale = {};
+      }
+
+      const gatewayPort = this.getGatewayPortFromConfig(clone);
+      const toolkitPort = this.getToolkitDashboardPortFromConfig(clone);
+
+      clone.gatewayPort = gatewayPort;
+      clone.toolkitDashboard.port = toolkitPort;
+      clone.tailscale.proxyTarget = `http://127.0.0.1:${gatewayPort}`;
+      clone.tailscale.toolkitProxyTarget = `http://127.0.0.1:${toolkitPort}`;
+      clone.tailscale.enableServe = this.normalizeBoolean(clone.tailscale.enableServe, true);
+      return clone;
+    }
+
     getConfigEndpoints() {
       return this.getConfigEndpointsFrom(this.config);
     }
@@ -134,6 +164,62 @@ export const ToolkitDashboardTopologyCatalogMixin = <TBase extends Constructor<L
       return 'hosted';
     }
 
+    normalizeAgentModelCandidates(agent: any, endpoint?: any) {
+      if (!agent || typeof agent !== 'object') {
+        return [];
+      }
+
+      const allowedRefs = endpoint
+        ? new Set(this.getEndpointModelOptions(endpoint).map((option: any) => option.ref))
+        : null;
+
+      const normalizedRefs: string[] = [];
+      const seen = new Set<string>();
+      const primaryRef = typeof agent?.modelRef === 'string' ? agent.modelRef.trim() : '';
+
+      const pushRef = (rawRef: any) => {
+        const ref = typeof rawRef === 'string' ? rawRef.trim() : '';
+        if (!ref || seen.has(ref)) {
+          return;
+        }
+        if (allowedRefs && !allowedRefs.has(ref)) {
+          return;
+        }
+        seen.add(ref);
+        normalizedRefs.push(ref);
+      };
+
+      pushRef(primaryRef);
+      if (Array.isArray(agent?.candidateModelRefs)) {
+        for (const ref of agent.candidateModelRefs) {
+          pushRef(ref);
+        }
+      }
+
+      agent.candidateModelRefs = normalizedRefs;
+      if ((!primaryRef || (allowedRefs && !allowedRefs.has(primaryRef))) && normalizedRefs.length > 0) {
+        agent.modelRef = normalizedRefs[0];
+      }
+
+      return normalizedRefs;
+    }
+
+    getAgentPrimaryModelOptions(agent: any, endpoint?: any) {
+      const selectedEndpoint = endpoint || this.resolveAgentEndpoint(agent);
+      const endpointOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
+      const candidateRefs = this.normalizeAgentModelCandidates(agent, selectedEndpoint);
+      if (candidateRefs.length === 0) {
+        return endpointOptions;
+      }
+
+      const optionMap = new Map(endpointOptions.map((option: any) => [option.ref, option]));
+      return candidateRefs.map((ref: string) => optionMap.get(ref) || {
+        ref,
+        label: ref,
+        kind: ref.startsWith('ollama/') ? 'local' : 'hosted'
+      });
+    }
+
     sanitizeAgentRecord(agent: any, key?: string) {
       const clone = JSON.parse(JSON.stringify(agent || {}));
       if (key) clone.key = key;
@@ -158,12 +244,15 @@ export const ToolkitDashboardTopologyCatalogMixin = <TBase extends Constructor<L
       if (typeof clone.modelRef !== 'string') {
         clone.modelRef = '';
       }
+      this.normalizeAgentModelCandidates(clone);
       clone.modelSource = this.inferModelSourceFromAgent(clone);
       return clone;
     }
 
     buildPersistedConfig(config: any) {
       const clone = JSON.parse(JSON.stringify(config));
+      this.ensureToolkitNetworkConfig(clone);
+      this.ensureToolkitWebConfig(clone);
       const defaultTelegramAccountId = (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default';
       clone.agents = clone.agents || { telegramRouting: {}, list: [] };
       clone.agents.telegramRouting = clone.agents.telegramRouting || {};
@@ -241,6 +330,8 @@ export const ToolkitDashboardTopologyCatalogMixin = <TBase extends Constructor<L
     sanitizeConfigModelNames(config: any) {
       const clone = JSON.parse(JSON.stringify(config));
       if (!clone) return clone;
+      this.ensureToolkitNetworkConfig(clone);
+      this.ensureToolkitWebConfig(clone);
       const defaultTelegramAccountId = (clone.telegram?.defaultAccount && String(clone.telegram.defaultAccount).trim()) || 'default';
       if (!clone.agents || typeof clone.agents !== 'object') {
         clone.agents = { telegramRouting: {}, list: [] };

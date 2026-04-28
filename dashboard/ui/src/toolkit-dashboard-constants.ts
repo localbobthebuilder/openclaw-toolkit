@@ -59,5 +59,6 @@ export const MINIMAL_CHAT_ONLY_ALLOW = ['message'];
 export const MINIMAL_CHAT_ONLY_DENY = AVAILABLE_TOOL_OPTIONS
   .map((tool) => tool.id)
   .filter((toolId) => !MINIMAL_CHAT_ONLY_ALLOW.includes(toolId));
+export const DELEGATION_CONTROLLED_TOOL_IDS = ['sessions_spawn', 'subagents'] as const;
 export const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive'] as const;
 export const TOOL_CHOICE_OPTIONS = ['', 'auto', 'required', 'none'] as const;

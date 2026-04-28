@@ -14,8 +14,10 @@ import { ToolkitDashboardTopologyMixin } from './toolkit-dashboard-topology-mixi
 import { ToolkitDashboardTopologyAssignmentMixin } from './toolkit-dashboard-topology-assignment-mixin';
 import { ToolkitDashboardTopologyGraphMixin } from './toolkit-dashboard-topology-graph-mixin';
 import { ToolkitDashboardTopologySessionMixin } from './toolkit-dashboard-topology-session-mixin';
+import { ToolkitDashboardTopologyToolsMixin } from './toolkit-dashboard-topology-tools-mixin';
 import { ToolkitDashboardTopologyViewMixin } from './toolkit-dashboard-topology-view-mixin';
 import { ToolkitDashboardShellViewMixin } from './toolkit-dashboard-shell-view-mixin';
+import { ToolkitDashboardWebConfigMixin } from './toolkit-dashboard-web-config-mixin';
 import { ToolkitDashboardWorkspacesMixin } from './toolkit-dashboard-workspaces-mixin';
 
 type Constructor<T = {}> = new (...args: any[]) => T;
@@ -24,7 +26,8 @@ export const ToolkitDashboardRenderMixin = <TBase extends Constructor<LitElement
   class ToolkitDashboardRenderMixin extends (() => {
     const WithTelegram = ToolkitDashboardTelegramMixin(Base);
     const WithConfig = ToolkitDashboardConfigMixin(WithTelegram);
-    const WithTopology = ToolkitDashboardTopologyMixin(WithConfig);
+    const WithWebConfig = ToolkitDashboardWebConfigMixin(WithConfig);
+    const WithTopology = ToolkitDashboardTopologyMixin(WithWebConfig);
     const WithModels = ToolkitDashboardTopologyModelsMixin(WithTopology);
     const WithModelsView = ToolkitDashboardTopologyModelsViewMixin(WithModels);
     const WithCatalog = ToolkitDashboardTopologyCatalogMixin(WithModelsView);
@@ -34,7 +37,8 @@ export const ToolkitDashboardRenderMixin = <TBase extends Constructor<LitElement
     const WithStatusView = ToolkitDashboardStatusViewMixin(WithTelegramLogic);
     const WithGraph = ToolkitDashboardTopologyGraphMixin(WithStatusView);
     const WithSession = ToolkitDashboardTopologySessionMixin(WithGraph);
-    const WithAssignment = ToolkitDashboardTopologyAssignmentMixin(WithSession);
+    const WithTools = ToolkitDashboardTopologyToolsMixin(WithSession);
+    const WithAssignment = ToolkitDashboardTopologyAssignmentMixin(WithTools);
     const WithShell = ToolkitDashboardShellViewMixin(WithAssignment);
     const WithTopologyView = ToolkitDashboardTopologyViewMixin(WithShell);
     const WithWorkspaces = ToolkitDashboardWorkspacesMixin(WithTopologyView);

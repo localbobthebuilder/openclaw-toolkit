@@ -7,6 +7,9 @@
   "envTemplatePath": "openclaw.env.template",
   "dockerSetupScriptRelativePath": "scripts/docker/setup.sh",
   "gatewayPort": 18789,
+  "toolkitDashboard": {
+    "port": 18792
+  },
   "bridgePort": 18790,
   "gatewayBind": "lan",
   "gatewayAuthRateLimit": {
@@ -123,9 +126,51 @@
     "echoTranscript": false,
     "timeoutSeconds": 120
   },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "duckduckgo",
+        "maxResults": 5,
+        "timeoutSeconds": 30,
+        "cacheTtlMinutes": 15
+      },
+      "fetch": {}
+    }
+  },
+  "plugins": {
+    "entries": {
+      "duckduckgo": {
+        "enabled": true,
+        "config": {
+          "webSearch": {
+            "safeSearch": "moderate"
+          }
+        }
+      },
+      "searxng": {
+        "enabled": true,
+        "config": {
+          "webSearch": {}
+        }
+      },
+      "firecrawl": {
+        "enabled": true,
+        "config": {
+          "webSearch": {},
+          "webFetch": {
+            "onlyMainContent": true,
+            "maxAgeMs": 172800000,
+            "timeoutSeconds": 60
+          }
+        }
+      }
+    }
+  },
   "tailscale": {
     "enableServe": true,
-    "proxyTarget": "http://127.0.0.1:18789"
+    "proxyTarget": "http://127.0.0.1:18789",
+    "toolkitProxyTarget": "http://127.0.0.1:18792"
   },
   "watchdog": {
     "installScheduledTask": false,

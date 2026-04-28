@@ -48,6 +48,10 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
   @state() topologyAgentSessions: Array<{ key: string; sessionId?: string; agentId: string; label: string; url: string; createdAt: number }> = [];
   @state() topologyAgentSessionBusyKey: string | null = null;
   @state() topologyAgentSessionError: string = '';
+  @state() topologyAgentRuntimeToolsByAgent: Record<string, any> = {};
+  @state() topologyAgentRuntimeToolErrorByAgent: Record<string, string> = {};
+  @state() topologyRuntimeToolSessionByAgent: Record<string, string> = {};
+  @state() topologyAgentRuntimeToolsLoadingAgentId: string | null = null;
   @state() showModelSelector: boolean = false;
   @state() selectorTarget: string | null = null; // 'tune' or 'candidate' or 'endpoint-hosted'
   ws: WebSocket | null = null;
@@ -189,6 +193,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .selectable-item:hover { border-color: #00bcd4; }
     .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .tag { background: #2a2a2a; border: 1px solid #444; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
+    .tag-delegation-disabled { background: rgba(244, 67, 54, 0.14); border-color: #8b2d2d; color: #ffb3b3; }
     .tag-remove { cursor: pointer; color: #f44336; font-weight: bold; }
     .tool-label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
     .tool-note-badge { display: inline-flex; align-items: center; border: 1px solid #245b68; border-radius: 999px; padding: 1px 6px; font-size: 0.64rem; line-height: 1.2; font-weight: 700; color: #7fe8ff; background: rgba(0, 188, 212, 0.08); white-space: nowrap; }
@@ -228,6 +233,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     .step-desc { font-size: 0.8rem; color: #888; }
     .step-done-badge { color: #4caf50; font-size: 0.75rem; font-weight: bold; }
     .setup-step .btn { white-space: nowrap; flex-shrink: 0; }
+    .setup-step .btn:disabled { background: #2e2e2e; color: #7e7e7e; border: 1px solid #454545; opacity: 1; }
     .topology-shell { display: flex; flex-direction: column; gap: 20px; }
     .topology-main-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
     .topology-main-grid.inspector-open { grid-template-columns: minmax(0, 1fr) 400px; }
@@ -1045,7 +1051,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
       return;
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.port === '18791' ? '127.0.0.1:18791' : window.location.host;
+    const host = window.location.host;
     this.ws = new WebSocket(`${protocol}//${host}`);
     this.ws.onopen = () => {
       if (this.reconnectTimer !== null) {
@@ -1308,7 +1314,7 @@ export class ToolkitDashboard extends ToolkitDashboardRenderMixin(LitElement) {
     if (!saved) {
       return;
     }
-    this.runCommand('agents');
+    this.runCommand('apply-toolkit-config');
   }
 
   addAgent() {

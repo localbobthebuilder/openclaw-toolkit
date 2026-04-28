@@ -7,6 +7,9 @@
   "envTemplatePath": "openclaw.env.template",
   "dockerSetupScriptRelativePath": "scripts/docker/setup.sh",
   "gatewayPort": 18789,
+  "toolkitDashboard": {
+    "port": 18792
+  },
   "bridgePort": 18790,
   "gatewayBind": "lan",
   "gatewayAuthRateLimit": {
@@ -121,7 +124,6 @@
           "sessions_yield",
           "subagents",
           "session_status",
-          "code_execution",
           "process"
         ],
         "deny": [
@@ -205,9 +207,44 @@
     "echoTranscript": false,
     "timeoutSeconds": 120
   },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "duckduckgo",
+        "maxResults": 5,
+        "timeoutSeconds": 30,
+        "cacheTtlMinutes": 15
+      },
+      "fetch": {}
+    }
+  },
+  "plugins": {
+    "entries": {
+      "duckduckgo": {
+        "enabled": true,
+        "config": {
+          "webSearch": {
+            "safeSearch": "off"
+          }
+        }
+      },
+      "firecrawl": {
+        "enabled": true,
+        "config": {
+          "webFetch": {
+            "onlyMainContent": true,
+            "maxAgeMs": 172800000,
+            "timeoutSeconds": 60
+          }
+        }
+      }
+    }
+  },
   "tailscale": {
     "enableServe": true,
-    "proxyTarget": "http://127.0.0.1:18789"
+    "proxyTarget": "http://127.0.0.1:18789",
+    "toolkitProxyTarget": "http://127.0.0.1:18792"
   },
   "watchdog": {
     "installScheduledTask": false,
@@ -269,6 +306,14 @@
       "managedPaths": [
         "extensions/ollama/src/stream.ts",
         "extensions/ollama/src/stream-runtime.test.ts"
+      ]
+    },
+    {
+      "enabled": true,
+      "name": "web-search-explicit-provider-precedence",
+      "path": ".\\upstream-patches\\openclaw-web-search-explicit-provider-precedence.patch",
+      "managedPaths": [
+        "src/agents/tools/web-search.ts"
       ]
     }
   ],
@@ -853,7 +898,7 @@
         "default": true,
         "sandboxMode": "off",
         "subagents": {
-          "enabled": true,
+          "enabled": false,
           "requireAgentId": true,
           "allowAgents": [
             "research",
@@ -866,6 +911,7 @@
         "modelRef": "ollama/gemma4:31b",
         "thinkingDefault": "high",
         "candidateModelRefs": [
+          "ollama/gemma4:31b",
           "ollama/gemma4:latest",
           "ollama/gemma4:26b",
           "ollama/qwen3-coder:30b",
@@ -882,7 +928,7 @@
       {
         "key": "researchAgent",
         "id": "research",
-        "name": "Gemini Research",
+        "name": "Research",
         "enabled": true,
         "toolsetKeys": [
           "research"
@@ -891,13 +937,14 @@
           "AGENTS.md": "research"
         },
         "subagents": {
-          "enabled": true,
+          "enabled": false,
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "google/gemini-3-flash-preview",
+        "modelRef": "ollama/qwen3.6:35b-a3b-q4_K_M",
         "thinkingDefault": "high",
         "candidateModelRefs": [
+          "ollama/qwen3.6:35b-a3b-q4_K_M",
           "google/gemini-3.1-flash-lite-preview",
           "google/gemini-3-flash-preview"
         ]
@@ -918,7 +965,9 @@
         },
         "modelRef": "ollama/glm-4.7-flash:latest",
         "thinkingDefault": "high",
-        "candidateModelRefs": [],
+        "candidateModelRefs": [
+          "ollama/glm-4.7-flash:latest"
+        ],
         "toolsetKeys": []
       },
       {
@@ -961,7 +1010,9 @@
         },
         "modelRef": "ollama/qwen3.5:35b-a3b",
         "thinkingDefault": "high",
-        "candidateModelRefs": []
+        "candidateModelRefs": [
+          "ollama/qwen3.5:35b-a3b"
+        ]
       },
       {
         "key": "localCoderAgent",
@@ -976,13 +1027,14 @@
         },
         "sandboxMode": "off",
         "subagents": {
-          "enabled": true,
+          "enabled": false,
           "requireAgentId": true,
           "allowAgents": []
         },
-        "modelRef": "ollama/qwen3-coder:30b",
+        "modelRef": "ollama/qwen3.6:35b-a3b-q4_K_M",
         "thinkingDefault": "off",
         "candidateModelRefs": [
+          "ollama/qwen3.6:35b-a3b-q4_K_M",
           "ollama/qwen3-coder:30b",
           "ollama/qwen3.5:35b-a3b",
           "ollama/glm-4.7-flash:latest"

@@ -2,6 +2,10 @@ function Get-ToolkitGatewayNodeCompileCachePath {
     return "/var/tmp/openclaw-compile-cache"
 }
 
+function Get-ToolkitGatewayPluginStageDir {
+    return "/var/tmp/openclaw-plugin-runtime-deps"
+}
+
 function Get-ToolkitGatewayOpenClawNoRespawnValue {
     return "1"
 }
@@ -25,6 +29,8 @@ function Get-ToolkitGatewayDockerExecArgs {
     }
     $dockerArgs.Add("-e")
     $dockerArgs.Add("NODE_COMPILE_CACHE=$(Get-ToolkitGatewayNodeCompileCachePath)")
+    $dockerArgs.Add("-e")
+    $dockerArgs.Add("OPENCLAW_PLUGIN_STAGE_DIR=$(Get-ToolkitGatewayPluginStageDir)")
     $dockerArgs.Add($ContainerName)
 
     foreach ($part in @($Command)) {

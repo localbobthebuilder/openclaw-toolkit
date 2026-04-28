@@ -20,6 +20,7 @@ export const ToolkitDashboardAgentConfigViewMixin = <TBase extends Constructor<L
       const selectedEndpoint = this.resolveAgentEndpoint(agent);
       const effectiveEndpointKey = selectedEndpoint?.key || '';
       const endpointModelOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
+      const primaryModelOptions = this.getAgentPrimaryModelOptions(agent, selectedEndpoint);
       const forceSandboxOff = (typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '') === 'off';
       const sandboxModeOverride = typeof agent.sandboxMode === 'string' ? agent.sandboxMode : '';
       const thinkingDefault = this.normalizeThinkingDefault(agent.thinkingDefault);
@@ -98,18 +99,20 @@ export const ToolkitDashboardAgentConfigViewMixin = <TBase extends Constructor<L
         <div class="grid-2">
           <div class="form-group">
             <label>Primary Model</label>
-            <select ?disabled=${!selectedEndpoint || endpointModelOptions.length === 0} @change=${(e: any) => {
+            <select ?disabled=${!selectedEndpoint || primaryModelOptions.length === 0} @change=${(e: any) => {
               agent.modelRef = e.target.value;
+              this.normalizeAgentModelCandidates(agent, selectedEndpoint);
               this.syncAgentModelSource(agent);
               this.requestUpdate();
             }}>
-              <option value="">${selectedEndpoint ? 'Select Endpoint Model' : 'Choose an endpoint first'}</option>
-              ${endpointModelOptions.map((option: any) => html`
+              <option value="">${selectedEndpoint ? (primaryModelOptions.length === 0 ? 'Add candidate models first' : 'Select Primary Candidate') : 'Choose an endpoint first'}</option>
+              ${primaryModelOptions.map((option: any) => html`
                 <option value=${option.ref} ?selected=${agent.modelRef === option.ref}>${option.kind === 'local' ? '[Local]' : '[Hosted]'} ${option.label}</option>
               `)}
             </select>
             ${selectedEndpoint && endpointModelOptions.length === 0 ? html`<p style="color: #f44336; font-size: 0.7rem; margin-top: 4px;">This endpoint has no models configured yet. Add local or hosted models on the Endpoints tab first.</p>` : ''}
-            ${selectedEndpoint && endpointModelOptions.length > 0 ? html`<p style="color: #888; font-size: 0.75rem; margin-top: 4px;">Primary and candidate models are limited to the currently selected endpoint.</p>` : ''}
+            ${selectedEndpoint && endpointModelOptions.length > 0 && primaryModelOptions.length === 0 ? html`<p style="color: #888; font-size: 0.75rem; margin-top: 4px;">Pick candidate models below first. The primary model must be one of those candidates.</p>` : ''}
+            ${selectedEndpoint && primaryModelOptions.length > 0 ? html`<p style="color: #888; font-size: 0.75rem; margin-top: 4px;">The primary model is chosen from this agent's candidate list, which is limited to the selected endpoint.</p>` : ''}
           </div>
           <div class="form-group">
             <label>Default Thinking</label>
@@ -236,7 +239,7 @@ export const ToolkitDashboardAgentConfigViewMixin = <TBase extends Constructor<L
     renderAgentToolsConfig(agent: any) {
       const selectedEndpoint = this.resolveAgentEndpoint(agent);
       const endpointModelOptions = selectedEndpoint ? this.getEndpointModelOptions(selectedEndpoint) : [];
-      const candidateModelRefs = Array.isArray(agent.candidateModelRefs) ? agent.candidateModelRefs : (agent.candidateModelRefs = []);
+      const candidateModelRefs = this.normalizeAgentModelCandidates(agent, selectedEndpoint);
       const toolsetKeys = this.ensureAgentToolsetKeys(agent);
       const appliedToolsets = this.getAgentAppliedToolsets(agent);
       const directToolOverrides = this.normalizeAgentToolOverrides(agent) || { allow: [], deny: [] };
@@ -255,7 +258,12 @@ export const ToolkitDashboardAgentConfigViewMixin = <TBase extends Constructor<L
             (ref: string, idx: number) => html`
               <div class="tag">
                 ${ref}
-                <span class="tag-remove" @click=${() => { agent.candidateModelRefs.splice(idx, 1); this.requestUpdate(); }}>×</span>
+                <span class="tag-remove" @click=${() => {
+                  agent.candidateModelRefs.splice(idx, 1);
+                  this.normalizeAgentModelCandidates(agent, selectedEndpoint);
+                  this.syncAgentModelSource(agent);
+                  this.requestUpdate();
+                }}>×</span>
               </div>
             `,
             endpointModelOptions
@@ -268,6 +276,10 @@ export const ToolkitDashboardAgentConfigViewMixin = <TBase extends Constructor<L
               if (!agent.candidateModelRefs) agent.candidateModelRefs = [];
               if (!agent.candidateModelRefs.includes(value)) {
                 agent.candidateModelRefs.push(value);
+                if (!agent.modelRef) {
+                  agent.modelRef = value;
+                }
+                this.normalizeAgentModelCandidates(agent, selectedEndpoint);
                 this.syncAgentModelSource(agent);
                 this.requestUpdate();
               }
@@ -276,6 +288,7 @@ export const ToolkitDashboardAgentConfigViewMixin = <TBase extends Constructor<L
             undefined,
             !selectedEndpoint || endpointModelOptions.length === 0
           )}
+          <div class="help-text" style="margin-top: 8px;">Candidate order matters: OpenClaw fallbacks are built from this set, and the primary model must stay inside it.</div>
         </div>
 
         <div class="card" style="margin-top: 20px; margin-bottom: 20px;">

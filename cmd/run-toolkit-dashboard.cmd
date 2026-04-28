@@ -5,10 +5,12 @@ set "SCRIPT_DIR=%~dp0"
 set "DASHBOARD_DIR=%SCRIPT_DIR%..\dashboard"
 set "UI_DIR=%DASHBOARD_DIR%\ui"
 set "ACTION=%~1"
+set "PORT=18792"
+for /f "usebackq delims=" %%p in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%..\scripts\get-toolkit-dashboard-port.ps1"`) do set "PORT=%%p"
 
 if /I "%ACTION%"=="stop" (
     echo Stopping OpenClaw Toolkit Dashboard...
-    for /f "tokens=5" %%a in ('netstat -aon ^| findstr :18791 ^| findstr LISTENING') do (
+    for /f "tokens=5" %%a in ('netstat -aon ^| findstr :%PORT% ^| findstr LISTENING') do (
         echo Killing process %%a...
         taskkill /f /pid %%a > nul 2>&1
     )
@@ -18,8 +20,8 @@ if /I "%ACTION%"=="stop" (
 
 echo Starting OpenClaw Toolkit Dashboard...
 
-echo Checking for existing dashboard process on port 18791...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :18791 ^| findstr LISTENING') do (
+echo Checking for existing dashboard process on port %PORT%...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :%PORT% ^| findstr LISTENING') do (
     echo Killing existing process %%a...
     taskkill /f /pid %%a > nul 2>&1
 )
@@ -32,10 +34,10 @@ if not exist "%UI_DIR%\dist" (
 )
 
 echo Opening dashboard in browser...
-powershell.exe -NoProfile -Command "Start-Process 'http://127.0.0.1:18791'"
+powershell.exe -NoProfile -Command "Start-Process 'http://127.0.0.1:%PORT%'"
 
 echo.
-echo Dashboard is running on http://127.0.0.1:18791
+echo Dashboard is running on http://127.0.0.1:%PORT%
 echo Close this window or press Ctrl+C to stop.
 echo.
 

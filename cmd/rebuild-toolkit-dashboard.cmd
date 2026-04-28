@@ -4,6 +4,8 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "DASHBOARD_DIR=%SCRIPT_DIR%..\dashboard"
 set "UI_DIR=%DASHBOARD_DIR%\ui"
+set "PORT=18792"
+for /f "usebackq delims=" %%p in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%..\scripts\get-toolkit-dashboard-port.ps1"`) do set "PORT=%%p"
 
 echo Rebuilding OpenClaw Toolkit Dashboard...
 echo.
@@ -20,8 +22,8 @@ popd
 echo UI built successfully.
 echo.
 
-echo [2/3] Stopping existing dashboard server on port 18791...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :18791 ^| findstr LISTENING 2^>nul') do (
+echo [2/3] Stopping existing dashboard server on port %PORT%...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :%PORT% ^| findstr LISTENING 2^>nul') do (
     echo   Killing PID %%a...
     taskkill /f /pid %%a > nul 2>&1
 )
@@ -32,6 +34,6 @@ start /B "Toolkit Dashboard Backend" node "%DASHBOARD_DIR%\server.js"
 timeout /t 2 /nobreak > nul
 
 echo.
-echo Dashboard rebuilt and restarted on http://127.0.0.1:18791
+echo Dashboard rebuilt and restarted on http://127.0.0.1:%PORT%
 echo Refresh your browser tab to pick up the new build.
 exit /b 0

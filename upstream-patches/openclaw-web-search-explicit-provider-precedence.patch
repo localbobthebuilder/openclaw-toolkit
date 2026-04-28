@@ -1,0 +1,30 @@
+diff --git a/src/agents/tools/web-search.ts b/src/agents/tools/web-search.ts
+index 7eada7a71..3c6d9c622 100644
+--- a/src/agents/tools/web-search.ts
++++ b/src/agents/tools/web-search.ts
+@@ -1,6 +1,7 @@
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import { resolveManifestContractOwnerPluginId } from "../../plugins/plugin-registry.js";
+ import type { RuntimeWebSearchMetadata } from "../../secrets/runtime-web-tools.types.js";
++import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
+ import {
+   resolveWebSearchDefinition,
+   resolveWebSearchProviderId,
+@@ -15,9 +16,17 @@ export function createWebSearchTool(options?: {
+   sandboxed?: boolean;
+   runtimeWebSearch?: RuntimeWebSearchMetadata;
+ }): AnyAgentTool | null {
++  const configuredProviderId = normalizeLowercaseStringOrEmpty(
++    options?.config?.tools?.web?.search &&
++      typeof options.config.tools.web.search === "object" &&
++      "provider" in options.config.tools.web.search
++      ? options.config.tools.web.search.provider
++      : "",
++  );
+   const runtimeProviderId =
+     options?.runtimeWebSearch?.selectedProvider ?? options?.runtimeWebSearch?.providerConfigured;
+   const preferRuntimeProviders =
++    !configuredProviderId &&
+     Boolean(runtimeProviderId) &&
+     !resolveManifestContractOwnerPluginId({
+       contract: "webSearchProviders",

@@ -65,6 +65,8 @@ export const ToolkitDashboardShellViewMixin = <TBase extends Constructor<LitElem
           <header class="config-toolbar">
             <div class="config-toolbar-tabs">
               <button type="button" class="config-toolbar-tab ${this.configSection === 'general' ? 'active' : ''}" @click=${() => this.configSection = 'general'}>General</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'web' ? 'active' : ''}" @click=${() => this.configSection = 'web'}>Web Search</button>
+              <button type="button" class="config-toolbar-tab ${this.configSection === 'network' ? 'active' : ''}" @click=${() => this.configSection = 'network'}>Network</button>
               <button type="button" class="config-toolbar-tab ${this.configSection === 'sandbox' ? 'active' : ''}" @click=${() => this.configSection = 'sandbox'}>Sandbox</button>
               <button type="button" class="config-toolbar-tab ${this.configSection === 'endpoints' ? 'active' : ''}" @click=${() => this.configSection = 'endpoints'}>Endpoints</button>
               <button type="button" class="config-toolbar-tab ${this.configSection === 'models' ? 'active' : ''}" @click=${() => this.configSection = 'models'}>Models Catalog</button>
@@ -95,6 +97,8 @@ export const ToolkitDashboardShellViewMixin = <TBase extends Constructor<LitElem
     renderConfigSection() {
       switch (this.configSection) {
         case 'general': return this.renderGeneralConfig();
+        case 'web': return this.renderWebConfig();
+        case 'network': return this.renderNetworkConfig();
         case 'sandbox': return this.renderSandboxConfig();
         case 'endpoints': return this.renderEndpointsConfig();
         case 'models': return this.renderModelsConfig();
@@ -255,6 +259,39 @@ export const ToolkitDashboardShellViewMixin = <TBase extends Constructor<LitElem
               <label>Sandbox Image</label>
               <input type="text" .value=${this.config.sandbox.sandboxImage || ''} @input=${(e: any) => { this.config.sandbox.sandboxImage = e.target.value; this.requestUpdate(); }}>
             </div>
+          </div>
+        </div>
+      `;
+    }
+
+    renderNetworkConfig() {
+      const gatewayPort = this.getGatewayPortFromConfig(this.config);
+      const toolkitPort = this.getToolkitDashboardPortFromConfig(this.config);
+      return html`
+        <div class="card">
+          <div class="card-header"><h3>Tailscale</h3></div>
+          <div class="form-group">
+            <label class="toggle-switch">
+              <input type="checkbox" ?checked=${this.config?.tailscale?.enableServe} @change=${(e: any) => { if (!this.config.tailscale) this.config.tailscale = {}; this.config.tailscale.enableServe = e.target.checked; this.requestUpdate(); }}>
+              Enable Tailscale Serve (phone access)
+            </label>
+            <div class="help-text">When enabled, Save & Apply will refresh Tailscale Serve so your phone can reach both the official OpenClaw dashboard and this toolkit dashboard.</div>
+          </div>
+          <div class="form-group">
+            <label>Toolkit Dashboard Port</label>
+            <input type="number" min="1" step="1" .value=${String(toolkitPort)} @input=${(e: any) => {
+              if (!this.config.toolkitDashboard) this.config.toolkitDashboard = {};
+              const parsed = Number(e.target.value);
+              this.config.toolkitDashboard.port = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 18792;
+              this.requestUpdate();
+            }}>
+            <div class="help-text">This controls only the toolkit dashboard backend. The official OpenClaw gateway keeps using its own fixed port.</div>
+          </div>
+          <div class="form-group">
+            <label>Live Tailscale Routes</label>
+            <div class="help-text">OpenClaw root route <code>/</code> stays on <code>http://127.0.0.1:${gatewayPort}</code>.</div>
+            <div class="help-text">Toolkit route <code>/toolkit</code> will point to <code>http://127.0.0.1:${toolkitPort}</code>.</div>
+            <div class="help-text">Use Save Only to keep the change in config. Use Save & Apply to restart managed services and refresh Tailscale Serve.</div>
           </div>
         </div>
       `;

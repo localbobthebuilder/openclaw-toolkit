@@ -11,7 +11,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = 18791;
 const toolkitDir = path.resolve(__dirname, '..');
 const configPath = path.join(toolkitDir, 'openclaw-bootstrap.config.json');
 const validAgentBootstrapMarkdownFiles = [
@@ -46,12 +45,25 @@ const defaultWhisperModels = [
   'turbo'
 ];
 
+function getToolkitDashboardPort(config) {
+  const parsed = Number(config?.toolkitDashboard?.port);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 18792;
+}
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+  next();
+});
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
   next();
 });
 
@@ -118,6 +130,8 @@ function getWhisperModels() {
 function readToolkitConfig() {
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
+
+const port = getToolkitDashboardPort(readToolkitConfig());
 
 function isValidAgentId(value) {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value.trim());
@@ -301,6 +315,168 @@ function getLiveOpenClawConfig() {
   const toolkitConfig = readToolkitConfig();
   const liveConfigPath = path.join(getToolkitHostConfigDir(toolkitConfig), 'openclaw.json');
   return readJsonFileIfExists(liveConfigPath) || toolkitConfig;
+}
+
+function normalizeUniqueStringList(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const normalized = [];
+  for (const value of values) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    normalized.push(text);
+  }
+  return normalized;
+}
+
+function getLiveAgentConfig(agentId) {
+  const liveConfig = getLiveOpenClawConfig();
+  const agents = Array.isArray(liveConfig?.agents?.list) ? liveConfig.agents.list : [];
+  return agents.find((entry) => String(entry?.id || '').trim() === agentId) || null;
+}
+
+function getAgentSessionStorePath(agentId) {
+  const toolkitConfig = readToolkitConfig();
+  const hostConfigDir = getToolkitHostConfigDir(toolkitConfig);
+  return path.join(hostConfigDir, 'agents', agentId, 'sessions', 'sessions.json');
+}
+
+function summarizeAgentSessionEntry(sessionKey, entry) {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const updatedAt = Number(entry.updatedAt);
+  const startedAt = Number(entry.startedAt);
+  const suffix = String(sessionKey).split(':').slice(2).join(':') || sessionKey;
+  const originLabel = typeof entry?.origin?.label === 'string' ? entry.origin.label.trim() : '';
+  const lastTo = typeof entry?.lastTo === 'string' ? entry.lastTo.trim() : '';
+  const label = originLabel || lastTo || suffix;
+
+  return {
+    key: sessionKey,
+    label,
+    suffix,
+    status: typeof entry.status === 'string' ? entry.status : '',
+    modelProvider: typeof entry.modelProvider === 'string' ? entry.modelProvider : '',
+    model: typeof entry.model === 'string' ? entry.model : '',
+    thinkingLevel: typeof entry.thinkingLevel === 'string' ? entry.thinkingLevel : '',
+    chatType: typeof entry.chatType === 'string' ? entry.chatType : '',
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+    startedAt: Number.isFinite(startedAt) ? startedAt : 0
+  };
+}
+
+function listAgentSessions(agentId) {
+  const storePath = getAgentSessionStorePath(agentId);
+  const raw = readJsonFileIfExists(storePath);
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+
+  return Object.entries(raw)
+    .map(([sessionKey, entry]) => {
+      if (!isValidSessionKey(sessionKey) || !sessionKey.startsWith(`agent:${agentId}:`)) {
+        return null;
+      }
+      return summarizeAgentSessionEntry(sessionKey, entry);
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const delta = (right.updatedAt || 0) - (left.updatedAt || 0);
+      if (delta !== 0) {
+        return delta;
+      }
+      return left.key.localeCompare(right.key);
+    });
+}
+
+function runToolkitScript(scriptPath, wrapperName, args = [], options = {}) {
+  const wrapper = path.join(toolkitDir, 'cmd', 'invoke-toolkit-script.cmd');
+  const result = spawnSync('cmd.exe', [
+    '/c',
+    wrapper,
+    scriptPath,
+    wrapperName,
+    ...args
+  ], {
+    cwd: toolkitDir,
+    encoding: 'utf8',
+    timeout: options.timeoutMs || 120000
+  });
+
+  const stdout = (result.stdout || '').trim();
+  const stderr = (result.stderr || '').trim();
+  if (result.status !== 0 && !options.allowNonZero) {
+    const detail = stderr || stdout || result.error?.message || `Toolkit script failed with exit code ${result.status}`;
+    throw new Error(detail);
+  }
+
+  return {
+    status: result.status ?? 0,
+    stdout,
+    stderr
+  };
+}
+
+function summarizeEffectiveToolInventory(inventory) {
+  const groups = Array.isArray(inventory?.groups) ? inventory.groups : [];
+  const summaryGroups = groups.map((group) => {
+    const tools = Array.isArray(group?.tools) ? group.tools : [];
+    return {
+      id: typeof group?.id === 'string' ? group.id : '',
+      label: typeof group?.label === 'string' ? group.label : '',
+      source: typeof group?.source === 'string' ? group.source : '',
+      tools: tools
+        .map((tool) => {
+          const id = typeof tool?.id === 'string' ? tool.id.trim() : '';
+          if (!id) {
+            return null;
+          }
+          return {
+            id,
+            label: typeof tool?.label === 'string' ? tool.label : id,
+            source: typeof tool?.source === 'string' ? tool.source : '',
+            pluginId: typeof tool?.pluginId === 'string' ? tool.pluginId : '',
+            description: typeof tool?.description === 'string' ? tool.description : ''
+          };
+        })
+        .filter(Boolean)
+    };
+  });
+
+  const toolIds = normalizeUniqueStringList(
+    summaryGroups.flatMap((group) => group.tools.map((tool) => tool.id))
+  );
+
+  return {
+    agentId: typeof inventory?.agentId === 'string' ? inventory.agentId : '',
+    profile: typeof inventory?.profile === 'string' ? inventory.profile : '',
+    toolIds,
+    groups: summaryGroups
+  };
+}
+
+function buildToolRuntimeDiagnostics(liveConfigured, runtimeSummary) {
+  const configuredAllow = normalizeUniqueStringList(liveConfigured?.allow);
+  const configuredDeny = normalizeUniqueStringList(liveConfigured?.deny);
+  const runtimeToolIds = normalizeUniqueStringList(runtimeSummary?.toolIds);
+  const runtimeOnlyTools = runtimeToolIds.filter((toolId) => !configuredAllow.includes(toolId));
+  const configuredMissingFromRuntime = configuredAllow.filter((toolId) => !runtimeToolIds.includes(toolId));
+
+  return {
+    configuredAllow,
+    configuredDeny,
+    runtimeToolIds,
+    configuredMissingFromRuntime,
+    runtimeOnlyTools
+  };
 }
 
 function getAgentThinkingDefault(agentId) {
@@ -636,7 +812,30 @@ app.post('/api/config', (req, res) => {
 
 app.get('/api/status', (req, res) => {
   const statusScript = path.join(toolkitDir, 'scripts', 'status-openclaw.ps1');
-  const child = spawn('powershell.exe', [
+
+  if (!fs.existsSync(statusScript)) {
+    res.status(500).json({ output: `Status script not found at ${statusScript}`, code: -1, error: true });
+    return;
+  }
+
+  // Choose an available PowerShell executable (Windows PowerShell or PowerShell Core)
+  let shellExe = 'powershell.exe';
+  try {
+    const probe = spawnSync('where', [shellExe], { cwd: toolkitDir, encoding: 'utf8', timeout: 2000 });
+    if (probe.status !== 0) {
+      const probe2 = spawnSync('where', ['pwsh'], { cwd: toolkitDir, encoding: 'utf8', timeout: 2000 });
+      if (probe2.status === 0) {
+        shellExe = 'pwsh';
+      } else {
+        res.status(500).json({ output: 'PowerShell not found (powershell.exe or pwsh)', code: -1, error: true });
+        return;
+      }
+    }
+  } catch (err) {
+    // Fall back to default shellExe
+  }
+
+  const child = spawn(shellExe, [
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-File', statusScript
@@ -698,6 +897,67 @@ app.get('/api/gateway-auth', (req, res) => {
     res.json({ token: getGatewayToken() });
   } catch (err) {
     res.status(500).json({ error: 'Failed to read OpenClaw gateway auth token', details: err.message });
+  }
+});
+
+app.get('/api/agents/:agentId/tools-runtime', (req, res) => {
+  try {
+    const agentId = String(req.params?.agentId || '').trim();
+    if (!isValidAgentId(agentId)) {
+      res.status(400).json({ error: 'Invalid agent id' });
+      return;
+    }
+
+    const requestedSessionKey = typeof req.query?.sessionKey === 'string'
+      ? req.query.sessionKey.trim()
+      : '';
+    if (requestedSessionKey && !isValidSessionKey(requestedSessionKey)) {
+      res.status(400).json({ error: 'Invalid session key' });
+      return;
+    }
+
+    const sessions = listAgentSessions(agentId);
+    const selectedSession = requestedSessionKey
+      ? sessions.find((session) => session.key === requestedSessionKey) || null
+      : (sessions[0] || null);
+    if (requestedSessionKey && !selectedSession) {
+      res.status(404).json({ error: 'Session key not found for agent' });
+      return;
+    }
+
+    const liveAgentConfig = getLiveAgentConfig(agentId);
+    const liveConfigured = {
+      allow: normalizeUniqueStringList(liveAgentConfig?.tools?.allow),
+      deny: normalizeUniqueStringList(liveAgentConfig?.tools?.deny),
+      modelPrimary: typeof liveAgentConfig?.model?.primary === 'string' ? liveAgentConfig.model.primary : '',
+      thinkingDefault: typeof liveAgentConfig?.thinkingDefault === 'string' ? liveAgentConfig.thinkingDefault : ''
+    };
+
+    let runtime = null;
+    let runtimeError = '';
+    if (selectedSession) {
+      try {
+        const runtimeResult = callOpenClawGateway('tools.effective', {
+          sessionKey: selectedSession.key,
+          agentId
+        });
+        runtime = summarizeEffectiveToolInventory(runtimeResult);
+      } catch (err) {
+        runtimeError = String(err?.message || err);
+      }
+    }
+
+    res.json({
+      agentId,
+      selectedSessionKey: selectedSession?.key || '',
+      sessions,
+      liveConfigured,
+      runtime,
+      runtimeError,
+      diagnostics: buildToolRuntimeDiagnostics(liveConfigured, runtime)
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to inspect agent runtime tools', details: err.message });
   }
 });
 
@@ -783,6 +1043,40 @@ app.post('/api/agent-sessions/close', (req, res) => {
   }
 });
 
+app.post('/api/agent-sessions/clear', (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const rawAgentId = typeof payload.agentId === 'string' ? payload.agentId.trim() : '';
+    const clearAll = payload.all === true || rawAgentId === 'all';
+
+    if (!clearAll && !isValidAgentId(rawAgentId)) {
+      res.status(400).json({ error: 'Invalid agentId' });
+      return;
+    }
+
+    const scriptPath = path.join(toolkitDir, 'scripts', 'clear-agent-sessions.ps1');
+    const scriptArgs = clearAll
+      ? ['-All', '-Json']
+      : ['-AgentId', rawAgentId, '-Json'];
+    const result = runToolkitScript(scriptPath, 'clear-agent-sessions', scriptArgs, { allowNonZero: true, timeoutMs: 180000 });
+    const output = result.stdout || result.stderr || '';
+    const jsonStart = output.indexOf('{');
+    const jsonText = jsonStart >= 0 ? output.slice(jsonStart).trim() : output.trim();
+    if (!jsonText) {
+      throw new Error('Session cleanup script did not return JSON output.');
+    }
+
+    const parsed = JSON.parse(jsonText);
+    const hadGatewayErrors = Array.isArray(parsed?.results)
+      ? parsed.results.some((entry) => Array.isArray(entry?.gatewayErrors) && entry.gatewayErrors.length > 0)
+      : false;
+
+    res.status(hadGatewayErrors || result.status !== 0 ? 207 : 200).json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to clear OpenClaw agent sessions', details: err.message });
+  }
+});
+
 // Fallback for SPA routing: serve index.html for any other GET requests that weren't matched
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api')) {
@@ -826,9 +1120,26 @@ wss.on('connection', (ws) => {
       const { command, args = [] } = data;
       console.log(`Running command: ${command} ${args.join(' ')}`);
 
-      // Rebuild is handled in-process: build UI, tell client, then process.exit(0)
-      // so the cmd\\run-toolkit-dashboard.cmd restart loop brings the server back up cleanly.
-      if (command === 'toolkit-dashboard-rebuild') {
+      // Explicit command -> script mapping for safer execution
+      const commandMap = {
+        'expose-toolkit-dashboard': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'expose-toolkit-dashboard.ps1') },
+        'apply-toolkit-config': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'apply-toolkit-config.ps1'), restartDashboardOnSuccess: true },
+        'toolkit-dashboard-rebuild': { type: 'rebuild' },
+        'bootstrap': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'bootstrap-openclaw.ps1') },
+        'start': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'start-openclaw.ps1') },
+        'stop': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'stop-openclaw.ps1') },
+        'verify': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'verify-openclaw.ps1') },
+        'prereqs': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'ensure-windows-prereqs.ps1') },
+        'telegram-setup': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'telegram-setup.ps1') },
+        'agents': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'configure-agent-layout.ps1') },
+        'remove-local-model': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'remove-local-model.ps1') },
+        'add-local-model': { type: 'ps1', script: path.join(toolkitDir, 'scripts', 'add-local-model.ps1') }
+      };
+
+      const mapped = commandMap[command];
+
+      if (mapped && mapped.type === 'rebuild') {
+        // Keep existing rebuild behavior
         const uiDir = path.join(toolkitDir, 'dashboard', 'ui');
         ws.send(JSON.stringify({ type: 'stdout', data: '==> Building dashboard UI...\n' }));
         const build = spawn('cmd.exe', ['/c', 'npm run build'], { cwd: uiDir });
@@ -850,6 +1161,37 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      if (mapped && mapped.type === 'ps1') {
+        // Use the cmd\invoke-toolkit-script.cmd wrapper so it will prefer pwsh and show help when needed
+        const wrapper = path.join(toolkitDir, 'cmd', 'invoke-toolkit-script.cmd');
+        const spawnArgs = ['/c', wrapper, mapped.script, command, ...args];
+        ws.send(JSON.stringify({ type: 'stdout', data: `==> Running: ${mapped.script}\n` }));
+        try {
+          const child = spawn('cmd.exe', spawnArgs, { cwd: toolkitDir });
+          activeChild = child;
+          child.stdout.on('data', d => ws.send(JSON.stringify({ type: 'stdout', data: cleanOutputChunk(d.toString()) })));
+          child.stderr.on('data', d => ws.send(JSON.stringify({ type: 'stderr', data: cleanOutputChunk(d.toString()) })));
+          child.on('close', (code) => {
+            activeChild = null;
+            if (code === 0 && mapped.restartDashboardOnSuccess) {
+              const nextPort = getToolkitDashboardPort(readToolkitConfig());
+              if (nextPort !== port) {
+                ws.send(JSON.stringify({ type: 'stdout', data: `\n[INFO] Toolkit dashboard port changed to ${nextPort}. Restarting the toolkit dashboard server...\n` }));
+                ws.send(JSON.stringify({ type: 'exit', code }));
+                setTimeout(() => process.exit(0), 400);
+                return;
+              }
+            }
+            ws.send(JSON.stringify({ type: 'exit', code }));
+          });
+        } catch (err) {
+          ws.send(JSON.stringify({ type: 'stderr', data: `Failed to start script: ${err?.message || err}\n` }));
+          ws.send(JSON.stringify({ type: 'exit', code: -1 }));
+        }
+        return;
+      }
+
+      // Fallback: legacy run-openclaw.cmd wrapper (keeps backwards compatibility)
       const child = spawn('cmd.exe', [
         '/c',
         path.join(toolkitDir, 'run-openclaw.cmd'),

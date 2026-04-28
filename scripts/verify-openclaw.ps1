@@ -213,10 +213,16 @@ function Add-ReportSection {
     param(
         [Parameter(Mandatory = $true)]$Lines,
         [Parameter(Mandatory = $true)][string]$Title,
-        [Parameter(Mandatory = $true)][string]$Content
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content
     )
 
-    $sanitizedContent = Remove-SmokeStructuredMetadata -Output $Content
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        $sanitizedContent = "(no output)"
+    }
+    else {
+        $sanitizedContent = Remove-SmokeStructuredMetadata -Output $Content
+    }
+
     [void]$Lines.Add("")
     [void]$Lines.Add("[$Title]")
     [void]$Lines.Add($sanitizedContent)

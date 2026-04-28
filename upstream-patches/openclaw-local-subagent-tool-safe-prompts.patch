@@ -1,17 +1,17 @@
 diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index f7ca83329..295ce231f 100644
+index 644631b0d..d9e9cf699 100644
 --- a/src/agents/subagent-spawn.ts
 +++ b/src/agents/subagent-spawn.ts
-@@ -605,6 +605,7 @@ export async function spawnSubagentDirect(
+@@ -926,6 +926,7 @@ export async function spawnSubagentDirect(
      childSessionKey,
      label: label || undefined,
      task,
 +    modelRef: resolvedModel,
-     acpEnabled: cfg.acp?.enabled !== false && !childRuntime.sandboxed,
-     childDepth,
-     maxSpawnDepth,
+     acpEnabled: isAcpRuntimeSpawnAvailable({
+       config: cfg,
+       sandboxed: childRuntime.sandboxed,
 diff --git a/src/agents/subagent-system-prompt.ts b/src/agents/subagent-system-prompt.ts
-index 0a75a9272..9f6817e7c 100644
+index 4984b7573..b69134a6a 100644
 --- a/src/agents/subagent-system-prompt.ts
 +++ b/src/agents/subagent-system-prompt.ts
 @@ -7,6 +7,8 @@ export function buildSubagentSystemPrompt(params: {
@@ -20,11 +20,11 @@ index 0a75a9272..9f6817e7c 100644
    task?: string;
 +  /** Target provider/model ref for model-sensitive prompt shaping. */
 +  modelRef?: string;
-   /** Whether ACP-specific routing guidance should be included. Defaults to true. */
+   /** Whether ACP-specific routing guidance should be included. Defaults to false. */
    acpEnabled?: boolean;
-   /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
-@@ -26,6 +28,40 @@ export function buildSubagentSystemPrompt(params: {
-   const acpEnabled = params.acpEnabled !== false;
+   /** Registered runtime slash/native command names such as `codex`. */
+@@ -32,6 +34,40 @@ export function buildSubagentSystemPrompt(params: {
+   );
    const canSpawn = childDepth < maxSpawnDepth;
    const parentLabel = childDepth >= 2 ? "parent orchestrator" : "main agent";
 +  const normalizedModelRef = params.modelRef?.trim().toLowerCase() ?? "";
@@ -36,7 +36,7 @@ index 0a75a9272..9f6817e7c 100644
 +      "# Subagent Context",
 +      "",
 +      `You are a temporary subagent helping the ${parentLabel}.`,
-+      `Your only task is: ${taskText}`,
++      `Your only task is: ${hasTask ? taskBody : "{{TASK_DESCRIPTION}}"}`,
 +      "Stay focused on that task only.",
 +      "Use the available tools normally when needed.",
 +      "When a tool is needed, invoke the real tool call instead of writing pseudo XML, pseudo JSON, or narrated tool markup.",
@@ -61,14 +61,14 @@ index 0a75a9272..9f6817e7c 100644
 +    ];
 +    return compactLines.join("\n");
 +  }
- 
-   const lines = [
-     "# Subagent Context",
+   const roleLines =
+     hasTask && taskBody.includes("\n")
+       ? [
 diff --git a/src/agents/system-prompt.test.ts b/src/agents/system-prompt.test.ts
-index 9e1bd7630..3cbc8bd90 100644
+index d558aad99..ef5855fde 100644
 --- a/src/agents/system-prompt.test.ts
 +++ b/src/agents/system-prompt.test.ts
-@@ -1099,4 +1099,31 @@ describe("buildSubagentSystemPrompt", () => {
+@@ -1097,4 +1097,31 @@ describe("buildSubagentSystemPrompt", () => {
        }
      }
    });

@@ -807,6 +807,235 @@ function Write-ProviderAuthSection {
     Write-Host "Run: $SetupCommand"
 }
 
+function Get-ProviderDisplayName {
+    param([string]$ProviderId)
+
+    $normalizedProviderId = if ($null -eq $ProviderId) { "" } else { ([string]$ProviderId).Trim().ToLowerInvariant() }
+    switch ($normalizedProviderId) {
+        "duckduckgo" { return "DuckDuckGo" }
+        "searxng" { return "SearXNG" }
+        "firecrawl" { return "Firecrawl" }
+        "ollama" { return "Ollama Web Search" }
+        "brave" { return "Brave" }
+        "gemini" { return "Gemini" }
+        "grok" { return "Grok" }
+        "kimi" { return "Kimi" }
+        "perplexity" { return "Perplexity" }
+        "exa" { return "Exa" }
+        "tavily" { return "Tavily" }
+        "minimax" { return "MiniMax" }
+        default {
+            if ([string]::IsNullOrWhiteSpace($ProviderId)) {
+                return "Auto-detect"
+            }
+            return $ProviderId
+        }
+    }
+}
+
+function Get-ToolkitProviderPluginWebConfig {
+    param(
+        $Config,
+        [string]$ProviderId,
+        [string]$Section
+    )
+
+    $path = "plugins.entries.$ProviderId.config.$Section"
+    return Resolve-ConfigDocumentPathValue -Document $Config -Path $path
+}
+
+function Test-StringValuePresent {
+    param($Value)
+
+    return $null -ne $Value -and -not [string]::IsNullOrWhiteSpace([string]$Value)
+}
+
+function Get-WebSearchProviderReadiness {
+    param(
+        [string]$ProviderId,
+        $HostConfig,
+        [bool]$OllamaReady,
+        $OllamaGatewayReachability
+    )
+
+    $normalizedProviderId = ([string]$ProviderId).Trim().ToLowerInvariant()
+    switch ($normalizedProviderId) {
+        "duckduckgo" {
+            return [pscustomobject]@{
+                Ready  = $true
+                Detail = "Key-free fallback provider."
+            }
+        }
+        "searxng" {
+            $cfg = Get-ToolkitProviderPluginWebConfig -Config $HostConfig -ProviderId "searxng" -Section "webSearch"
+            $baseUrl = if ($null -ne $cfg -and $cfg.PSObject.Properties.Name -contains "baseUrl") { [string]$cfg.baseUrl } else { "" }
+            return [pscustomobject]@{
+                Ready  = -not [string]::IsNullOrWhiteSpace($baseUrl)
+                Detail = if ([string]::IsNullOrWhiteSpace($baseUrl)) { "Missing plugins.entries.searxng.config.webSearch.baseUrl." } else { "Base URL: $baseUrl" }
+            }
+        }
+        "firecrawl" {
+            $cfg = Get-ToolkitProviderPluginWebConfig -Config $HostConfig -ProviderId "firecrawl" -Section "webSearch"
+            $apiKey = if ($null -ne $cfg -and $cfg.PSObject.Properties.Name -contains "apiKey") { $cfg.apiKey } else { $null }
+            $baseUrl = if ($null -ne $cfg -and $cfg.PSObject.Properties.Name -contains "baseUrl") { [string]$cfg.baseUrl } else { "" }
+            $hasApiKey = Test-StringValuePresent -Value $apiKey
+            $detailParts = New-Object System.Collections.Generic.List[string]
+            if ($hasApiKey) {
+                $detailParts.Add("API key configured.")
+            } else {
+                $detailParts.Add("Missing Firecrawl webSearch apiKey.")
+            }
+            if (-not [string]::IsNullOrWhiteSpace($baseUrl)) {
+                $detailParts.Add("Base URL: $baseUrl")
+            }
+            return [pscustomobject]@{
+                Ready  = $hasApiKey
+                Detail = ($detailParts -join " ")
+            }
+        }
+        "ollama" {
+            $detailParts = New-Object System.Collections.Generic.List[string]
+            if ($OllamaReady) {
+                $detailParts.Add("Host Ollama is reachable.")
+            } else {
+                $detailParts.Add("Host Ollama is not reachable.")
+            }
+            if ($null -ne $OllamaGatewayReachability) {
+                if ($OllamaGatewayReachability.Reachable) {
+                    $detailParts.Add("Gateway can reach the configured Ollama endpoint.")
+                } else {
+                    $detailParts.Add("Gateway cannot reach the configured Ollama endpoint.")
+                }
+            }
+            $detailParts.Add("Upstream also requires Ollama web search signin.")
+            return [pscustomobject]@{
+                Ready  = $OllamaReady -and $null -ne $OllamaGatewayReachability -and [bool]$OllamaGatewayReachability.Reachable
+                Detail = ($detailParts -join " ")
+            }
+        }
+        default {
+            return [pscustomobject]@{
+                Ready  = $false
+                Detail = "Toolkit does not yet probe this provider directly."
+            }
+        }
+    }
+}
+
+function Resolve-WebSearchStatus {
+    param(
+        $HostConfig,
+        [bool]$OllamaReady,
+        $OllamaGatewayReachability
+    )
+
+    $searchConfig = Resolve-ConfigDocumentPathValue -Document $HostConfig -Path "tools.web.search"
+    if ($null -eq $searchConfig) {
+        return [pscustomobject]@{
+            Enabled          = $false
+            Configured       = ""
+            Selected         = ""
+            Ready            = $false
+            Detail           = "No tools.web.search config found in openclaw.json."
+            ConfiguredLabel  = "unset"
+            SelectedLabel    = "none"
+        }
+    }
+
+    $enabled = if ($searchConfig.PSObject.Properties.Name -contains "enabled") { [bool]$searchConfig.enabled } else { $true }
+    $configuredProvider = if ($searchConfig.PSObject.Properties.Name -contains "provider") { [string]$searchConfig.provider } else { "" }
+
+    if (-not $enabled) {
+        return [pscustomobject]@{
+            Enabled         = $false
+            Configured      = $configuredProvider
+            Selected        = ""
+            Ready           = $false
+            Detail          = "Managed web search is disabled."
+            ConfiguredLabel = if ([string]::IsNullOrWhiteSpace($configuredProvider)) { "auto-detect" } else { Get-ProviderDisplayName -ProviderId $configuredProvider }
+            SelectedLabel   = "disabled"
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($configuredProvider)) {
+        $configuredState = Get-WebSearchProviderReadiness -ProviderId $configuredProvider -HostConfig $HostConfig -OllamaReady:$OllamaReady -OllamaGatewayReachability $OllamaGatewayReachability
+        return [pscustomobject]@{
+            Enabled         = $true
+            Configured      = $configuredProvider
+            Selected        = $configuredProvider
+            Ready           = [bool]$configuredState.Ready
+            Detail          = [string]$configuredState.Detail
+            ConfiguredLabel = Get-ProviderDisplayName -ProviderId $configuredProvider
+            SelectedLabel   = Get-ProviderDisplayName -ProviderId $configuredProvider
+        }
+    }
+
+    $autoDetectProviders = @("duckduckgo", "ollama", "searxng", "firecrawl")
+    foreach ($providerId in $autoDetectProviders) {
+        $state = Get-WebSearchProviderReadiness -ProviderId $providerId -HostConfig $HostConfig -OllamaReady:$OllamaReady -OllamaGatewayReachability $OllamaGatewayReachability
+        if ($state.Ready) {
+            return [pscustomobject]@{
+                Enabled         = $true
+                Configured      = ""
+                Selected        = $providerId
+                Ready           = $true
+                Detail          = "Auto-detect would currently land on $(Get-ProviderDisplayName -ProviderId $providerId). $([string]$state.Detail)"
+                ConfiguredLabel = "auto-detect"
+                SelectedLabel   = Get-ProviderDisplayName -ProviderId $providerId
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Enabled         = $true
+        Configured      = ""
+        Selected        = ""
+        Ready           = $false
+        Detail          = "Auto-detect could not find a ready provider from the toolkit-known set."
+        ConfiguredLabel = "auto-detect"
+        SelectedLabel   = "none"
+    }
+}
+
+function Resolve-WebFetchStatus {
+    param($HostConfig)
+
+    $fetchConfig = Resolve-ConfigDocumentPathValue -Document $HostConfig -Path "tools.web.fetch"
+    if ($null -eq $fetchConfig) {
+        return [pscustomobject]@{
+            ConfiguredLabel = "auto-detect"
+            SelectedLabel   = "readability only"
+            Detail          = "No tools.web.fetch config found. Basic local readability still exists."
+        }
+    }
+
+    $configuredProvider = if ($fetchConfig.PSObject.Properties.Name -contains "provider") { [string]$fetchConfig.provider } else { "" }
+    if ([string]::IsNullOrWhiteSpace($configuredProvider)) {
+        return [pscustomobject]@{
+            ConfiguredLabel = "auto-detect"
+            SelectedLabel   = "auto-detect"
+            Detail          = "OpenClaw will auto-detect a fetch fallback provider when available."
+        }
+    }
+
+    if ($configuredProvider.Trim().ToLowerInvariant() -eq "firecrawl") {
+        $cfg = Get-ToolkitProviderPluginWebConfig -Config $HostConfig -ProviderId "firecrawl" -Section "webFetch"
+        $apiKey = if ($null -ne $cfg -and $cfg.PSObject.Properties.Name -contains "apiKey") { $cfg.apiKey } else { $null }
+        $hasApiKey = Test-StringValuePresent -Value $apiKey
+        return [pscustomobject]@{
+            ConfiguredLabel = Get-ProviderDisplayName -ProviderId $configuredProvider
+            SelectedLabel   = Get-ProviderDisplayName -ProviderId $configuredProvider
+            Detail          = if ($hasApiKey) { "Firecrawl fetch fallback is configured." } else { "Firecrawl fetch fallback selected, but apiKey is missing." }
+        }
+    }
+
+    return [pscustomobject]@{
+        ConfiguredLabel = Get-ProviderDisplayName -ProviderId $configuredProvider
+        SelectedLabel   = Get-ProviderDisplayName -ProviderId $configuredProvider
+        Detail          = "Toolkit does not yet probe this fetch provider directly."
+    }
+}
+
 # Check Docker installation with a fast command (no daemon connection needed),
 # then separately check if the engine is actually running.
 $dockerVersion   = Invoke-External -FilePath "docker" -Arguments @("--version") -AllowFailure -TimeoutSeconds 5
@@ -874,6 +1103,16 @@ $ollamaEndpointSnapshots = if ($ollamaInstalled) { @(Get-OllamaEndpointSnapshots
 $defaultOllamaEndpoint = if ($bootstrapConfig) { Get-ToolkitDefaultOllamaEndpoint -Config $bootstrapConfig } else { $null }
 $ollamaGatewayReachability = if ($dockerEngineReady -and $bootstrapReady -and $defaultOllamaEndpoint) {
     Get-OllamaGatewayReachability -Endpoint $defaultOllamaEndpoint
+} else {
+    $null
+}
+$webSearchStatus = if ($null -ne $hostOpenClawConfig) {
+    Resolve-WebSearchStatus -HostConfig $hostOpenClawConfig -OllamaReady:$ollamaReady -OllamaGatewayReachability $ollamaGatewayReachability
+} else {
+    $null
+}
+$webFetchStatus = if ($null -ne $hostOpenClawConfig) {
+    Resolve-WebFetchStatus -HostConfig $hostOpenClawConfig
 } else {
     $null
 }
@@ -956,6 +1195,32 @@ if (-not $dockerInstalled) {
     Write-Host "Gateway health check failed." -ForegroundColor Yellow
     if ($health.Output -and $health.Output -ne "not installed") {
         Write-Host $health.Output
+    }
+}
+
+Write-Host ""
+Write-Host "[Web Search]" -ForegroundColor Cyan
+if ($null -eq $hostOpenClawConfig) {
+    Write-Host "Web search: bootstrap not run yet" -ForegroundColor Yellow
+}
+else {
+    $searchEnabledLabel = if ($webSearchStatus.Enabled) { "enabled" } else { "disabled" }
+    Write-Host "Managed web search: $searchEnabledLabel" -ForegroundColor $(if ($webSearchStatus.Enabled) { "Green" } else { "Yellow" })
+    Write-Host "Configured provider: $($webSearchStatus.ConfiguredLabel)"
+    Write-Host "Ready provider: $($webSearchStatus.SelectedLabel)"
+    Write-Host "Search status: $(if ($webSearchStatus.Ready) { "ready" } else { "not ready" })"
+    if ($webSearchStatus.Detail) {
+        Write-Host "Search detail: $($webSearchStatus.Detail)"
+    }
+
+    if ($null -ne $webFetchStatus) {
+        Write-Host "Fetch fallback: $($webFetchStatus.ConfiguredLabel)"
+        if ($webFetchStatus.SelectedLabel -and $webFetchStatus.SelectedLabel -ne $webFetchStatus.ConfiguredLabel) {
+            Write-Host "Fetch runtime: $($webFetchStatus.SelectedLabel)"
+        }
+        if ($webFetchStatus.Detail) {
+            Write-Host "Fetch detail: $($webFetchStatus.Detail)"
+        }
     }
 }
 

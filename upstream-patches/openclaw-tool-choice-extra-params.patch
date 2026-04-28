@@ -136,10 +136,10 @@ index 000000000..a4ca00fb5
 +  });
 +});
 diff --git a/src/agents/pi-embedded-runner/extra-params.ts b/src/agents/pi-embedded-runner/extra-params.ts
-index 8c5afa6e6..84bfbe618 100644
+index db7fd3d9d..3cd4f5785 100644
 --- a/src/agents/pi-embedded-runner/extra-params.ts
 +++ b/src/agents/pi-embedded-runner/extra-params.ts
-@@ -100,6 +100,15 @@ export function resolveExtraParams(params: {
+@@ -109,6 +109,15 @@ export function resolveExtraParams(params: {
      merged.cachedContent = resolvedCachedContent;
      delete merged.cached_content;
    }
@@ -155,7 +155,7 @@ index 8c5afa6e6..84bfbe618 100644
  
    applyDefaultOpenAIGptRuntimeParams(params, merged);
  
-@@ -111,6 +120,17 @@ type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
+@@ -120,6 +129,17 @@ type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
    cachedContent?: string;
    openaiWsWarmup?: boolean;
  };
@@ -170,10 +170,10 @@ index 8c5afa6e6..84bfbe618 100644
 +        name: string;
 +      };
 +    };
- type SupportedTransport = Exclude<CacheRetentionStreamOptions["transport"], undefined>;
+ export type SupportedTransport = Exclude<CacheRetentionStreamOptions["transport"], undefined>;
  
  function resolveSupportedTransport(value: unknown): SupportedTransport | undefined {
-@@ -121,6 +141,52 @@ function hasExplicitTransportSetting(settings: { transport?: unknown }): boolean
+@@ -130,6 +150,52 @@ function hasExplicitTransportSetting(settings: { transport?: unknown }): boolean
    return Object.hasOwn(settings, "transport");
  }
  
@@ -226,7 +226,7 @@ index 8c5afa6e6..84bfbe618 100644
  export function resolvePreparedExtraParams(params: {
    cfg: OpenClawConfig | undefined;
    provider: string;
-@@ -159,6 +225,15 @@ export function resolvePreparedExtraParams(params: {
+@@ -172,6 +238,15 @@ export function resolvePreparedExtraParams(params: {
      merged.cachedContent = resolvedCachedContent;
      delete merged.cached_content;
    }
@@ -239,10 +239,10 @@ index 8c5afa6e6..84bfbe618 100644
 +    merged.toolChoice = resolvedToolChoice;
 +    delete merged.tool_choice;
 +  }
-   return (
+   const prepared =
      providerRuntimeDeps.prepareProviderExtraParams({
        provider: params.provider,
-@@ -260,6 +335,11 @@ function createStreamFnWithExtraParams(
+@@ -307,6 +382,11 @@ function createStreamFnWithExtraParams(
    if (typeof extraParams.openaiWsWarmup === "boolean") {
      streamParams.openaiWsWarmup = extraParams.openaiWsWarmup;
    }
@@ -254,7 +254,7 @@ index 8c5afa6e6..84bfbe618 100644
    const cachedContent =
      typeof extraParams.cachedContent === "string"
        ? extraParams.cachedContent
-@@ -294,9 +374,9 @@ function createStreamFnWithExtraParams(
+@@ -341,9 +421,9 @@ function createStreamFnWithExtraParams(
        return underlying(callModel, context, options);
      }
      return underlying(callModel, context, {

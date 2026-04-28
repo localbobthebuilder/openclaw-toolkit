@@ -1,9 +1,9 @@
 diff --git a/extensions/ollama/src/stream-runtime.test.ts b/extensions/ollama/src/stream-runtime.test.ts
-index 8597d6b53..b83fa31c7 100644
+index 3019c1cf7..eaeeb06a5 100644
 --- a/extensions/ollama/src/stream-runtime.test.ts
 +++ b/extensions/ollama/src/stream-runtime.test.ts
-@@ -56,6 +56,29 @@ describe("buildOllamaChatRequest", () => {
-       model: "qwen3:14b-q8_0",
+@@ -81,6 +81,29 @@ describe("buildOllamaChatRequest", () => {
+       model: "library/qwen3:32b",
      });
    });
 +
@@ -32,16 +32,15 @@ index 8597d6b53..b83fa31c7 100644
  });
  
  describe("createConfiguredOllamaCompatStreamWrapper", () => {
-@@ -202,6 +225,54 @@ describe("createConfiguredOllamaCompatStreamWrapper", () => {
-       },
+@@ -265,6 +288,54 @@ describe("createConfiguredOllamaCompatStreamWrapper", () => {
      );
    });
-+
+ 
 +  it("forwards toolChoice on native Ollama chat requests when configured", async () => {
 +    await withMockNdjsonFetch(
 +      [
-+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"read","arguments":{"path":"/tmp/a"}}}]},"done":false}',
-+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
++        '{\"model\":\"m\",\"created_at\":\"t\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"/tmp/a\"}}}]},\"done\":false}',
++        '{\"model\":\"m\",\"created_at\":\"t\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}',
 +      ],
 +      async (fetchMock) => {
 +        const baseStreamFn = createOllamaStreamFn("http://ollama-host:11434");
@@ -84,36 +83,37 @@ index 8597d6b53..b83fa31c7 100644
 +      },
 +    );
 +  });
- });
- 
- describe("convertToOllamaMessages", () => {
++
+   it("passes resolved provider request timeouts to native Ollama chat fetches", async () => {
+     await withMockNdjsonFetch(
+       [
 diff --git a/extensions/ollama/src/stream.ts b/extensions/ollama/src/stream.ts
-index 62aa4d865..265c56577 100644
+index ec6412877..3a9bb21e0 100644
 --- a/extensions/ollama/src/stream.ts
 +++ b/extensions/ollama/src/stream.ts
-@@ -228,6 +228,7 @@ export function buildOllamaChatRequest(params: {
-   modelId: string;
+@@ -341,6 +341,7 @@ export function buildOllamaChatRequest(params: {
+   providerId?: string;
    messages: OllamaChatMessage[];
    tools?: OllamaTool[];
 +  toolChoice?: OllamaToolChoice;
    options?: Record<string, unknown>;
+   requestParams?: Record<string, unknown>;
    stream?: boolean;
- }): OllamaChatRequest {
-@@ -236,6 +237,7 @@ export function buildOllamaChatRequest(params: {
+@@ -350,6 +351,7 @@ export function buildOllamaChatRequest(params: {
      messages: params.messages,
      stream: params.stream ?? true,
      ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
 +    ...(params.toolChoice !== undefined ? { tool_choice: params.toolChoice } : {}),
      ...(params.options ? { options: params.options } : {}),
+     ...params.requestParams,
    };
- }
-@@ -309,10 +311,23 @@ interface OllamaChatRequest {
+@@ -431,10 +433,23 @@ interface OllamaChatRequest {
    messages: OllamaChatMessage[];
    stream: boolean;
    tools?: OllamaTool[];
 +  tool_choice?: OllamaToolChoice;
    options?: Record<string, unknown>;
-   think?: boolean;
+   think?: OllamaThinkValue;
  }
  
 +type OllamaToolChoice =
@@ -131,11 +131,11 @@ index 62aa4d865..265c56577 100644
  interface OllamaChatMessage {
    role: "system" | "user" | "assistant" | "tool";
    content: string;
-@@ -636,6 +651,7 @@ export function createOllamaStreamFn(
+@@ -922,6 +937,7 @@ export function createOllamaStreamFn(
            messages: ollamaMessages,
            stream: true,
            tools: ollamaTools,
 +          toolChoice: (options as { toolChoice?: OllamaToolChoice } | undefined)?.toolChoice,
            options: ollamaOptions,
+           requestParams: resolveOllamaTopLevelParams(model),
          });
-         options?.onPayload?.(body, model);

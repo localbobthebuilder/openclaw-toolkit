@@ -12,7 +12,8 @@ export const ToolkitDashboardTelegramLogicMixin = <TBase extends Constructor<Lit
       const parts = output.split(/\[(.*?)\]/g);
       
       for (let i = 1; i < parts.length; i += 2) {
-          const title = parts[i];
+          const rawTitle = parts[i];
+          const title = rawTitle === 'Bootstrap' ? 'OpenClaw Repo' : rawTitle;
           let content = parts[i+1]?.trim() || '';
           let status: 'online'|'offline'|'not-installed' = 'online';
           
@@ -25,7 +26,12 @@ export const ToolkitDashboardTelegramLogicMixin = <TBase extends Constructor<Lit
                       .join('\n');
               }
           } catch (e) {
-               if (content.toLowerCase().includes('not installed') ||
+               if (content.toLowerCase().includes('bootstrap not complete yet') ||
+                    content.toLowerCase().includes('0/3 present') ||
+                    content.toLowerCase().includes('0/2 present') ||
+                    content.toLowerCase().includes('0/1 present')) {
+                   status = 'offline';
+                } else if (content.toLowerCase().includes('not installed') ||
                     content.toLowerCase().includes('not enabled') ||
                     content.toLowerCase().includes('not initialized') ||
                     content.toLowerCase().includes('setup incomplete') ||
@@ -44,6 +50,41 @@ export const ToolkitDashboardTelegramLogicMixin = <TBase extends Constructor<Lit
                    content.toLowerCase().includes('not responding') ||
                    content.toLowerCase().includes('error')) {
                   status = 'offline';
+              }
+          }
+
+          const normalizedContent = String(content || '').trim();
+          if (title === 'Compose') {
+              const composeLines = normalizedContent.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+              if (composeLines.length <= 1 && composeLines[0] === 'NAME      IMAGE     COMMAND   SERVICE   CREATED   STATUS    PORTS') {
+                  status = 'offline';
+                  content = 'Compose: no compose services are running yet';
+              }
+          }
+
+          if (title === 'Containers') {
+              const containerLines = normalizedContent.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+              if (containerLines.length <= 1 && containerLines[0] === 'NAMES     IMAGE     STATUS    PORTS') {
+                  status = 'offline';
+                  content = 'Containers: no running containers yet';
+              }
+          }
+
+          if (title === 'Web Search') {
+              if (/managed web search:\s*disabled/i.test(normalizedContent) || /bootstrap not run yet/i.test(normalizedContent)) {
+                  status = 'not-installed';
+              } else if (/search status:\s*not ready/i.test(normalizedContent) || /missing/i.test(normalizedContent)) {
+                  status = 'offline';
+              }
+          }
+
+          if (!content) {
+              if (title === 'Compose' || title === 'Containers') {
+                  status = 'offline';
+                  content = `${title}: no runtime data yet`;
+              } else if (title === 'OpenClaw Repo') {
+                  status = 'not-installed';
+                  content = 'Repo: status unavailable';
               }
           }
           
@@ -66,7 +107,7 @@ export const ToolkitDashboardTelegramLogicMixin = <TBase extends Constructor<Lit
       const gatewaySection = sections.find(s => s.title === 'Gateway');
       const wsl2Section = sections.find(s => s.title === 'WSL2');
       const virtSection = sections.find(s => s.title === 'Virtualization');
-      const bootstrapSection = sections.find(s => s.title === 'Bootstrap');
+      const bootstrapSection = sections.find(s => s.title === 'OpenClaw Repo' || s.title === 'Bootstrap');
       const managedImagesSection = sections.find(s => s.title === 'Managed Images');
       const scriptFailed = sections.length === 0 && !!this.statusOutput;
       const managedImageCounts = managedImagesSection?.content.match(/(\d+)\s*\/\s*(\d+)\s*present/i);

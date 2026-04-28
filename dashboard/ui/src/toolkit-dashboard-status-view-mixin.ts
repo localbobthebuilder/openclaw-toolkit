@@ -7,6 +7,95 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
   class ToolkitDashboardStatusViewMixin extends Base {
     [key: string]: any;
 
+    getStatusSection(title: string) {
+      const sections = this.parseStatusOutput(this.statusOutput);
+      return sections.find((section: any) => section.title === title) || null;
+    }
+
+    canStartFromGuidedSetup() {
+      const managedImagesSection = this.getStatusSection('Managed Images');
+      if (!managedImagesSection) {
+        return false;
+      }
+      return managedImagesSection.status === 'online' && /ready/i.test(String(managedImagesSection.content || ''));
+    }
+
+    canVerifyFromGuidedSetup() {
+      const gatewaySection = this.getStatusSection('Gateway');
+      const containersSection = this.getStatusSection('Containers');
+      if (!gatewaySection || !containersSection) {
+        return false;
+      }
+      return gatewaySection.status === 'online' && containersSection.status === 'online';
+    }
+
+    shouldShowInitialSetupGuide() {
+      if (!this.statusLoaded) {
+        return false;
+      }
+
+      const sections = this.parseStatusOutput(this.statusOutput);
+      if (sections.length === 0) {
+        return false;
+      }
+
+      const managedImagesSection = sections.find((section: any) => section.title === 'Managed Images');
+      const containersSection = sections.find((section: any) => section.title === 'Containers');
+      const composeSection = sections.find((section: any) => section.title === 'Compose');
+      const gatewaySection = sections.find((section: any) => section.title === 'Gateway');
+      const imagesMatch = managedImagesSection?.content?.match(/(\d+)\s*\/\s*(\d+)\s*present/i);
+      const presentImages = imagesMatch ? Number(imagesMatch[1]) : null;
+      const expectedImages = imagesMatch ? Number(imagesMatch[2]) : null;
+      const noManagedImages = presentImages === 0 && expectedImages !== null && expectedImages > 0;
+      const noContainers = !!containersSection && (
+        containersSection.status !== 'online' ||
+        /bootstrap not run yet|not ready|not installed/i.test(String(containersSection.content || ''))
+      );
+      const noCompose = !!composeSection && (
+        composeSection.status !== 'online' ||
+        /bootstrap not run yet|not ready|not installed/i.test(String(composeSection.content || ''))
+      );
+      const gatewayUnavailable = !gatewaySection || gatewaySection.status !== 'online';
+      return !!noManagedImages && (!!noContainers || !!noCompose || !!gatewayUnavailable);
+    }
+
+    renderInitialSetupGuide() {
+      const canStart = this.canStartFromGuidedSetup() && !this.isRunning;
+      const canVerify = this.canVerifyFromGuidedSetup() && !this.isRunning;
+      return html`
+        <div class="setup-guide">
+          <h2>Guided Setup</h2>
+          <p class="subtitle">This looks like a fresh or not-yet-built toolkit state. Build the managed images first, then start services and verify.</p>
+          <div class="setup-steps">
+            <div class="setup-step active">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Run bootstrap</div>
+                <div class="step-desc">Bootstrap clones or updates OpenClaw, builds the managed images, writes config, and prepares the gateway.</div>
+              </div>
+              <button class="btn btn-primary" ?disabled=${this.isRunning} @click=${() => this.runCommand('bootstrap')}>Bootstrap</button>
+            </div>
+            <div class="setup-step">
+              <div class="step-num">2</div>
+              <div class="step-body">
+                <div class="step-title">Start services</div>
+                <div class="step-desc">${canStart ? 'Once images exist, start Docker services and the OpenClaw gateway.' : 'Bootstrap must finish building the managed images before services can be started.'}</div>
+              </div>
+              <button class="btn btn-primary" ?disabled=${!canStart} @click=${() => this.runCommand('start')}>Start</button>
+            </div>
+            <div class="setup-step">
+              <div class="step-num">3</div>
+              <div class="step-body">
+                <div class="step-title">Verify health</div>
+                <div class="step-desc">${canVerify ? 'Run the managed verification and smoke tests after startup is healthy.' : 'Verification unlocks after the gateway and containers are up and reporting live status.'}</div>
+              </div>
+              <button class="btn btn-primary" ?disabled=${!canVerify} @click=${() => this.runCommand('verify')}>Verify</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     renderConfigurationChecklist() {
       const checklist = this.getConfigurationChecklist();
       const renderChecklistItem = (item: any, optional = false) => html`
@@ -82,7 +171,7 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
         const statusOutputLooksBroken = this.statusLoaded && sections.length === 0 && !!rawStatusOutput;
 
         if (sections.length === 0 && !statusOutputLooksBroken) {
-          return html`
+      return html`
         <div class="card status-services-section">
           <div class="card-header">
             <h3>Services</h3>
@@ -147,9 +236,6 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
               </div>
               <div class="status-content" style="white-space: normal;">
                 ${telegramStatusMessage}
-                <div style="margin-top: 12px;">
-                  <button class="btn btn-secondary" @click=${() => this.fetchStatus()}>Refresh Status</button>
-                </div>
               </div>
             </div>
             ${sections.map((section: any) => html`
@@ -193,6 +279,7 @@ export const ToolkitDashboardStatusViewMixin = <TBase extends Constructor<LitEle
           ${renderHelpText('Current dashboard health summary and service checks.', 'margin-top: 0;')}
         </div>
 
+        ${this.shouldShowInitialSetupGuide() ? this.renderInitialSetupGuide() : ''}
         ${renderServicesSection()}
         ${this.renderConfigurationChecklist()}
 

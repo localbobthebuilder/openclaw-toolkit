@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import {
+  DELEGATION_CONTROLLED_TOOL_IDS,
   VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES
 } from './toolkit-dashboard-constants';
 import { renderPreviewCard, renderPreviewRows, renderPreviewTags, renderToolLabel } from './toolkit-dashboard-ui-helpers';
@@ -61,6 +62,12 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
             </div>
               </div>
               <div class="topology-toolbar-controls">
+                <button
+                  class="btn btn-danger"
+                  ?disabled=${this.topologyAgentSessionBusyKey !== null}
+                  @click=${() => this.clearAllTopologyAgentSessions()}>
+                  Clear All Agent Sessions
+                </button>
                 <label class="toggle-switch topology-legend-item" title="When off, arrows only appear while hovering a delegator card.">
                   <input type="checkbox" ?checked=${this.topologyShowAllArrows} @change=${(event: Event) => {
                     const target = event.target as HTMLInputElement;
@@ -240,6 +247,12 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                                     }}>
                                       New Chat
                                     </button>
+                                    <button class="btn btn-danger" ?disabled=${this.topologyAgentSessionBusyKey !== null} @click=${(event: Event) => {
+                                      event.stopPropagation();
+                                      this.clearTopologyAgentSessions(entry.id);
+                                    }}>
+                                      Clear Sessions
+                                    </button>
                                     <button class="btn btn-ghost" @click=${(event: Event) => {
                                       event.stopPropagation();
                                       this.selectTopologyDelegationSource(entry.id);
@@ -372,6 +385,12 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
       const workspaceOptions = this.getWorkspaceAssignmentOptions(agent.id);
       const appliedToolsets = this.getAgentAppliedToolsets(agent);
       const effectiveToolState = this.getEffectiveAgentToolState(agent);
+      const runtimeToolState = this.getTopologyAgentRuntimeToolState(selectedEntry.id);
+      const runtimeToolError = this.topologyAgentRuntimeToolErrorByAgent?.[selectedEntry.id] || '';
+      const runtimeLoading = this.topologyAgentRuntimeToolsLoadingAgentId === selectedEntry.id;
+      const runtimeSessions = Array.isArray(runtimeToolState?.sessions) ? runtimeToolState.sessions : [];
+      const runtimeGroups = Array.isArray(runtimeToolState?.runtime?.groups) ? runtimeToolState.runtime.groups : [];
+      const runtimeDiagnostics = runtimeToolState?.diagnostics || {};
       const dashboardSessions = this.getTopologySessionsForAgent(selectedEntry.id);
       const selectedMarkdownFile = VALID_AGENT_BOOTSTRAP_MARKDOWN_FILES.includes(this.topologyInspectorMarkdownFile as any)
         ? this.topologyInspectorMarkdownFile
@@ -441,6 +460,12 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                 @click=${() => this.createTopologyAgentSession(selectedEntry.id)}>
                 New Persistent Chat
               </button>
+              <button
+                class="btn btn-danger"
+                ?disabled=${this.topologyAgentSessionBusyKey !== null}
+                @click=${() => this.clearTopologyAgentSessions(selectedEntry.id)}>
+                Clear This Agent's Sessions
+              </button>
             </div>
             <div class="topology-help">
               Opens this agent directly in a persistent OpenClaw chat session. Keep this dashboard open and it will best-effort abort and delete dashboard-created sessions when their chat tabs close.
@@ -498,6 +523,18 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
             <div class="card-header" style="padding: 0 0 10px; margin-bottom: 0; border-bottom: none;">
               <h3 style="font-size: 1rem;">Combined Toolset</h3>
             </div>
+            ${(() => {
+              const delegationDisabled = subagents.enabled === false;
+              const renderDelegationAwareToolTag = (toolId: string) => {
+                const disabledByDelegation =
+                  delegationDisabled && DELEGATION_CONTROLLED_TOOL_IDS.includes(toolId as any);
+                return html`
+                  <div class="tag ${disabledByDelegation ? 'tag-delegation-disabled' : ''}">
+                    ${renderToolLabel(this.getToolOption(toolId), toolId)}
+                  </div>
+                `;
+              };
+              return html`
             <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">This is the effective toolkit toolset stack for the selected agent, including the always-on global <code>minimal</code> chat-only baseline.</div>
             <details class="topology-expander">
               <summary>Applied toolset layers (${appliedToolsets.length})</summary>
@@ -511,7 +548,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                         label: 'Allow',
                         body: renderPreviewTags(
                           allowedTools,
-                          (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
+                          (toolId: string) => renderDelegationAwareToolTag(toolId),
                           html`No allowed tools.`
                         )
                       },
@@ -519,7 +556,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                         label: 'Deny',
                         body: renderPreviewTags(
                           deniedTools,
-                          (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
+                          (toolId: string) => renderDelegationAwareToolTag(toolId),
                           html`No denied tools.`
                         )
                       }
@@ -533,7 +570,7 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                 label: 'Final Allow',
                 body: renderPreviewTags(
                   effectiveToolState.allowedTools,
-                  (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
+                  (toolId: string) => renderDelegationAwareToolTag(toolId),
                   html`No allowed tools.`
                 )
               },
@@ -541,11 +578,90 @@ export const ToolkitDashboardTopologyViewMixin = <TBase extends Constructor<LitE
                 label: 'Final Deny',
                 body: renderPreviewTags(
                   effectiveToolState.deniedTools,
-                  (toolId: string) => html`<div class="tag">${renderToolLabel(this.getToolOption(toolId), toolId)}</div>`,
+                  (toolId: string) => renderDelegationAwareToolTag(toolId),
                   html`No denied tools.`
                 )
               }
             ], 'margin-top: 14px;')}
+            <details class="topology-expander" style="margin-top: 14px;">
+              <summary>Live runtime tools${runtimeToolState?.selectedSessionKey ? html` for ${runtimeToolState.selectedSessionKey}` : ''}</summary>
+              <div class="topology-expander-body">
+                <div class="help-text" style="margin-top: 0; margin-bottom: 12px;">
+                  This probes OpenClaw's own <code>tools.effective</code> gateway method for a real session, so it shows what the agent can actually see at runtime instead of only the saved toolkit allowlist.
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px;">
+                  <select
+                    class="topology-inspector-select"
+                    style="max-width: 100%; flex: 1 1 360px;"
+                    .value=${runtimeToolState?.selectedSessionKey || ''}
+                    ?disabled=${runtimeLoading || runtimeSessions.length === 0}
+                    @change=${(event: any) => this.selectTopologyRuntimeToolSession(selectedEntry.id, event.target.value)}>
+                    ${runtimeSessions.length === 0
+                      ? html`<option value="">No live sessions found for this agent</option>`
+                      : runtimeSessions.map((session: any) => html`
+                          <option value=${session.key}>
+                            ${session.label} | ${session.status || 'unknown'} | ${session.modelProvider || 'provider?'}${session.model ? `/${session.model}` : ''}
+                          </option>
+                        `)}
+                  </select>
+                  <button
+                    class="btn btn-secondary"
+                    ?disabled=${runtimeLoading}
+                    @click=${() => this.loadTopologyAgentRuntimeToolState(selectedEntry.id, { force: true })}>
+                    ${runtimeLoading ? 'Inspecting...' : 'Refresh Live Tools'}
+                  </button>
+                </div>
+                ${runtimeToolError
+                  ? html`<div class="error" style="margin-bottom: 12px;">${runtimeToolError}</div>`
+                  : ''}
+                ${runtimeToolState?.runtimeError
+                  ? html`<div class="error" style="margin-bottom: 12px;">${runtimeToolState.runtimeError}</div>`
+                  : ''}
+                ${runtimeToolState ? html`
+                  ${renderPreviewRows([
+                    {
+                      label: 'Live OpenClaw allow',
+                      body: renderPreviewTags(
+                        runtimeToolState.liveConfigured?.allow || [],
+                        (toolId: string) => renderDelegationAwareToolTag(toolId),
+                        html`No live allowlist found in <code>openclaw.json</code>.`
+                      )
+                    },
+                    {
+                      label: 'Runtime missing',
+                      body: renderPreviewTags(
+                        runtimeDiagnostics.configuredMissingFromRuntime || [],
+                        (toolId: string) => renderDelegationAwareToolTag(toolId),
+                        html`Nothing missing from runtime for the selected session.`
+                      )
+                    }
+                  ])}
+                  ${runtimeGroups.length === 0
+                    ? html`<div class="toolset-preview-empty" style="margin-top: 14px;">No runtime tool inventory was returned for the selected session yet.</div>`
+                    : html`<div class="applied-toolset-list" style="margin-top: 14px;">
+                        ${runtimeGroups.map((group: any) => renderPreviewCard(
+                          group.label || group.id || 'Runtime tools',
+                          [
+                            {
+                              label: group.source === 'plugin' ? 'Plugin tools' : 'Tools',
+                              body: renderPreviewTags(
+                                Array.isArray(group.tools) ? group.tools : [],
+                                (tool: any) => renderDelegationAwareToolTag(tool.id),
+                                html`No tools in this runtime group.`
+                              )
+                            }
+                          ],
+                          undefined,
+                          group.source ? html`<span class="badge">${group.source}</span>` : ''
+                        ))}
+                      </div>`}
+                ` : html`
+                  <div class="toolset-preview-empty">No runtime inspection has been loaded for this agent yet.</div>
+                `}
+              </div>
+            </details>
+              `;
+            })()}
           </div>
 
           <div class="topology-inspector-section">

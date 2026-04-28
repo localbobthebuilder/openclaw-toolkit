@@ -14,6 +14,9 @@ export const ToolkitDashboardTopologyAssignmentMixin = <TBase extends Constructo
     selectTopologyAgent(agentId: string) {
       this.topologySelectedAgentId = agentId;
       this.topologyInspectorOpen = true;
+      if (typeof this.loadTopologyAgentRuntimeToolState === 'function') {
+        void this.loadTopologyAgentRuntimeToolState(agentId);
+      }
     }
 
     setTopologyAgentEnabled(agentId: string, enabled: boolean) {
@@ -193,6 +196,7 @@ export const ToolkitDashboardTopologyAssignmentMixin = <TBase extends Constructo
     }
 
     syncAgentModelSource(agent: any) {
+      this.normalizeAgentModelCandidates(agent);
       const primaryRef = typeof agent?.modelRef === 'string' && agent.modelRef.length > 0
         ? agent.modelRef
         : (Array.isArray(agent?.candidateModelRefs) && agent.candidateModelRefs.length > 0 ? agent.candidateModelRefs[0] : '');
@@ -212,18 +216,24 @@ export const ToolkitDashboardTopologyAssignmentMixin = <TBase extends Constructo
 
       const allowedRefs = new Set(this.getEndpointModelOptions(endpoint).map((option: any) => option.ref));
       if (allowedRefs.size === 0) {
+        agent.candidateModelRefs = [];
         this.syncAgentModelSource(agent);
         return;
       }
 
       const currentCandidates = Array.isArray(agent?.candidateModelRefs) ? agent.candidateModelRefs : [];
+      const compatibleCandidates = currentCandidates.filter((ref: string) => allowedRefs.has(ref));
+      agent.candidateModelRefs = compatibleCandidates;
+
       if (!allowedRefs.has(agent?.modelRef)) {
-        const firstCompatibleCandidate = currentCandidates.find((ref: string) => allowedRefs.has(ref));
-        if (firstCompatibleCandidate) {
-          agent.modelRef = firstCompatibleCandidate;
+        if (compatibleCandidates.length > 0) {
+          agent.modelRef = compatibleCandidates[0];
+        } else {
+          agent.modelRef = '';
         }
       }
 
+      this.normalizeAgentModelCandidates(agent, endpoint);
       this.syncAgentModelSource(agent);
     }
 

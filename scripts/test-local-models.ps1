@@ -397,38 +397,14 @@ Write-ProgressLine "Session $sessionId with timeout ${TimeoutSeconds}s" Cyan
 Add-ToolkitVerificationCleanupModelRef -ModelRef $targetModelRef | Out-Null
 
 try {
-    Write-ProgressLine "Resetting session state" Gray
-    $null = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", $ContainerName,
-        "openclaw",
-        "agent",
-        "--agent", $AgentId,
-        "--session-id", $sessionId,
-        "--message", "/reset",
-        "--timeout", "60",
-        "--json"
-    ) -AllowFailure
-
-    Write-ProgressLine "Switching agent to $targetModelRef" Gray
-    $null = Invoke-External -FilePath "docker" -Arguments @(
-        "exec", $ContainerName,
-        "openclaw",
-        "agent",
-        "--agent", $AgentId,
-        "--session-id", $sessionId,
-        "--message", "/model $targetModelRef",
-        "--timeout", "60",
-        "--json"
-    )
-
-    Write-ProgressLine "Sending exact-match reply check to the agent" Gray
+    Write-ProgressLine "Sending exact-match reply check to a fresh session" Gray
     $result = Invoke-External -FilePath "docker" -Arguments @(
         "exec", $ContainerName,
         "openclaw",
         "agent",
         "--agent", $AgentId,
         "--session-id", $sessionId,
-        "--message", "Reply with exactly LOCAL_MODEL_OK and nothing else.",
+        "--message", "Reply with exactly LOCAL_MODEL_OK and nothing else. Do not use any tools. Reply as normal assistant text in this current session.",
         "--timeout", [string]$TimeoutSeconds,
         "--json"
     )
